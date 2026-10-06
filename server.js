@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.6.0";
+const VERSION = "4.7.0";
 
 /*
 =========================================================
@@ -4914,7 +4914,7 @@ function market42Triangles() {
 
 const BOT_NETWORK = {
   enabled:true, network:"Base",
-  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","AAVE_LIQUIDATION_BOT","MORPHO_LIQUIDATION_BOT","LIQUIDATION_ECONOMICS_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
+  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","AAVE_LIQUIDATION_BOT","MORPHO_LIQUIDATION_BOT","MORPHO_PRE_LIQUIDATION_BOT","LIQUIDATION_ECONOMICS_BOT","PROJECTED_LIQUIDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
 };
 
 function botScore({ estimatedNetUsd=0,grossPnlUsd=0,grossRoiPercent=0,confidence=0.5,depthUsd=0 }) {
@@ -5379,44 +5379,33 @@ function triangleCombos430(){
 }
 
 async function runFastTriangleBot430(spreadBot){
-  const startedAt=Date.now(),observations=[],errors=[],combos=triangleCombos430();
-  // 4.5 liquidity-gates triangle routes from the completed direct-pair scan.
-  // A triangle is deep-quoted only when every edge has at least one usable venue.
-  const usable=new Set((spreadBot.observations||[]).filter(x=>x.bestDirection).map(x=>x.pair.split("/").sort().join("/")));
-  const candidates=market42Triangles().filter(route=>{
-    const edges=[[route[0],route[1]],[route[1],route[2]],[route[2],route[3]]];
-    return edges.every(([a,b])=>usable.has([a,b].sort().join("/")));
-  });
-  const routes=candidates.slice(0,2);
-  const jobs=[]; for(const route of routes) for(const venues of combos) jobs.push({route,venues});
-  const rows=await mapLimit421(jobs,6,async({route,venues})=>{try{
-    const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),5000,`4.5 triangle ${route.join("->")} ${venues.join("/")}`);
-    return{ok:true,value:{...q,nearPositive:Number(q.grossPnl)<=0&&Number(q.grossPnl)>=-0.25,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}};
-  }catch(error){return{ok:false,error:{route,venues,error:error.message}};}});
-  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);} observations.sort((a,b)=>b.score-a.score);
-  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"LIQUIDITY_GATED_PARALLEL_TRIANGLE_DISCOVERY",routesGenerated:market42Triangles().length,routesViable:candidates.length,routesDeepChecked:routes.length,routes,probesPlanned:jobs.length,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
+  const startedAt=Date.now(),observations=[],errors=[];
+  // 4.7 event-driven rule: triangle deep quoting is expensive and the 4.6 scan
+  // showed repeated timeouts. Only wake it when direct discovery sees a raw-positive
+  // price anomaly. Otherwise preserve the RPC budget for liquidation monitoring.
+  const triggers=(spreadBot.candidates||[]).filter(x=>Number(x.bestDirection?.grossPnl||0)>0);
+  if(!triggers.length)return{bot:"TRIANGLE_BOT",status:"DORMANT",stage:"EVENT_DRIVEN_TRIGGER_GATE",trigger:"RAW_POSITIVE_DIRECT_ANOMALY",routesGenerated:market42Triangles().length,routesViable:0,routesDeepChecked:0,routes:[],probesPlanned:0,observations:[],candidates:[],nearCandidates:[],errors:[],elapsedMs:Date.now()-startedAt,note:"No raw-positive direct anomaly; expensive triangle probes skipped."};
+  const combos=triangleCombos430();
+  const routes=market42Triangles().filter(route=>triggers.some(x=>{const [a,b]=x.pair.split('/');return route.includes(a)&&route.includes(b);})).slice(0,1);
+  const jobs=[];for(const route of routes)for(const venues of combos.slice(0,2))jobs.push({route,venues});
+  const rows=await mapLimit421(jobs,2,async({route,venues})=>{try{const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),6000,`4.7 event triangle ${route.join("->")} ${venues.join("/")}`);return{ok:true,value:{...q,nearPositive:Number(q.grossPnl)<=0&&Number(q.grossPnl)>=-0.25,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}};}catch(error){return{ok:false,error:{route,venues,error:error.message}};}});
+  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);}observations.sort((a,b)=>b.score-a.score);
+  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"EVENT_DRIVEN_TRIANGLE_DISCOVERY",trigger:"RAW_POSITIVE_DIRECT_ANOMALY",routesGenerated:market42Triangles().length,routesViable:routes.length,routesDeepChecked:routes.length,routes,probesPlanned:jobs.length,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function runSizeDiscoveryBot440(spreadBot,triangleBot){
   const startedAt=Date.now(),tests=[],errors=[];
   const seeds=[];
-  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p>0||p>=-0.15)seeds.push({kind:"DIRECT",grossPnl:p,score:x.score,data:x});}
-  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p>0||p>=-0.30)seeds.push({kind:"TRIANGLE",grossPnl:p,score:x.score,data:x});}
+  for(const x of spreadBot.candidates||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p>0)seeds.push({kind:"DIRECT",grossPnl:p,score:x.score,data:x});}
+  for(const x of triangleBot.candidates||[]){const p=Number(x.grossPnl??-Infinity);if(p>0)seeds.push({kind:"TRIANGLE",grossPnl:p,score:x.score,data:x});}
   seeds.sort((a,b)=>b.score-a.score);
-  // 4.6.0: only the strongest two seeds are size-tested. Each DIRECT test
-  // reuses the already-selected venue path rather than rediscovering venues.
-  const shortlist=seeds.slice(0,2),sizes=[100,250,500,1000,2500,5000];
-  const jobs=[]; for(const seed of shortlist) for(const amount of sizes) jobs.push({seed,amount});
-  const rows=await mapLimit421(jobs,4,async({seed,amount})=>{try{
-    const q=seed.kind==="DIRECT"
-      ? await withTimeout421(quoteDirectSeed430(amount,seed.data),3500,`4.6 selected-path size direct ${amount}`)
-      : await withTimeout421(quoteMarket43Triangle(amount,seed.data.route,seed.data.venues),4500,`4.6 size triangle ${amount}`);
-    return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->"),amount,...q,rawPositive:Number(q.grossPnl)>0};
-  }catch(error){return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route?.join("->"),amount,error:error.message,rawPositive:false};}});
-  tests.push(...rows);
-  const positiveSeeds=tests.filter(x=>x.rawPositive).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl));
+  if(!seeds.length)return{bot:"SIZE_DISCOVERY_BOT",status:"DORMANT",strategy:"EVENT_DRIVEN_POSITIVE_SEED_ONLY",trigger:"RAW_POSITIVE_SEED",nearSeedCount:0,shortlisted:0,sizes:[100,250,500,1000,2500,5000],tests:[],curves:[],positiveSeeds:[],errors:[],elapsedMs:Date.now()-startedAt,note:"No raw-positive seed; multi-size RPC probes skipped."};
+  const shortlist=seeds.slice(0,1),sizes=[100,250,500,1000,2500,5000];
+  const jobs=[];for(const seed of shortlist)for(const amount of sizes)jobs.push({seed,amount});
+  const rows=await mapLimit421(jobs,2,async({seed,amount})=>{try{const q=seed.kind==="DIRECT"?await withTimeout421(quoteDirectSeed430(amount,seed.data),6500,`4.7 selected-path size direct ${amount}`):await withTimeout421(quoteMarket43Triangle(amount,seed.data.route,seed.data.venues),6500,`4.7 size triangle ${amount}`);return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->"),amount,...q,rawPositive:Number(q.grossPnl)>0};}catch(error){return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route?.join("->"),amount,error:error.message,rawPositive:false};}});
+  tests.push(...rows);const positiveSeeds=tests.filter(x=>x.rawPositive).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl));
   const curves=shortlist.map(seed=>{const label=seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->");const pts=tests.filter(x=>x.label===label&&!x.error).sort((a,b)=>a.amount-b.amount);return{kind:seed.kind,label,points:pts.map(x=>({amount:x.amount,grossPnl:x.grossPnl,grossRoiPercent:x.grossRoiPercent,rawPositive:x.rawPositive})),best:pts.slice().sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl))[0]||null};});
-  return{bot:"SIZE_DISCOVERY_BOT",status:"COMPLETE",strategy:"SELECTED_PATH_PARALLEL_PROFIT_CURVE",nearSeedCount:seeds.length,shortlisted:shortlist.length,sizes,tests,curves,positiveSeeds,errors,elapsedMs:Date.now()-startedAt};
+  return{bot:"SIZE_DISCOVERY_BOT",status:"COMPLETE",strategy:"EVENT_DRIVEN_SELECTED_PATH_PROFIT_CURVE",trigger:"RAW_POSITIVE_SEED",nearSeedCount:seeds.length,shortlisted:shortlist.length,sizes,tests,curves,positiveSeeds,errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function fastWatcherDirectPath430(item){
@@ -5511,9 +5500,30 @@ async function runLiquidationEconomicsBot460(aaveBot,morphoBot){
   return{bot:"LIQUIDATION_ECONOMICS_BOT",status:"COMPLETE",strategy:"LIQUIDATION_FIRST_CAPITAL_OPTIMIZER",financing:{primary:"AAVE_FLASH_LOAN",comparisonReady:["OWN_CAPITAL","AAVE_FLASH_LOAN","PROFIT_SHARE_CAPITAL_LATER"],flashLoanPremiumBps:premiumBps,availableFlashLiquidityUsd:flashState?.availableLiquidity??null},candidates,watchlist,errors,profitabilityValidated:false,note:"Economics are conservative discovery estimates only. A candidate is never executable until liquidation eligibility, incentive, collateral route, slippage, gas, flash premium and atomic simulation are revalidated onchain.",elapsedMs:Date.now()-startedAt};
 }
 
+
+function runProjectedLiquidationBot470(morphoBot,liquidationEconomicsBot){
+  const startedAt=Date.now(),watch=[];
+  const econ=new Map((liquidationEconomicsBot.watchlist||[]).filter(x=>x.protocol==="MORPHO_BLUE").map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
+  for(const row of morphoBot.watchlist||[]){
+    const hf=Number(row.healthFactor||Infinity);if(!(hf>1&&hf<=1.05))continue;
+    const e=econ.get(`${row.marketId}:${String(row.user).toLowerCase()}`)||{};
+    const distancePercent=(hf-1)*100;
+    watch.push({protocol:"MORPHO_BLUE",marketId:row.marketId,user:row.user,loanAsset:row.loanAsset,collateralAsset:row.collateralAsset,healthFactor:hf,distanceToNormalLiquidationPercent:round(distancePercent,4),borrowAssetsUsd:row.borrowAssetsUsd,collateralUsd:row.collateralUsd,estimatedLiquidationIncentivePercent:e.estimatedLiquidationIncentivePercent??null,projectedRepayCapacityUsd:e.repayUsd??null,projectedGrossIncentiveUsd:e.estimatedGrossIncentiveUsd??null,projectedFlashPremiumUsd:e.estimatedFlashPremiumUsd??null,projectedNetBeforeExitRouteUsd:e.estimatedNetBeforeRouteUsd??null,normalLiquidationEligible:false,preLiquidationEligibility:"NOT_YET_DISCOVERED",status:distancePercent<=1?"CRITICAL_WATCH":distancePercent<=2?"HIGH_WATCH":"WATCH",profitabilityValidated:false,executable:false,readOnly:true});
+  }
+  watch.sort((a,b)=>a.healthFactor-b.healthFactor);
+  return{bot:"PROJECTED_LIQUIDATION_BOT",status:"COMPLETE",strategy:"PRECOMPUTE_BEFORE_ELIGIBILITY",watchlist:watch,critical:watch.filter(x=>x.status==="CRITICAL_WATCH"),high:watch.filter(x=>x.status==="HIGH_WATCH"),note:"Projected economics prepare the opportunity before normal liquidation. Values are not executable profit and require onchain eligibility plus collateral-exit validation.",elapsedMs:Date.now()-startedAt};
+}
+
+function runMorphoPreLiquidationDiscovery470(morphoBot){
+  // Morpho pre-liquidation is opt-in and contract-specific. 4.7 exposes a safe
+  // discovery stage without inventing eligibility from ordinary Morpho health.
+  // A later onchain factory indexer will populate authorized contracts/parameters.
+  return{bot:"MORPHO_PRE_LIQUIDATION_BOT",status:"DISCOVERY_INTERFACE_READY",strategy:"AUTHORIZED_PRE_LIQUIDATION_ONLY",factoryIndexing:"PENDING_ONCHAIN_FACTORY_EVENT_INDEXER",positionsChecked:(morphoBot.watchlist||[]).length,eligible:[],watchlist:[],executable:false,readOnly:true,note:"Pre-liquidation requires borrower authorization and a deployed PreLiquidation contract. Normal Morpho health alone is not proof of eligibility."};
+}
+
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.6.0 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.7.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5537,8 +5547,10 @@ async function scanBaseBotNetwork422(){
   // Stage 3B: independent Morpho Base liquidation discovery.
   const morphoBot=await withTimeout421(runMorphoLiquidationBot450(),8000,"MORPHO_LIQUIDATION_BOT").catch(error=>({bot:"MORPHO_LIQUIDATION_BOT",status:"TIME_BUDGET_REACHED",opportunities:[],watchlist:[],errors:[{error:error.message}]}));
 
-  // Stage 3C: rank liquidation economics before spending more RPC budget on marginal DEX routes.
+  // Stage 3C: liquidation-first economics and projected readiness.
   const liquidationEconomicsBot=await withTimeout421(runLiquidationEconomicsBot460(liquidationBot,morphoBot),8000,"LIQUIDATION_ECONOMICS_BOT").catch(error=>({bot:"LIQUIDATION_ECONOMICS_BOT",status:"TIME_BUDGET_REACHED",candidates:[],watchlist:[],errors:[{error:error.message}],profitabilityValidated:false}));
+  const projectedLiquidationBot=runProjectedLiquidationBot470(morphoBot,liquidationEconomicsBot);
+  const morphoPreLiquidationBot=runMorphoPreLiquidationDiscovery470(morphoBot);
 
   // Stage 4: watcher reuses fresh quotes rather than immediately duplicating RPC calls.
   let watcherBot;
@@ -5554,7 +5566,7 @@ async function scanBaseBotNetwork422(){
     catch(error){largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}]};}
   }else largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"NO_POSITIVE_SEED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,flashOptimization:null,elapsedMs:0};
 
-  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,morphoPreLiquidationBot,liquidationEconomicsBot,projectedLiquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[]) ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[]) ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"AAVE_LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
@@ -5562,8 +5574,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationEconomicsBot.candidates||[]) ranked.push({source:"LIQUIDATION_ECONOMICS_BOT",type:"LIQUIDATION_ECONOMICS_CANDIDATE",label:x.user,marketId:x.marketId,healthFactor:x.healthFactor,estimatedNetBeforeRouteUsd:x.estimatedNetBeforeRouteUsd,score:botScore({grossPnlUsd:x.estimatedNetBeforeRouteUsd,confidence:.8,depthUsd:x.repayUsd}),profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.6.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"LIQUIDATION_PROFIT_HUNTER_460",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.6.0 Liquidation Profit Hunter prioritizes Morpho and Aave liquidation economics, selected-path multi-size discovery, and capital-source comparison. Liquidation economics are discovery estimates only. Nothing is executable until eligibility, incentive, collateral exit route, flash premium, gas, slippage, onchain freshness and atomic simulation pass the $15 minimum NET-profit protection."};
+  scan421Log("BOT NETWORK 4.7.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"EVENT_DRIVEN_PROFIT_HUNTER_470",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.7.0 Event Driven Profit Hunter preserves RPC budget for liquidation monitoring, precomputes Morpho liquidation economics before eligibility, and wakes expensive triangle/size discovery only on raw-positive triggers. Pre-liquidation eligibility is never inferred: it requires an authorized deployed PreLiquidation contract and onchain indexing. Nothing is executable until eligibility, incentive, collateral exit route, financing, gas, slippage, freshness and atomic simulation pass the $15 minimum NET-profit protection."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
