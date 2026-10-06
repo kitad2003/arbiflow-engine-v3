@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.3.0";
+const VERSION = "4.3.1";
 
 /*
 =========================================================
@@ -5223,53 +5223,71 @@ async function runLiquidationBatch422(){
 
 /*
 =========================================================
-ENGINE 4.3.0 - OPPORTUNITY EXPANSION
+ENGINE 4.3.1 - NATIVE PANCAKESWAP V3 BASE QUOTING
 =========================================================
-Adds PancakeSwap V3 as a third independent Base liquidity venue. To avoid
-inventing a PancakeSwap quoter address, read-only pricing is requested through
-LI.FI with allowExchanges constrained to the live PancakeSwap exchange tool.
-LI.FI is quote transport only; the returned exchange is validated as PancakeSwap
-before the quote is admitted as a direct venue observation.
+Replaces the failed LI.FI-constrained PancakeSwap transport with direct,
+read-only calls to PancakeSwap V3 contracts on Base.
 
-Fast discovery compares three independent venues, deep triangle discovery uses
-12 shortlisted three-venue combinations, and any raw-positive direct OR triangle
-seed may enter adaptive Aave flash-loan economics. Execution remains disabled.
+Official PancakeSwap V3 deployment addresses (Base shares the documented
+BSC/ETH/ARB/Linea/Base/opBNB core/periphery addresses):
+Factory:  0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
+QuoterV2: 0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997
+
+This code only reads pool existence and quote output. It never approves tokens,
+signs transactions, broadcasts swaps, requests flash loans, or moves funds.
 =========================================================
 */
-let pancakeTool430Cache = { key:null, checkedAt:0 };
+const PANCAKESWAP_V3_BASE = {
+  factory: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
+  quoter: "0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997",
+  feeTiers: [100, 500, 2500, 10000]
+};
 
-async function getPancakeTool430(){
-  if(pancakeTool430Cache.key && Date.now()-pancakeTool430Cache.checkedAt < 3600000) return pancakeTool430Cache.key;
-  const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
-  const r=await fetch421("https://li.quest/v1/tools",{headers},5000);
-  const text=await r.text(); let data; try{data=JSON.parse(text)}catch{throw new Error(`LI.FI tools non-JSON response (${r.status})`)}
-  if(!r.ok) throw new Error(data?.message||data?.error||`LI.FI tools HTTP ${r.status}`);
-  const exchanges=Array.isArray(data?.exchanges)?data.exchanges:[];
-  const match=exchanges.find(x=>/pancake/i.test(`${x?.key||""} ${x?.name||""}`));
-  if(!match?.key) throw new Error("PancakeSwap exchange tool not available from LI.FI /tools");
-  pancakeTool430Cache={key:String(match.key),checkedAt:Date.now()};
-  return pancakeTool430Cache.key;
+async function pancakeSwapV3QuoteOne431({sellToken,buyToken,sellAmount,fee}){
+  const network=NETWORKS.base, sell=network.tokens[sellToken], buy=network.tokens[buyToken];
+  if(!sell||!buy) throw new Error(`Unsupported PancakeSwap Base token pair: ${sellToken}/${buyToken}`);
+  if(sellToken===buyToken) throw new Error("PancakeSwap sell and buy token must be different");
+  const numericAmount=Number(sellAmount);
+  if(!Number.isFinite(numericAmount)||numericAmount<=0) throw new Error("PancakeSwap sell amount must be positive");
+  if(!PANCAKESWAP_V3_BASE.feeTiers.includes(Number(fee))) throw new Error(`Unsupported PancakeSwap V3 fee tier: ${fee}`);
+
+  const provider=getBaseProvider();
+  const factory=new Contract(PANCAKESWAP_V3_BASE.factory,UNISWAP_V3_FACTORY_ABI,provider);
+  const pool=await factory.getPool(sell.address,buy.address,Number(fee));
+  if(!pool||String(pool).toLowerCase()==="0x0000000000000000000000000000000000000000")
+    throw new Error(`No PancakeSwap V3 ${fee} fee-tier pool for ${sellToken}/${buyToken}`);
+
+  const quoter=new Contract(PANCAKESWAP_V3_BASE.quoter,UNISWAP_V3_QUOTER_ABI,provider);
+  const amountIn=parseUnits(String(sellAmount),sell.decimals);
+  const quoteResult=await quoter.quoteExactInputSingle({
+    tokenIn:sell.address,
+    tokenOut:buy.address,
+    amountIn,
+    fee:Number(fee),
+    sqrtPriceLimitX96:0
+  });
+  const rawOutput=quoteResult.amountOut ?? quoteResult[0];
+  const buyAmount=Number(formatUnits(rawOutput,buy.decimals));
+  if(!Number.isFinite(buyAmount)||buyAmount<=0) throw new Error(`PancakeSwap V3 returned an invalid ${fee} fee-tier quote`);
+  return {
+    provider:"PancakeSwap V3",liquidityModel:"DIRECT_VENUE",quoteTransport:"NATIVE_RPC",
+    network:network.name,networkKey:network.key,chainId:network.chainId,
+    quoter:PANCAKESWAP_V3_BASE.quoter,factory:PANCAKESWAP_V3_BASE.factory,pool,
+    feeTier:Number(fee),feePercent:Number(fee)/10000,
+    sellToken,buyToken,sellAmount:numericAmount,buyAmount:round(buyAmount,12),
+    rawBuyAmount:rawOutput.toString(),quoteTimestamp:Date.now(),readOnly:true
+  };
 }
 
 async function pancakeSwapV3Quote430(sellToken,buyToken,sellAmount){
-  const network=NETWORKS.base, s=network.tokens[sellToken], b=network.tokens[buyToken];
-  if(!s||!b) throw new Error("Unsupported PancakeSwap Base token");
-  const toolKey=await getPancakeTool430();
-  const raw=parseUnits(String(sellAmount),s.decimals).toString();
-  const u=new URL("https://li.quest/v1/quote");
-  u.searchParams.set("fromChain","8453"); u.searchParams.set("toChain","8453");
-  u.searchParams.set("fromToken",s.address); u.searchParams.set("toToken",b.address);
-  u.searchParams.set("fromAmount",raw); u.searchParams.set("fromAddress",LIFI_PROBE_ADDRESS);
-  u.searchParams.set("toAddress",LIFI_PROBE_ADDRESS); u.searchParams.set("slippage","0.003");
-  u.searchParams.set("allowBridges","none"); u.searchParams.append("allowExchanges",toolKey);
-  const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
-  const r=await fetch421(u,{headers},5500); const text=await r.text(); let data;
-  try{data=JSON.parse(text)}catch{throw new Error(`PancakeSwap constrained quote non-JSON response (${r.status})`)}
-  if(!r.ok) throw new Error(data?.message||data?.error||`PancakeSwap constrained quote HTTP ${r.status}`);
-  const used=String(data?.tool||"");
-  if(!used || !/pancake/i.test(used)) throw new Error(`Constrained quote returned unexpected exchange: ${used||"unknown"}`);
-  const toAmount=data?.estimate?.toAmount; if(!toAmount) throw new Error("PancakeSwap constrained quote missing estimate.toAmount");
-  return {provider:"PancakeSwap V3",quoteTransport:"LI.FI_CONSTRAINED_EXCHANGE",liquidityModel:"INDEPENDENT_VENUE",network:"Base",networkKey:"base",chainId:8453,exchangeTool:used,sellToken,buyToken,sellAmount:Number(sellAmount),buyAmount:Number(formatUnits(toAmount,b.decimals)),rawBuyAmount:String(toAmount),quoteTimestamp:Date.now(),readOnly:true};
+  const attempts=await Promise.allSettled(PANCAKESWAP_V3_BASE.feeTiers.map(fee=>
+    pancakeSwapV3QuoteOne431({sellToken,buyToken,sellAmount,fee})
+  ));
+  const successful=attempts.filter(x=>x.status==="fulfilled").map(x=>x.value);
+  const failures=attempts.filter(x=>x.status==="rejected").map(x=>x.reason?.message||"PancakeSwap V3 quote failed");
+  if(!successful.length) throw new Error(failures.join(" | ")||"No PancakeSwap V3 quote was available");
+  successful.sort((a,b)=>b.buyAmount-a.buyAmount);
+  return successful[0];
 }
 
 async function market43VenueQuote(venue,sellToken,buyToken,sellAmount){
@@ -5370,7 +5388,7 @@ async function runLargeOpportunityBot430(spreadBot,triangleBot){
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.3.0 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.3.1 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5405,8 +5423,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.3.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"EXPANDED_THREE_VENUE_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapConstrainedVenue:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.3.0 expands read-only Base discovery to Aerodrome, Uniswap V3, and PancakeSwap V3. PancakeSwap pricing is constrained to its independent exchange through LI.FI quote transport. Raw-positive direct or triangle seeds may enter adaptive flash economics, but nothing is executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
+  scan421Log("BOT NETWORK 4.3.1 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"EXPANDED_THREE_VENUE_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.3.1 expands read-only Base discovery to Aerodrome, Uniswap V3, and native PancakeSwap V3 RPC quoting. Raw-positive direct or triangle seeds may enter adaptive flash economics, but nothing is executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
