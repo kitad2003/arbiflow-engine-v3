@@ -1100,10 +1100,10 @@ amountIn,
 fee: Number(fee),
 sqrtPriceLimitX96: 0
 });
-const rawOutput = quoteResult[0];
-const sqrtPriceX96After = quoteResult[1];
-const initializedTicksCrossed = quoteResult[2];
-const gasEstimate = quoteResult[3];
+const rawOutput = quoteResult.amountOut ?? quoteResult[0];
+const sqrtPriceX96After = quoteResult.sqrtPriceX96After ?? quoteResult[1];
+const initializedTicksCrossed = quoteResult.initializedTicksCrossed ?? quoteResult[2];
+const gasEstimate = quoteResult.gasEstimate ?? quoteResult[3];
 const buyAmount = Number(
 formatUnits(rawOutput, buy.decimals)
 );
@@ -1129,8 +1129,8 @@ sellAmount: numericAmount,
 buyAmount: round(buyAmount, 12),
 rawBuyAmount: rawOutput.toString(),
 sqrtPriceX96After: sqrtPriceX96After.toString(),
-initializedTicksCrossed: initializedTicksCrossed.toString(),
-gasEstimate: gasEstimate.toString(),
+initializedTicksCrossed: Number(initializedTicksCrossed),
+quoterGasEstimate: gasEstimate.toString(),
 quoteTimestamp: Date.now(),
 readOnly: true
 };
