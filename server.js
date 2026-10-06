@@ -21,7 +21,7 @@ polygon: process.env.POLYGON_RPC_URL || "",
 ethereum: process.env.ETHEREUM_RPC_URL || "",
 bnb: process.env.BNB_RPC_URL || ""
 };
-const VERSION = "3.2.0";
+const VERSION = "3.2.1";
 /*
 =========================================================
 DIRECT VENUE CONFIGURATION
@@ -48,7 +48,7 @@ const AERODROME_ROUTER_ABI = [
 /*
 =========================================================
 UNISWAP V3 BASE - READ ONLY
-Official Base deployment used by Engine 3.2.0:
+Official Base deployment used by Engine 3.2.1:
 View-only Quoter: 0x222ca98f00ed15b1fae10b61c277703a194cf5d2
 V3 Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD
 This layer is read only. It does not approve tokens, sign,
@@ -61,14 +61,13 @@ factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
 feeTiers: [100, 500, 3000, 10000]
 };
 const UNISWAP_V3_QUOTER_ABI = [
-"function quoteExactInputSingle(address tokenIn,address tokenOut,uint24 fee,uint256 amountIn,uint160 sqrtPriceLimitX96) view returns (uint256 amountOut)"
-];
+"function quoteExactInputSingle(tuple(address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) view returns (uint256 ];
 const UNISWAP_V3_FACTORY_ABI = [
 "function getPool(address tokenA,address tokenB,uint24 fee) view returns (address pool)"
 ];
 /*
 =========================================================
-ARBIFLOW ENGINE 3.2.0
+ARBIFLOW ENGINE 3.2.1
 PHASE:
 Live market discovery + paper simulation.
 THIS BUILD DOES:
@@ -1094,13 +1093,17 @@ const amountIn = parseUnits(
 String(sellAmount),
 sell.decimals
 );
-const rawOutput = await quoter.quoteExactInputSingle(
-sell.address,
-buy.address,
-Number(fee),
+const quoteResult = await quoter.quoteExactInputSingle({
+tokenIn: sell.address,
+tokenOut: buy.address,
 amountIn,
-0
-);
+fee: Number(fee),
+sqrtPriceLimitX96: 0
+});
+const rawOutput = quoteResult.amountReceived ?? quoteResult[0];
+const sqrtPriceX96After = quoteResult.sqrtPriceX96After ?? quoteResult[1];
+const initializedTicksCrossed = quoteResult.initializedTicksCrossed ?? quoteResult[2];
+const gasEstimate = quoteResult.gasEstimate ?? quoteResult[3];
 const buyAmount = Number(
 formatUnits(rawOutput, buy.decimals)
 );
@@ -1124,6 +1127,9 @@ sellToken,
 buyToken,
 sellAmount: numericAmount,
 buyAmount: round(buyAmount, 12),
+sqrtPriceX96After: sqrtPriceX96After?.toString?.() || String(sqrtPriceX96After || 0),
+initializedTicksCrossed: Number(initializedTicksCrossed || 0),
+gasEstimate: gasEstimate?.toString?.() || String(gasEstimate || 0),
 rawBuyAmount: rawOutput.toString(),
 quoteTimestamp: Date.now(),
 readOnly: true
@@ -2683,7 +2689,7 @@ liquidityModel:
 liveExecutionEnabled:
 false,
 message:
-"ArbiFlow Engine 3.2.0 is online."
+"ArbiFlow Engine 3.2.1 is online."
 });
 }
 );
@@ -3190,7 +3196,7 @@ message:
 res.json({
 success: true,
 message:
-"ArbiFlow Engine 3.2.0 scan started.",
+"ArbiFlow Engine 3.2.1 scan started.",
 selectedNetworks
 });
 runScanCycle()
