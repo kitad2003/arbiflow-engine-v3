@@ -32,7 +32,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.18.1";
+const VERSION = "4.19.0";
 
 /*
 =========================================================
@@ -5483,7 +5483,16 @@ function estimateMorphoLiquidationIncentive460(lltv){
 async function runLiquidationEconomicsBot460(aaveBot,morphoBot){
   const startedAt=Date.now(),candidates=[],watchlist=[],errors=[];
   let flashState=null,gasModel=null;
-  try{[flashState,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);}catch(error){errors.push({stage:"FINANCING_STATE",error:error.message});}
+  const flashByAsset={};
+  const morphoRows=[...(morphoBot.opportunities||[]),...(morphoBot.watchlist||[])];
+  const debtAssets=[...new Set(morphoRows.map(x=>x.loanAsset).filter(Boolean))];
+  try{
+    gasModel=await getBaseFlashModeledGasCostUsd();
+    for(const asset of debtAssets){
+      try{flashByAsset[asset]=await getAaveBaseFlashState(asset);}catch(error){errors.push({stage:"FINANCING_STATE",asset,error:error.message});}
+    }
+    flashState=flashByAsset[debtAssets[0]]||null;
+  }catch(error){errors.push({stage:"FINANCING_STATE",error:error.message});}
   const premiumBps=Number(flashState?.flashLoanPremiumBps||5),gasUsd=Number(gasModel?.modeledGasUsd||0);
   // Morpho: rank both liquidatable and near-liquidation positions by economic potential.
   for(const row of [...(morphoBot.opportunities||[]),...(morphoBot.watchlist||[])]){
@@ -5501,7 +5510,7 @@ async function runLiquidationEconomicsBot460(aaveBot,morphoBot){
   // Aave remains watch-first until eligible. Do not invent liquidation bonus economics.
   for(const row of aaveBot.opportunities||[]) watchlist.push({protocol:"AAVE_V3",user:row.user,healthFactor:Number(row.healthFactor),totalDebtUsd:Number(row.totalDebtUsd||0),totalCollateralUsd:Number(row.totalCollateralUsd||0),status:"ECONOMIC_WATCH_REQUIRES_ELIGIBILITY_AND_RESERVE_BONUS",profitabilityValidated:false,executable:false,readOnly:true});
   candidates.sort((a,b)=>b.estimatedNetBeforeRouteUsd-a.estimatedNetBeforeRouteUsd);watchlist.sort((a,b)=>(a.healthFactor??99)-(b.healthFactor??99));
-  return{bot:"LIQUIDATION_ECONOMICS_BOT",status:"COMPLETE",strategy:"LIQUIDATION_FIRST_CAPITAL_OPTIMIZER",financing:{primary:"AAVE_FLASH_LOAN",comparisonReady:["OWN_CAPITAL","AAVE_FLASH_LOAN","PROFIT_SHARE_CAPITAL_LATER"],flashLoanPremiumBps:premiumBps,availableFlashLiquidityUsd:flashState?.availableLiquidity??null},candidates,watchlist,errors,profitabilityValidated:false,note:"Economics are conservative discovery estimates only. A candidate is never executable until liquidation eligibility, incentive, collateral route, slippage, gas, flash premium and atomic simulation are revalidated onchain.",elapsedMs:Date.now()-startedAt};
+  return{bot:"LIQUIDATION_ECONOMICS_BOT",status:"COMPLETE",strategy:"LIQUIDATION_FIRST_CAPITAL_OPTIMIZER",financing:{primary:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",comparisonReady:["OWN_CAPITAL","AAVE_FLASH_LOAN","PROFIT_SHARE_CAPITAL_LATER"],flashAsset:flashState?.asset??null,flashAssetAddress:flashState?.assetAddress??null,flashLoanPremiumBps:premiumBps,availableFlashLiquidityTokenUnits:flashState?.availableLiquidity??null,byAsset:Object.fromEntries(Object.entries(flashByAsset).map(([asset,x])=>[asset,{assetAddress:x.assetAddress,availableLiquidityTokenUnits:x.availableLiquidity,flashLoanPremiumBps:x.flashLoanPremiumBps}]))},candidates,watchlist,errors,profitabilityValidated:false,note:"4.19.0 matches Aave flash financing to the Morpho debt asset. Economics are conservative discovery estimates only. A candidate is never executable until liquidation eligibility, incentive, collateral route, slippage, gas, flash premium and atomic simulation are revalidated onchain.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5536,11 +5545,16 @@ function uniqueSorted490(values,maxRepay){
 }
 async function runLiquidationRouteOptimizer490(morphoBot,projectedBot,liquidationEconomicsBot){
   const startedAt=Date.now(),tests=[],errors=[];
-  const flashLiquidity=Number(liquidationEconomicsBot?.financing?.availableFlashLiquidityUsd||0);
+  const primaryFlashAsset=liquidationEconomicsBot?.financing?.flashAsset||null;
+  const primaryFlashLiquidityTokenUnits=Number(liquidationEconomicsBot?.financing?.availableFlashLiquidityTokenUnits||0);
   const premiumBps=Number(liquidationEconomicsBot?.financing?.flashLoanPremiumBps||5);
+  let flashLiquidity=0;
   let gasUsd=0; try{gasUsd=Number((await getBaseFlashModeledGasCostUsd())?.modeledGasUsd||0)}catch(e){errors.push({stage:"GAS",error:e.message})}
   const sourceByKey=new Map([...(morphoBot.opportunities||[]),...(morphoBot.watchlist||[])].map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
   const targets=[...(projectedBot.critical||[]),...(projectedBot.high||[])].slice(0,3);
+  const firstSrc=targets[0]?sourceByKey.get(`${targets[0].marketId}:${String(targets[0].user).toLowerCase()}`):null;
+  const flashPriceUsd=Number(firstSrc?.loanAssetPriceUsd||0);
+  flashLiquidity=primaryFlashLiquidityTokenUnits>0&&flashPriceUsd>0?primaryFlashLiquidityTokenUnits*flashPriceUsd:0;
   const quoteCache=new Map();
 
   async function quoteExit(src,target,repayUsd,phase){
@@ -5608,7 +5622,7 @@ async function runLiquidationRouteOptimizer490(morphoBot,projectedBot,liquidatio
   for(const target of targets){const r=successful.filter(x=>String(x.user).toLowerCase()===String(target.user).toLowerCase()).sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);if(r[0])bestByPosition.push(r[0]);}
   bestByPosition.sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);
   const bestOverall=bestByPosition[0]||null;
-  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"ADAPTIVE_COARSE_TO_FINE_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_MODEL",availableFlashLiquidityUsd:flashLiquidity,flashLoanPremiumBps:premiumBps,coarseSizesUsd:[10000,50000,100000,250000,500000,1000000],adaptiveRefinement:true,positionsTargeted:targets.length,uniqueExitQuotes:quoteCache.size,tests,bestByPosition,bestOverall,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"4.18.1 normalizes Morpho raw asset units before USD pricing, exposes quote diagnostics, and retains bounded coarse-to-fine search around live 0x collateral-exit quotes. projectedFinalNetUsd remains pre-eligibility projection only. Exact Morpho liquidation eligibility/repay limits, fresh execution quotes, minimum-output protection and atomic simulation remain mandatory before execution.",elapsedMs:Date.now()-startedAt};
+  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"ADAPTIVE_COARSE_TO_FINE_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",flashAsset:primaryFlashAsset,availableFlashLiquidityTokenUnits:primaryFlashLiquidityTokenUnits,availableFlashLiquidityUsd:round(flashLiquidity,2),flashLoanPremiumBps:premiumBps,coarseSizesUsd:[10000,50000,100000,250000,500000,1000000],adaptiveRefinement:true,positionsTargeted:targets.length,uniqueExitQuotes:quoteCache.size,tests,bestByPosition,bestOverall,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"4.19.0 retains normalized Morpho token pricing and live 0x route diagnostics while aligning execution financing with the actual Morpho debt asset. projectedFinalNetUsd remains pre-eligibility projection only. Exact Morpho liquidation eligibility/repay limits, fresh execution quotes, minimum-output protection and atomic simulation remain mandatory before execution.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5705,6 +5719,9 @@ function runExecutionFoundation411(morphoBot, routeBot, readinessBot){
       borrower:route.user,
       loanAsset:route.loanAsset,
       loanAssetAddress:pos.loanAssetAddress||null,
+      flashAsset:route.loanAsset,
+      flashAssetAddress:pos.loanAssetAddress||null,
+      flashAssetMatchesDebtAsset:Boolean(route.loanAsset&&pos.loanAssetAddress),
       collateralAsset:route.collateralAsset,
       collateralAssetAddress:pos.collateralAssetAddress||null,
       selectedRepayUsd:repayUsd>0?round(repayUsd,2):null,
@@ -5715,7 +5732,7 @@ function runExecutionFoundation411(morphoBot, routeBot, readinessBot){
       projectedFinalNetUsd:Number.isFinite(projectedNetUsd)?round(projectedNetUsd,2):null,
       minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,
       executionSequence:[
-        "AAVE_FLASH_LOAN_SIMPLE_USDC",
+        `AAVE_FLASH_LOAN_SIMPLE_${route.loanAsset||"DEBT_ASSET"}` ,
         "MORPHO_BLUE_LIQUIDATE_ONLY_IF_FRESHLY_ELIGIBLE",
         "RECEIVE_SEIZED_COLLATERAL",
         "SWAP_COLLATERAL_TO_LOAN_ASSET_WITH_MIN_OUTPUT",
@@ -5749,7 +5766,7 @@ function runExecutionFoundation411(morphoBot, routeBot, readinessBot){
       readOnly:true
     });
   }
-  return {bot:"EXECUTION_FOUNDATION_BOT",status:"COMPLETE",strategy:"ATOMIC_FLASH_LIQUIDATION_BLUEPRINT_FAIL_CLOSED",plansBuilt:plans.length,plans,executorContractRequired:true,transactionPayloadBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.11.0 defines the execution sequence and hard guards without pretending a transaction exists. Live execution remains disabled until an executor contract, exact onchain repay state, transaction calldata, transaction-specific gas, minimum-output binding and atomic simulation are implemented and validated.",elapsedMs:Date.now()-startedAt};
+  return {bot:"EXECUTION_FOUNDATION_BOT",status:"COMPLETE",strategy:"ATOMIC_FLASH_LIQUIDATION_BLUEPRINT_FAIL_CLOSED",plansBuilt:plans.length,plans,executorContractRequired:true,transactionPayloadBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.19.0 aligns the flash asset with the Morpho debt asset and preserves the execution sequence and hard guards without pretending a transaction exists. Live execution remains disabled until an executor contract, exact onchain repay state, transaction calldata, transaction-specific gas, minimum-output binding and atomic simulation are implemented and validated.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5793,7 +5810,7 @@ function runExecutorSimulationFoundation412(executionFoundationBot){
       protocol:p.protocol,network:p.network,marketId:p.marketId,borrower:p.borrower,
       selectedRepayUsd:p.selectedRepayUsd,requiredFlashRepaymentUsd:p.requiredFlashRepaymentUsd,
       projectedFinalNetUsd:p.projectedFinalNetUsd,minimumNetProfitUsd:p.minimumNetProfitUsd,
-      executorArtifact:"ArbiFlowExecutor412.sol",
+      executorArtifact:"ArbiFlowExecutor414.sol",
       transactionShape:{chainId:8453,from:"USER_WALLET_AT_EXECUTION",to:"DEPLOYED_EXECUTOR_ADDRESS_REQUIRED",value:"0",data:"NOT_ENCODED_UNTIL_EXACT_TOKEN_UNITS_AND_FIRM_SWAP_QUOTE_EXIST"},
       calldataSchema:schema,
       simulationPipeline:[
@@ -5814,7 +5831,7 @@ function runExecutorSimulationFoundation412(executionFoundationBot){
       blockers,planStatus:"SIMULATION_FOUNDATION_ONLY_NOT_EXECUTABLE",executable:false,paperPass:false,readOnly:true
     });
   }
-  return {bot:"EXECUTOR_SIMULATION_FOUNDATION_BOT",status:"COMPLETE",strategy:"CALLDATA_SCHEMA_PLUS_FAIL_CLOSED_SIMULATION_PIPELINE",plansBuilt:plans.length,plans,executorSourceArtifactIncluded:true,executorDeployed:false,realCalldataBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.12.0 adds the non-live executor source artifact, transaction shape, calldata schema, and exact simulation pipeline. No executor address is fabricated and no transaction is signed, sent, or simulated until a callable executor and fresh protocol/quote data exist.",elapsedMs:Date.now()-startedAt};
+  return {bot:"EXECUTOR_SIMULATION_FOUNDATION_BOT",status:"COMPLETE",strategy:"CALLDATA_SCHEMA_PLUS_FAIL_CLOSED_SIMULATION_PIPELINE",plansBuilt:plans.length,plans,executorSourceArtifactIncluded:true,executorDeployed:false,realCalldataBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.19.0 reports the current ArbiFlowExecutor414 artifact and retains the non-live executor transaction schema, transaction shape, calldata schema, and exact simulation pipeline. No executor address is fabricated and no transaction is signed, sent, or simulated until a callable executor and fresh protocol/quote data exist.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5835,10 +5852,10 @@ function runCallableExecutorTestFoundation413(executorSimulationBot){
       selectorPass=data.slice(0,10).toLowerCase()===selector.toLowerCase();
       calldataHash=keccak256(data);
     }catch(e){error=e?.message||String(e);}
-    tests.push({marketId:p.marketId,borrower:p.borrower,executorArtifact:"ArbiFlowExecutor413.sol",callableFunction:"validatePlan",sideEffects:false,abiEncodingPass,selectorPass,calldataHash,error,liveFunction:"executeLiquidationPlan",liveFunctionState:"HARD_DISABLED_REVERTS",onchainCallPerformed:false,contractDeployed:false,executable:false,readOnly:true});
+    tests.push({marketId:p.marketId,borrower:p.borrower,executorArtifact:"ArbiFlowExecutor414.sol",callableFunction:"validatePlan",sideEffects:false,abiEncodingPass,selectorPass,calldataHash,error,liveFunction:"executeLiquidationPlan",liveFunctionState:"HARD_DISABLED_REVERTS",onchainCallPerformed:false,contractDeployed:false,executable:false,readOnly:true});
   }
   const allLocalTestsPass=tests.length>0&&tests.every(t=>t.abiEncodingPass&&t.selectorPass&&!t.error);
-  return {bot:"CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT",status:allLocalTestsPass?"COMPLETE":"LOCAL_ABI_TEST_FAILED",strategy:"SIDE_EFFECT_FREE_CALLABLE_HARNESS_PLUS_LOCAL_ABI_INTEGRITY",testsBuilt:tests.length,tests,allLocalTestsPass,executorArtifact:"ArbiFlowExecutor413.sol",executorDeploymentRequiredForBaseEthCall:true,executorDeployed:false,baseEthCallPerformed:false,realTransactionGasEstimated:false,liveExecutionFunctionEnabled:false,executable:false,paperPass:false,readOnly:true,blockers:["TEST_EXECUTOR_NOT_DEPLOYED","BASE_ETH_CALL_REQUIRES_DEPLOYED_TEST_EXECUTOR","REAL_GAS_ESTIMATE_REQUIRES_DEPLOYED_TEST_EXECUTOR","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"],note:"4.13.0 proves the executor ABI and calldata shape locally and supplies a side-effect-free callable Solidity test harness. No deployment address is fabricated. Base eth_call and transaction-specific gas remain unavailable until the test harness is deliberately deployed; the live execution entry point remains hard-disabled.",elapsedMs:Date.now()-startedAt};
+  return {bot:"CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT",status:allLocalTestsPass?"COMPLETE":"LOCAL_ABI_TEST_FAILED",strategy:"SIDE_EFFECT_FREE_CALLABLE_HARNESS_PLUS_LOCAL_ABI_INTEGRITY",testsBuilt:tests.length,tests,allLocalTestsPass,executorArtifact:"ArbiFlowExecutor414.sol",executorDeploymentRequiredForBaseEthCall:true,executorDeployed:false,baseEthCallPerformed:false,realTransactionGasEstimated:false,liveExecutionFunctionEnabled:false,executable:false,paperPass:false,readOnly:true,blockers:["TEST_EXECUTOR_NOT_DEPLOYED","BASE_ETH_CALL_REQUIRES_DEPLOYED_TEST_EXECUTOR","REAL_GAS_ESTIMATE_REQUIRES_DEPLOYED_TEST_EXECUTOR","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"],note:"4.19.0 reports ArbiFlowExecutor414 consistently and proves the executor ABI and calldata shape locally and supplies a side-effect-free callable Solidity test harness. No deployment address is fabricated. Base eth_call and transaction-specific gas remain unavailable until the test harness is deliberately deployed; the live execution entry point remains hard-disabled.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5849,7 +5866,7 @@ function runBaseForkSimulationFoundation414(callableBot){
   const localIntegrityPass=!!callableBot?.allLocalTestsPass;
   let report=null, reportError=null;
   try {
-    const reportPath=path.join(__dirname,"fork-report-4180.json");
+    const reportPath=path.join(__dirname,"fork-report-4190.json");
     if(fs.existsSync(reportPath)) report=JSON.parse(fs.readFileSync(reportPath,"utf8"));
   } catch(e){ reportError=String(e?.message||e); }
   const forkPass=!!(report?.success && report?.chainId===8453 && report?.forkContractDeployed===true && report?.validatePlanEthCallPerformed===true && report?.liveEntryReverted===true && report?.mainnetBroadcast===false && report?.fundsMoved===false);
@@ -5859,7 +5876,7 @@ function runBaseForkSimulationFoundation414(callableBot){
     strategy:"STARTUP_COMPILE_DEPLOY_AND_ETH_CALL_ON_EPHEMERAL_BASE_MAINNET_FORK",
     chainId:8453,
     executorArtifact:"ArbiFlowExecutor414.sol",
-    forkHarnessArtifact:"BaseForkTest4180.js",
+    forkHarnessArtifact:"BaseForkTest4190.js",
     deploymentTarget:"EPHEMERAL_BASE_MAINNET_FORK",
     realBaseMainnetDeploymentAllowed:false,
     compilePerformedByRender:!!report?.compilePerformed,
@@ -5885,7 +5902,7 @@ function runBaseForkSimulationFoundation414(callableBot){
     prerequisites:{baseRpcRequiredForFork:true,solidityCompilerRequired:true,localIntegrityPass},
     reportError:reportError||report?.error||null,
     blockers:forkPass?["LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:(localIntegrityPass?["FORK_STARTUP_TEST_DID_NOT_PRODUCE_A_VALID_PASS_REPORT","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:["LOCAL_ABI_INTEGRITY_FAILED"]),
-    note:forkPass?"4.18.0 startup protocol-fork test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.18.0 requires a valid startup protocol-fork report before claiming fork verification. It remains fail-closed and non-live.",
+    note:forkPass?"4.19.0 startup protocol-fork test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.19.0 requires a valid startup protocol-fork report before claiming fork verification. It remains fail-closed and non-live.",
     elapsedMs:Date.now()-startedAt
   };
 }
