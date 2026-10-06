@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.34.0";
+const VERSION = "4.35.0";
 
 /*
 =========================================================
@@ -6871,9 +6871,27 @@ const runControlledAtomicForkTest4302 = async (req,res)=>{
   }catch(e){return res.status(500).json({success:false,version:VERSION,status:"CONTROLLED_FORK_ATOMIC_TEST_ERROR",error:e?.message||String(e),syntheticForkOnly:true,currentMainnetEligibilityClaimed:false,mainnetBroadcast:false,elapsedMs:Date.now()-startedAt});}
 };
 
+
+const runControlledKyberAtomicForkTest4350 = async (req,res)=>{
+  const startedAt=Date.now();
+  try{
+    const morpho=await runMorphoLiquidationBot450();
+    const pool=[...(morpho?.opportunities||[]),...(morpho?.watchlist||[])].filter(x=>x?.marketId&&x?.user).sort((a,b)=>Number(a.healthFactor??99)-Number(b.healthFactor??99));
+    if(!pool.length)return res.status(409).json({success:false,version:VERSION,status:"BLOCKED",blocker:"NO_MORPHO_CANDIDATE_AVAILABLE",mainnetBroadcast:false});
+    const candidate=pool[0],hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),reportPath=path.join(__dirname,"controlled-kyber-atomic-report-4350.json");
+    try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+    const child=spawnSync(hardhatBin,["run","--no-compile","ControlledKyberAtomicForkTest4350.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_CONTROLLED_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_CONTROLLED_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+    let report=null;try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+    if(child.status!==0||!report?.success)return res.status(409).json({success:false,version:VERSION,status:"CONTROLLED_FORK_KYBERSWAP_ATOMIC_TEST_FAILED_CLOSED",candidate:{marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor},error:(child.stderr||child.stdout||"CONTROLLED_KYBER_TEST_FAILED").slice(-4000),report,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    return res.json({...report,status:"CONTROLLED_FORK_KYBERSWAP_ATOMIC_TEST_PASSED",candidateDiscoveryHealthFactor:candidate.healthFactor,currentMainnetEligibilityClaimed:false,elapsedMs:Date.now()-startedAt});
+  }catch(e){return res.status(500).json({success:false,version:VERSION,status:"CONTROLLED_FORK_KYBERSWAP_ATOMIC_TEST_ERROR",error:e?.message||String(e),mainnetBroadcast:false,elapsedMs:Date.now()-startedAt})}
+};
+
 // Browser-accessible trigger plus POST compatibility. Both execute the same disposable-fork-only test.
 app.get("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
 app.post("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
+app.get("/api/test/base/controlled-kyberswap-atomic", runControlledKyberAtomicForkTest4350);
+app.post("/api/test/base/controlled-kyberswap-atomic", runControlledKyberAtomicForkTest4350);
 const zeroXAccessHandler4303 = async (req,res)=>{ const zeroXAccess=await zeroXAccessPreflight4302(); return res.status(zeroXAccess.ok?200:(zeroXAccess.status===401||zeroXAccess.status===403?403:409)).json({success:zeroXAccess.ok,version:VERSION,...zeroXAccess,apiKeyConfigured:Boolean(ZEROX_API_KEY),apiKeyExposed:false,readOnly:true,mainnetBroadcast:false}); };
 app.get("/api/zero-x/base/access", zeroXAccessHandler4303);
 app.get("/api/test/zerox/access", zeroXAccessHandler4303);
@@ -6881,7 +6899,7 @@ app.get("/api/test/zero-x/access", zeroXAccessHandler4303);
 app.get("/api/zero-x/base/production-readiness", async (req,res)=>{const r=await zeroXProductionQuoteReadiness4320();return res.status(r.success?200:409).json(r);});
 app.get("/api/kyberswap/base/route-readiness", async (req,res)=>{const r=await kyberSwapBaseRouteReadiness4330();return res.status(r.success?200:409).json(r);});
 app.get("/api/kyberswap/base/build-readiness", async (req,res)=>{const r=await kyberSwapBaseBuildReadiness4340();return res.status(r.success?200:409).json(r);});
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.34.0_KYBERSWAP_TRANSACTION_BUILD_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.35.0_KYBERSWAP_CONTROLLED_ATOMIC_FORK_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6890,7 +6908,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.34.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.35.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
