@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.30.2";
+const VERSION = "4.30.3";
 
 /*
 =========================================================
@@ -6803,7 +6803,11 @@ const runControlledAtomicForkTest4302 = async (req,res)=>{
 // Browser-accessible trigger plus POST compatibility. Both execute the same disposable-fork-only test.
 app.get("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
 app.post("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
-app.get("/api/zero-x/base/access", async (req,res)=>{ const zeroXAccess=await zeroXAccessPreflight4302(); return res.status(zeroXAccess.ok?200:(zeroXAccess.status===401||zeroXAccess.status===403?403:409)).json({success:zeroXAccess.ok,version:VERSION,...zeroXAccess,apiKeyConfigured:Boolean(ZEROX_API_KEY),apiKeyExposed:false,readOnly:true,mainnetBroadcast:false}); });
+const zeroXAccessHandler4303 = async (req,res)=>{ const zeroXAccess=await zeroXAccessPreflight4302(); return res.status(zeroXAccess.ok?200:(zeroXAccess.status===401||zeroXAccess.status===403?403:409)).json({success:zeroXAccess.ok,version:VERSION,...zeroXAccess,apiKeyConfigured:Boolean(ZEROX_API_KEY),apiKeyExposed:false,readOnly:true,mainnetBroadcast:false}); };
+app.get("/api/zero-x/base/access", zeroXAccessHandler4303);
+app.get("/api/test/zerox/access", zeroXAccessHandler4303);
+app.get("/api/test/zero-x/access", zeroXAccessHandler4303);
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.30.3_BROWSER_ROUTE_IDENTITY",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6812,7 +6816,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.30.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.30.3] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
