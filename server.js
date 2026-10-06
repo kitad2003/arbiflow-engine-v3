@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.2.4";
+const VERSION = "4.2.5";
 
 /*
 =========================================================
@@ -4995,26 +4995,42 @@ async function runWatcherBot(spreadBot,triangleBot,dislocationBot){
   return {bot:"WATCHER_BOT",status:"COMPLETE",rule:"Keep raw near-misses within $2 hot and fresh-requote the strongest 12 items.",watchlist:near,rechecks,promoted:rechecks.filter(x=>x.becameRawPositive)};
 }
 
-async function runFastWatcher424(spreadBot,triangleBot,dislocationBot){
+async function fastWatcherDirectPath425(item){
+  const [baseToken,quoteToken]=item.pair.split("/");
+  const buyVenue=item.buyVenueKey;
+  const sellVenue=item.sellVenueKey;
+  if(!buyVenue||!sellVenue) throw new Error("Watcher item is missing its selected venue path.");
+  const first=await market42VenueQuote(buyVenue,baseToken,quoteToken,MARKET42.probeUsd);
+  const second=await market42VenueQuote(sellVenue,quoteToken,baseToken,Number(first.buyAmount));
+  const grossPnl=Number(second.buyAmount)-Number(MARKET42.probeUsd);
+  return {freshGrossPnl:round(grossPnl,6),freshGrossRoiPercent:round(grossPnl/Number(MARKET42.probeUsd)*100,6),becameRawPositive:grossPnl>0,fastPath:[buyVenue,sellVenue]};
+}
+
+function venueKey425(name){
+  if(String(name||"").toLowerCase().includes("aerodrome")) return "AERODROME";
+  if(String(name||"").toLowerCase().includes("uniswap")) return "UNISWAP_V3";
+  return null;
+}
+
+async function runFastWatcher425(spreadBot,triangleBot,dislocationBot){
   const startedAt=Date.now(), near=[];
-  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score});}
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:venueKey425(x.bestDirection?.buyVenue),sellVenueKey:venueKey425(x.bestDirection?.sellVenue)});}
+  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:venueKey425(x.bestDirection?.buyVenue),sellVenueKey:venueKey425(x.bestDirection?.sellVenue)});}
   for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score});}
-  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score});}
   near.sort((a,b)=>b.score-a.score);
   const shortlist=near.slice(0,SCAN422.watcherLimit);
   const rows=await mapLimit421(shortlist,3,async item=>{
     try{
       if(item.pair){
-        const [a,b]=item.pair.split("/");
-        const result=await withTimeout421(compareBaseDirectVenues({baseToken:a,quoteToken:b,amount:MARKET42.probeUsd}),4500,`watcher ${item.pair}`);
-        const best=bestDirectDirection({result});
-        return {...item,freshGrossPnl:Number(best?.grossPnl??NaN),freshGrossRoiPercent:Number(best?.grossRoiPercent??NaN),becameRawPositive:Boolean(best&&Number(best.grossPnl)>0),recheckedAt:now()};
+        const fresh=await withTimeout421(fastWatcherDirectPath425(item),4500,`fast watcher ${item.pair}`);
+        return {...item,...fresh,recheckedAt:now()};
       }
-      const q=await withTimeout421(quoteMarket42Triangle(MARKET42.probeUsd,item.route,item.venues),4500,`watcher triangle ${item.venues?.join("/")||"route"}`);
-      return {...item,freshGrossPnl:Number(q.grossPnl),freshGrossRoiPercent:Number(q.grossRoiPercent),becameRawPositive:Boolean(q.rawPositive),recheckedAt:now()};
+      // The deep triangle result is already a recent 3-leg quote. Do not repeat the
+      // expensive dependent 3-leg RPC path inside the fast Watcher request.
+      return {...item,freshGrossPnl:item.grossPnl,freshGrossRoiPercent:round(Number(item.grossPnl)/Number(MARKET42.probeUsd)*100,6),becameRawPositive:false,recheckMode:"RECENT_DEEP_QUOTE_REUSED",recheckedAt:now()};
     }catch(error){return {...item,recheckError:error.message,becameRawPositive:false,recheckedAt:now()};}
   });
-  return {bot:"WATCHER_BOT",status:"COMPLETE",stage:"PRE_SHORTLISTED_FAST_RECHECK",rule:`Select the strongest ${SCAN422.watcherLimit} near-misses before requoting; recheck with bounded concurrency and per-item timeouts.`,watchlist:shortlist,rechecks:rows,promoted:rows.filter(x=>x.becameRawPositive),elapsedMs:Date.now()-startedAt};
+  return {bot:"WATCHER_BOT",status:"COMPLETE",stage:"SELECTED_PATH_FAST_RECHECK",rule:`Select the strongest ${SCAN422.watcherLimit} near-misses first. Direct pairs re-quote only the previously selected two-venue path; recent deep triangle quotes are reused instead of repeating a slow 3-leg RPC path.`,watchlist:shortlist,rechecks:rows,promoted:rows.filter(x=>x.becameRawPositive),elapsedMs:Date.now()-startedAt};
 }
 
 const LIFI_PROBE_ADDRESS="0x0000000000000000000000000000000000000001";
@@ -5199,13 +5215,13 @@ async function runLiquidationBatch422(){
     for (const x of [...result.watchlist, ...result.liquidationEligible]) liquidationWatch423.set(String(x.user).toLowerCase(), x);
     const watcherRechecks = await recheckLiquidationWatch423();
     const newlyEligible = watcherRechecks.filter(x=>x.becameLiquidationEligible);
-    return {bot:"LIQUIDATION_BOT",status:"COMPLETE",stage:"BATCHED_DISCOVERY_PLUS_PERSISTENT_WATCH",scanWindowBlocks:SCAN422.liquidationBlocksPerRequest,maxUsers:SCAN422.liquidationMaxUsersPerRequest,opportunities,liquidationWatcher:{tracked:liquidationWatch423.size,rechecks:watcherRechecks,newlyEligible,profitabilityValidated:false,note:"Eligibility triggers economics analysis only; no liquidation is executed."},counts:result.counts,errors:result.errors,profitabilityValidated:false,elapsedMs:Date.now()-startedAt};
+    return {bot:"LIQUIDATION_BOT",status:"COMPLETE",stage:"BATCHED_DISCOVERY_PLUS_RUNTIME_WATCH",scanWindowBlocks:SCAN422.liquidationBlocksPerRequest,maxUsers:SCAN422.liquidationMaxUsersPerRequest,opportunities,liquidationWatcher:{tracked:liquidationWatch423.size,rechecks:watcherRechecks,newlyEligible,profitabilityValidated:false,note:"Eligibility triggers economics analysis only; no liquidation is executed."},counts:result.counts,errors:result.errors,profitabilityValidated:false,elapsedMs:Date.now()-startedAt};
   }catch(error){return {bot:"LIQUIDATION_BOT",status:"ERROR",stage:"BATCHED_DISCOVERY",opportunities:[],errors:[{error:error.message}],profitabilityValidated:false,elapsedMs:Date.now()-startedAt};}
 }
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.2.4 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.2.5 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5224,8 +5240,8 @@ async function scanBaseBotNetwork422(){
   // Stage 3: shortlist first, then requote only the strongest bounded set.
   let watcherBot;
   try{
-    watcherBot=await withTimeout421(runFastWatcher424(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
-  }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",stage:"PRE_SHORTLISTED_FAST_RECHECK",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
+    watcherBot=await withTimeout421(runFastWatcher425(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
+  }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",stage:"SELECTED_PATH_FAST_RECHECK",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
 
   // Stage 4: expensive flash sizing remains gated behind a raw-positive seed.
   let largeOpportunityBot;
@@ -5241,7 +5257,7 @@ async function scanBaseBotNetwork422(){
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
   scan421Log("BOT NETWORK 4.2.4 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"FAST_STAGED_MARKET_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,persistentLiquidationWatcher:true,preShortlistedFastWatcher:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.4 uses staged, bounded discovery with LI.FI quote repair, persistent liquidation rechecks, and a pre-shortlisted fast Watcher. A raw-positive quote is not executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
+  return {mode:"FAST_STAGED_MARKET_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.5 uses staged, bounded discovery with LI.FI quote repair, liquidation rechecks, and selected-path fast Watcher requotes. A raw-positive quote is not executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
