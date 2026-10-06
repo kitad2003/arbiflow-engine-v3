@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "3.3.0";
+const VERSION = "3.4.0";
 
 /*
 =========================================================
@@ -3335,7 +3335,7 @@ app.get(
         false,
 
       message:
-        "ArbiFlow Engine 3.2.2 is online."
+        `ArbiFlow Engine ${VERSION} is online.`
     });
   }
 );
@@ -3853,6 +3853,188 @@ app.get(
         engine: "ArbiFlow Opportunity Engine",
         version: VERSION,
         mode: "DIRECT_VENUE_COMPARISON",
+        liveExecutionEnabled: false,
+        affectsPaperBalance: false,
+        executable: false,
+        error: error.message,
+        time: now()
+      });
+    }
+  }
+);
+
+/*
+=========================================================
+BASE MULTI-SIZE DIRECT VENUE SCANNER - ENGINE 3.4
+
+Read only. Probes several trade sizes across Aerodrome and
+Uniswap V3, tests both cross-venue directions, ranks the
+results, and separates positive raw candidates from near
+passes. Gas and transaction simulation are deliberately not
+included yet, so scanner results are never executable.
+=========================================================
+*/
+
+const BASE_DIRECT_SCAN_DEFAULT_SIZES = [10, 25, 50, 100, 250];
+const BASE_DIRECT_SCAN_MAX_SIZES = 10;
+const BASE_DIRECT_NEAR_PASS_FLOOR_USD = -0.50;
+
+function parseBaseDirectScanSizes(rawSizes) {
+  if (rawSizes === undefined || rawSizes === null || String(rawSizes).trim() === "") {
+    return [...BASE_DIRECT_SCAN_DEFAULT_SIZES];
+  }
+
+  const values = String(rawSizes)
+    .split(",")
+    .map(value => Number(value.trim()))
+    .filter(value => Number.isFinite(value) && value > 0);
+
+  const unique = [...new Set(values.map(value => round(value, 8)))];
+
+  if (!unique.length) {
+    throw new Error("sizes must contain at least one positive number.");
+  }
+
+  if (unique.length > BASE_DIRECT_SCAN_MAX_SIZES) {
+    throw new Error(`A maximum of ${BASE_DIRECT_SCAN_MAX_SIZES} scan sizes is allowed.`);
+  }
+
+  return unique.sort((a, b) => a - b);
+}
+
+function classifyBaseDirectScanResult(result) {
+  const best = result.bestDirection;
+
+  if (best.grossPnl > 0) {
+    return "RAW_CANDIDATE";
+  }
+
+  if (best.grossPnl >= BASE_DIRECT_NEAR_PASS_FLOOR_USD) {
+    return "WATCHLIST";
+  }
+
+  return "REJECTED";
+}
+
+async function scanBaseDirectVenues({
+  baseToken = "USDC",
+  quoteToken = "WETH",
+  sizes = BASE_DIRECT_SCAN_DEFAULT_SIZES
+}) {
+  const startedAt = Date.now();
+  const results = [];
+
+  // Run sequentially to avoid hammering public RPC/provider limits and to
+  // keep each comparison's quote window easy to interpret.
+  for (const size of sizes) {
+    try {
+      const comparison = await compareBaseDirectVenues({
+        baseToken,
+        quoteToken,
+        amount: size
+      });
+
+      results.push({
+        success: true,
+        size,
+        classification: classifyBaseDirectScanResult(comparison),
+        ...comparison
+      });
+    } catch (error) {
+      results.push({
+        success: false,
+        size,
+        classification: "ERROR",
+        error: error.message,
+        executable: false,
+        paperPass: false
+      });
+    }
+  }
+
+  const successful = results.filter(item => item.success);
+  const ranked = [...successful].sort(
+    (a, b) => b.bestDirection.grossPnl - a.bestDirection.grossPnl
+  );
+  const rawCandidates = ranked.filter(item => item.classification === "RAW_CANDIDATE");
+  const watchlist = ranked.filter(item => item.classification === "WATCHLIST");
+  const rejected = ranked.filter(item => item.classification === "REJECTED");
+  const errors = results.filter(item => !item.success);
+
+  return {
+    network: "Base",
+    scanMode: "MULTI_SIZE_DIRECT_VENUE_READ_ONLY",
+    baseToken,
+    quoteToken,
+    requestedSizes: sizes,
+    venues: ["Aerodrome", "Uniswap V3"],
+    bestResult: ranked[0] || null,
+    rawCandidates,
+    watchlist,
+    rejected,
+    errors,
+    counts: {
+      tested: results.length,
+      successful: successful.length,
+      rawCandidates: rawCandidates.length,
+      watchlist: watchlist.length,
+      rejected: rejected.length,
+      errors: errors.length
+    },
+    elapsedMs: Date.now() - startedAt,
+    executableOpportunities: 0,
+    executable: false,
+    paperPass: false,
+    costsIncluded: {
+      dexFees: true,
+      gas: false,
+      transactionSimulation: false,
+      atomicExecutionProtection: false
+    },
+    nextValidationRequired: [
+      "gas estimation",
+      "fresh quote confirmation",
+      "transaction simulation",
+      "minimum-profit protection"
+    ],
+    warning: "Discovery scanner only. RAW_CANDIDATE means positive before gas and transaction-level protections; it is not an executable or paper-pass trade."
+  };
+}
+
+app.get(
+  "/api/venues/base/scan",
+  async (req, res) => {
+    try {
+      const baseToken = String(req.query.baseToken || "USDC")
+        .trim()
+        .toUpperCase();
+      const quoteToken = String(req.query.quoteToken || "WETH")
+        .trim()
+        .toUpperCase();
+      const sizes = parseBaseDirectScanSizes(req.query.sizes);
+
+      const result = await scanBaseDirectVenues({
+        baseToken,
+        quoteToken,
+        sizes
+      });
+
+      return res.json({
+        success: true,
+        engine: "ArbiFlow Opportunity Engine",
+        version: VERSION,
+        mode: "DIRECT_VENUE_MULTI_SIZE_SCAN",
+        liveExecutionEnabled: false,
+        affectsPaperBalance: false,
+        ...result,
+        time: now()
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        engine: "ArbiFlow Opportunity Engine",
+        version: VERSION,
+        mode: "DIRECT_VENUE_MULTI_SIZE_SCAN",
         liveExecutionEnabled: false,
         affectsPaperBalance: false,
         executable: false,
