@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.3.2";
+const VERSION = "4.4.0";
 
 /*
 =========================================================
@@ -4914,7 +4914,7 @@ function market42Triangles() {
 
 const BOT_NETWORK = {
   enabled:true, network:"Base",
-  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","LIQUIDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
+  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","LIQUIDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
 };
 
 function botScore({ estimatedNetUsd=0,grossPnlUsd=0,grossRoiPercent=0,confidence=0.5,depthUsd=0 }) {
@@ -4938,8 +4938,9 @@ async function quoteMarket42Triangle(amount,route,venues){
 }
 
 async function runMarketDiscoveryBot(){
-  const pairs=market42DirectPairs(), triangles=market42Triangles();
-  return {bot:"MARKET_DISCOVERY_BOT",status:"COMPLETE",tokenUniverse:MARKET42.routeTokens,directPairUniverse:pairs.map(x=>x.join("/")),triangleUniverse:triangles.map(x=>x.join("->")),directVenues:MARKET42.directVenues,intelligenceProviders:MARKET42.intelligenceProviders,counts:{tokens:MARKET42.routeTokens.length,directPairs:pairs.length,triangleRoutes:triangles.length,venueCombinationsPerTriangle:market42VenueCombos().length,totalTriangleProbes:triangles.length*market42VenueCombos().length}};
+  const pairs=[]; for(let i=0;i<MARKET42.routeTokens.length;i++) for(let j=i+1;j<MARKET42.routeTokens.length;j++) pairs.push([MARKET42.routeTokens[i],MARKET42.routeTokens[j]]);
+  const triangles=market42Triangles();
+  return {bot:"MARKET_DISCOVERY_BOT",status:"COMPLETE",tokenUniverse:MARKET42.routeTokens,directPairUniverse:pairs.map(x=>x.join("/")),triangleUniverse:triangles.map(x=>x.join("->")),directVenues:MARKET42.directVenues,intelligenceProviders:MARKET42.intelligenceProviders,counts:{tokens:MARKET42.routeTokens.length,directPairs:pairs.length,triangleRoutes:triangles.length,venueCombinationsPerTriangle:triangleCombos430().length,totalTriangleProbes:2*triangleCombos430().length}};
 }
 
 async function runSpreadBot(){
@@ -5093,7 +5094,7 @@ async function scanBaseBotNetwork(){
   const spreadBot=byName.SPREAD_BOT||{observations:[],candidates:[]}, triangleBot=byName.TRIANGLE_BOT||{observations:[],candidates:[]}, liquidationBot=byName.LIQUIDATION_BOT||{opportunities:[]}, dislocationBot=byName.DISLOCATION_BOT||{observations:[],candidates:[]}, aggregatorBot=byName.AGGREGATOR_INTELLIGENCE_BOT||{observations:[]};
   let watcherBot; try{watcherBot=await withTimeout421(runWatcherBot(spreadBot,triangleBot,dislocationBot),30000,"WATCHER_BOT");}catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIMEOUT_OR_ERROR",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
   let largeOpportunityBot; try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot(triangleBot),45000,"LARGE_OPPORTUNITY_BOT");}catch(error){largeOpportunityBot={bot:"LARGE_OPPORTUNITY_BOT",status:"TIMEOUT_OR_ERROR",flashOptimization:null,errors:[{error:error.message}]};}
-  const bots=[marketBot,spreadBot,triangleBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[])ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[])ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[])ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false}); ranked.sort((a,b)=>b.score-a.score);
@@ -5223,7 +5224,7 @@ async function runLiquidationBatch422(){
 
 /*
 =========================================================
-ENGINE 4.3.2 - THREE-VENUE PERFORMANCE + OPTIMIZER FOUNDATION
+ENGINE 4.4.0 - DEEP OPPORTUNITY EXPANSION
 =========================================================
 Replaces the failed LI.FI-constrained PancakeSwap transport with direct,
 read-only calls to PancakeSwap V3 contracts on Base.
@@ -5357,10 +5358,14 @@ async function quoteMarket43Triangle(amount,route,venues){
 }
 
 async function runFastSpreadBot430(){
-  const startedAt=Date.now(),observations=[],errors=[];const pairs=[["USDC","DAI"],["USDC","WETH"],["USDC","cbBTC"],["DAI","WETH"]];
-  const rows=await mapLimit421(pairs,3,async([baseToken,quoteToken])=>{try{const result=await compareBaseExpandedVenues430({baseToken,quoteToken,amount:MARKET42.probeUsd});const best=result.bestDirection;return{ok:true,value:{type:"EXPANDED_DIRECT_SPREAD",pair:`${baseToken}/${quoteToken}`,probeAmount:MARKET42.probeUsd,bestDirection:best,rawPositive:Boolean(best&&Number(best.grossPnl)>0),venueErrors:result.errors,score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{pair:`${baseToken}/${quoteToken}`,error:error.message}}}});
+  const startedAt=Date.now(),observations=[],errors=[];
+  // 4.4.0 expands direct discovery to every unique pair in the verified
+  // four-token Base universe instead of only four hand-picked pairs.
+  const t=MARKET42.routeTokens,pairs=[];
+  for(let i=0;i<t.length;i++) for(let j=i+1;j<t.length;j++) pairs.push([t[i],t[j]]);
+  const rows=await mapLimit421(pairs,3,async([baseToken,quoteToken])=>{try{const result=await compareBaseExpandedVenues430({baseToken,quoteToken,amount:MARKET42.probeUsd});const best=result.bestDirection;return{ok:true,value:{type:"EXPANDED_DIRECT_SPREAD",pair:`${baseToken}/${quoteToken}`,probeAmount:MARKET42.probeUsd,bestDirection:best,rawPositive:Boolean(best&&Number(best.grossPnl)>0),nearPositive:Boolean(best&&Number(best.grossPnl)<=0&&Number(best.grossPnl)>=-0.10),venueErrors:result.errors,score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{pair:`${baseToken}/${quoteToken}`,error:error.message}}}});
   for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);} observations.sort((a,b)=>b.score-a.score);
-  return{bot:"SPREAD_BOT",status:"COMPLETE",stage:"THREE_VENUE_EXPANDED_DISCOVERY",pairsPlanned:pairs.length,venues:MARKET42.directVenues,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
+  return{bot:"SPREAD_BOT",status:"COMPLETE",stage:"ALL_PAIR_THREE_VENUE_DISCOVERY",pairsPlanned:pairs.length,venues:MARKET42.directVenues,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
 function triangleCombos430(){
@@ -5374,12 +5379,31 @@ function triangleCombos430(){
 }
 
 async function runFastTriangleBot430(spreadBot){
-  const startedAt=Date.now(),observations=[],errors=[];
-  const btc=spreadBot.observations?.find(x=>x.pair==="USDC/cbBTC"),eth=spreadBot.observations?.find(x=>x.pair==="USDC/WETH");
-  const middle=(Number(btc?.score||0)>Number(eth?.score||0))?"cbBTC":"WETH";const route=["USDC",middle,"DAI","USDC"],combos=triangleCombos430();
-  const rows=await mapLimit421(combos,3,async venues=>{try{const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),7000,`4.3.2 triangle ${venues.join("/")}`);return{ok:true,value:{...q,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{route,venues,error:error.message}}}});
+  const startedAt=Date.now(),observations=[],errors=[],combos=triangleCombos430();
+  // Deep-check both major volatile paths. This doubles route coverage while
+  // retaining only six true three-venue permutations per route.
+  const routes=[["USDC","WETH","DAI","USDC"],["USDC","cbBTC","DAI","USDC"]];
+  const jobs=[]; for(const route of routes) for(const venues of combos) jobs.push({route,venues});
+  const rows=await mapLimit421(jobs,4,async({route,venues})=>{try{const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),6500,`4.4 triangle ${route.join("->")} ${venues.join("/")}`);return{ok:true,value:{...q,nearPositive:Number(q.grossPnl)<=0&&Number(q.grossPnl)>=-0.25,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{route,venues,error:error.message}}}});
   for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);}observations.sort((a,b)=>b.score-a.score);
-  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"THREE_VENUE_SHORTLIST_DEEP_CHECK",routesGenerated:market42Triangles().length,routesDeepChecked:1,route,probesPlanned:combos.length,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
+  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"TWO_ROUTE_THREE_VENUE_DEEP_CHECK",routesGenerated:market42Triangles().length,routesDeepChecked:routes.length,routes,probesPlanned:jobs.length,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
+}
+
+async function runSizeDiscoveryBot440(spreadBot,triangleBot){
+  const startedAt=Date.now(),tests=[],errors=[];
+  // Expensive sizing is reserved for the two strongest routes within a tight
+  // near-profit window. It is discovery only: no flash loan is requested.
+  const seeds=[];
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p>0||p>=-0.10)seeds.push({kind:"DIRECT",grossPnl:p,score:x.score,data:x});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p>0||p>=-0.25)seeds.push({kind:"TRIANGLE",grossPnl:p,score:x.score,data:x});}
+  seeds.sort((a,b)=>b.score-a.score);
+  const shortlist=seeds.slice(0,2), sizes=[250,1000,5000];
+  for(const seed of shortlist){
+    const rows=await mapLimit421(sizes,2,async amount=>{try{const q=seed.kind==="DIRECT"?await withTimeout421(quoteDirectSeed430(amount,seed.data),5000,`4.4 size direct ${amount}`):await withTimeout421(quoteMarket43Triangle(amount,seed.data.route,seed.data.venues),6500,`4.4 size triangle ${amount}`);return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->"),amount,...q,rawPositive:Number(q.grossPnl)>0};}catch(error){return{kind:seed.kind,amount,error:error.message,rawPositive:false}}});
+    tests.push(...rows);
+  }
+  const positiveSeeds=tests.filter(x=>x.rawPositive).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl));
+  return{bot:"SIZE_DISCOVERY_BOT",status:"COMPLETE",strategy:"BOUNDED_MULTI_SIZE_NEAR_PROFIT_PROBE",nearSeedCount:seeds.length,shortlisted:shortlist.length,sizes,tests,positiveSeeds,errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function fastWatcherDirectPath430(item){
@@ -5390,12 +5414,15 @@ async function fastWatcherDirectPath430(item){
 
 async function runFastWatcher430(spreadBot,triangleBot,dislocationBot){
   const startedAt=Date.now(),near=[];
-  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:x.bestDirection?.buyVenueKey||venueKey425(x.bestDirection?.buyVenue),sellVenueKey:x.bestDirection?.sellVenueKey||venueKey425(x.bestDirection?.sellVenue)});}
-  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:venueKey425(x.bestDirection?.buyVenue),sellVenueKey:venueKey425(x.bestDirection?.sellVenue)});}
-  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score});}
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:x.bestDirection?.buyVenueKey||venueKey425(x.bestDirection?.buyVenue),sellVenueKey:x.bestDirection?.sellVenueKey||venueKey425(x.bestDirection?.sellVenue),quoteTimestamp:Math.max(Number(x.bestDirection?.buyQuote?.quoteTimestamp||0),Number(x.bestDirection?.sellQuote?.quoteTimestamp||0))});}
+  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:venueKey425(x.bestDirection?.buyVenue),sellVenueKey:venueKey425(x.bestDirection?.sellVenue),quoteTimestamp:Math.max(Number(x.bestDirection?.buyQuote?.quoteTimestamp||0),Number(x.bestDirection?.sellQuote?.quoteTimestamp||0))});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score,quoteTimestamp:Math.max(...(x.legs||[]).map(q=>Number(q.quoteTimestamp||0)),0)});}
   near.sort((a,b)=>b.score-a.score);const shortlist=near.slice(0,SCAN422.watcherLimit);
-  const rows=await mapLimit421(shortlist,2,async item=>{try{if(item.pair){const fresh=await withTimeout421(fastWatcherDirectPath430(item),4500,`4.3.2 watcher ${item.pair}`);return{...item,...fresh,recheckedAt:now()};}return{...item,freshGrossPnl:item.grossPnl,freshGrossRoiPercent:round(Number(item.grossPnl)/Number(MARKET42.probeUsd)*100,6),becameRawPositive:false,recheckMode:"RECENT_DEEP_QUOTE_REUSED",recheckedAt:now()};}catch(error){return{...item,recheckError:error.message,becameRawPositive:false,recheckedAt:now()}}});
-  return{bot:"WATCHER_BOT",status:"COMPLETE",stage:"THREE_VENUE_SELECTED_PATH_RECHECK",rule:`Select strongest ${SCAN422.watcherLimit} near-misses; re-quote only selected venue path with cached Pancake pool topology.`,watchlist:shortlist,rechecks:rows,promoted:rows.filter(x=>x.becameRawPositive),elapsedMs:Date.now()-startedAt};
+  // 4.4.0 no longer immediately repeats RPC calls that were just completed.
+  // Fresh scan quotes become the initial watcher state; a future scan provides
+  // the next observation. This removes the 4.3.2 timeout regression.
+  const rows=shortlist.map(item=>({...item,freshGrossPnl:item.grossPnl,becameRawPositive:false,recheckMode:"FRESH_SCAN_QUOTE_REUSED",quoteAgeMs:item.quoteTimestamp?Math.max(0,Date.now()-item.quoteTimestamp):null,recheckedAt:now()}));
+  return{bot:"WATCHER_BOT",status:"COMPLETE",stage:"FRESH_QUOTE_STATE_WATCH",rule:`Keep strongest ${SCAN422.watcherLimit} near-misses using the already-fresh scan quote; do not duplicate RPC work inside the same scan.`,watchlist:shortlist,rechecks:rows,promoted:[],elapsedMs:Date.now()-startedAt};
 }
 
 async function quoteDirectSeed430(amount,seed){
@@ -5404,10 +5431,11 @@ async function quoteDirectSeed430(amount,seed){
   return{seedType:"DIRECT",pair:seed.pair,venues:[b,s],startAmount:Number(amount),finalAmount:Number(second.buyAmount),grossPnl:round(grossPnl,6),grossRoiPercent:round(grossPnl/Number(amount)*100,6)};
 }
 
-async function runLargeOpportunityBot430(spreadBot,triangleBot){
+async function runLargeOpportunityBot430(spreadBot,triangleBot,sizeBot){
   const startedAt=Date.now();const seeds=[];
   for(const x of spreadBot.candidates||[])seeds.push({kind:"DIRECT",grossPnl:Number(x.bestDirection?.grossPnl||0),data:x});
   for(const x of triangleBot.candidates||[])seeds.push({kind:"TRIANGLE",grossPnl:Number(x.grossPnl||0),data:x});
+  for(const x of sizeBot?.positiveSeeds||[]){if(x.kind==="DIRECT"){const original=(spreadBot.observations||[]).find(o=>o.pair===x.pair);if(original)seeds.push({kind:"DIRECT",grossPnl:Number(x.grossPnl||0),data:original,discoveredAtSize:x.amount});}else if(x.kind==="TRIANGLE")seeds.push({kind:"TRIANGLE",grossPnl:Number(x.grossPnl||0),data:x,discoveredAtSize:x.amount});}
   seeds.sort((a,b)=>b.grossPnl-a.grossPnl);if(!seeds.length)return{bot:"LARGE_OPPORTUNITY_BOT",status:"NO_POSITIVE_SEED",flashOptimization:null,elapsedMs:Date.now()-startedAt};
   const chosen=seeds[0];
   try{const[aave,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);const sizes=buildAdaptiveFlashSizes(aave.availableLiquidity),results=[];
@@ -5419,7 +5447,7 @@ async function runLargeOpportunityBot430(spreadBot,triangleBot){
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.3.2 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.4.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5435,27 +5463,33 @@ async function scanBaseBotNetwork422(){
   try{triangleBot=await withTimeout421(runFastTriangleBot430(spreadBot),SCAN422.fastBotBudgetMs,"TRIANGLE_BOT");}
   catch{triangleBot=timeoutResult422("TRIANGLE_BOT",SCAN422.fastBotBudgetMs,startedAt);}
 
-  // Stage 3: shortlist first, then requote only the strongest bounded set.
+  // Stage 3: bounded multi-size discovery for only the strongest near-profit routes.
+  let sizeBot;
+  try{sizeBot=await withTimeout421(runSizeDiscoveryBot440(spreadBot,triangleBot),10000,"SIZE_DISCOVERY_BOT");}
+  catch(error){sizeBot={bot:"SIZE_DISCOVERY_BOT",status:"TIME_BUDGET_REACHED",tests:[],positiveSeeds:[],errors:[{error:error.message}]};}
+
+  // Stage 4: watcher reuses fresh quotes rather than immediately duplicating RPC calls.
   let watcherBot;
   try{
     watcherBot=await withTimeout421(runFastWatcher430(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
   }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",stage:"SELECTED_PATH_FAST_RECHECK",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
 
-  // Stage 4: expensive flash sizing remains gated behind a raw-positive seed.
+  // Stage 5: expensive flash sizing remains gated behind a raw-positive seed,
+  // including a seed discovered by the bounded multi-size probe.
   let largeOpportunityBot;
-  if((spreadBot.candidates||[]).length || (triangleBot.candidates||[]).length){
-    try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot430(spreadBot,triangleBot),12000,"LARGE_OPPORTUNITY_BOT");}
+  if((spreadBot.candidates||[]).length || (triangleBot.candidates||[]).length || (sizeBot.positiveSeeds||[]).length){
+    try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot430(spreadBot,triangleBot,sizeBot),12000,"LARGE_OPPORTUNITY_BOT");}
     catch(error){largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}]};}
   }else largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"NO_POSITIVE_SEED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,flashOptimization:null,elapsedMs:0};
 
-  const bots=[marketBot,spreadBot,triangleBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[]) ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[]) ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.3.2 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"EXPANDED_THREE_VENUE_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.3.2 keeps read-only Aerodrome, Uniswap V3, and native PancakeSwap V3 discovery while reducing repeated RPC work with Pancake pool/fee caching and a six-permutation triangle shortlist. Raw-positive direct or triangle seeds enter the adaptive NET-profit optimizer; nothing is executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
+  scan421Log("BOT NETWORK 4.4.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"DEEP_OPPORTUNITY_EXPANSION",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,twoRouteTriangleDeepCheck:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.4.0 expands read-only opportunity discovery across every pair in the verified Base token universe, two deep triangle routes, and bounded multi-size testing for near-profit routes. The watcher reuses fresh quotes to avoid duplicate RPC timeouts. Only raw-positive seeds can enter flash economics; nothing is executable until costs, freshness, atomic simulation, and the $15 minimum NET-profit protection pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
