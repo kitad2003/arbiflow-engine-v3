@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.32.0";
+const VERSION = "4.33.0";
 
 /*
 =========================================================
@@ -6806,6 +6806,25 @@ const zeroXProductionQuoteReadiness4320 = async ()=>{
   }catch(e){return {...base,success:false,classification:"PRODUCTION_QUOTE_READINESS_ERROR",message:e?.message||String(e)}};
 };
 
+
+const kyberSwapBaseRouteReadiness4330 = async ()=>{
+  const base={version:VERSION,provider:"KYBERSWAP",chain:"base",chainId:8453,readOnly:true,routePreviewOnly:true,encodedTransactionRequested:false,calldataRequested:false,walletConnectionRequired:false,approvalPerformed:false,signaturePerformed:false,transactionSubmitted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+  const tokenIn="0x4200000000000000000000000000000000000006";
+  const tokenOut="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const amountIn=process.env.ARBIFLOW_KYBER_READINESS_AMOUNT_IN||"100000000000000";
+  const clientId=(process.env.ARBIFLOW_KYBER_CLIENT_ID||"ArbiFlow").trim()||"ArbiFlow";
+  const url="https://aggregator-api.kyberswap.com/base/api/v1/routes?"+new URLSearchParams({tokenIn,tokenOut,amountIn,excludeRFQSources:"true",onlyScalableSources:"true",gasInclude:"true"});
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);
+  try{
+    const r=await fetch(url,{method:"GET",headers:{"X-Client-Id":clientId,"Accept":"application/json"},signal:c.signal});
+    const body=await r.text();let data=null;try{data=JSON.parse(body)}catch{}
+    const summary=data?.data?.routeSummary||null,routerAddress=data?.data?.routerAddress||null;
+    const routeFound=Boolean(r.ok&&summary?.amountIn&&summary?.amountOut&&routerAddress);
+    return {...base,success:routeFound,classification:routeFound?"KYBERSWAP_BASE_ROUTE_PREVIEW_CONFIRMED":"KYBERSWAP_BASE_ROUTE_PREVIEW_FAILED",httpStatus:r.status,kyberCode:data?.code??null,message:data?.message??(!r.ok?body.slice(0,300):null),requestId:data?.requestId??null,clientIdConfigured:Boolean(clientId),clientIdExposed:false,tokenIn,tokenOut,amountIn,routePreview:routeFound?{amountOut:summary.amountOut,amountInUsd:summary.amountInUsd??null,amountOutUsd:summary.amountOutUsd??null,gas:summary.gas??null,gasUsd:summary.gasUsd??null,routerAddress,routeIdPresent:Boolean(summary.routeID),routeLegs:Array.isArray(summary.route)?summary.route.length:null}:null,note:routeFound?"KyberSwap returned a Base route preview only. No route-build request, calldata, approval, signature, transaction submission, or swap occurred.":"Read-only KyberSwap route preview failed closed. No transaction-building or execution step was attempted."};
+  }catch(e){return {...base,success:false,classification:"KYBERSWAP_BASE_ROUTE_PREVIEW_NETWORK_ERROR",httpStatus:null,message:e?.message||String(e)}}
+  finally{clearTimeout(t)}
+};
+
 const runControlledAtomicForkTest4302 = async (req,res)=>{
   const startedAt=Date.now();
   try{
@@ -6833,7 +6852,8 @@ app.get("/api/zero-x/base/access", zeroXAccessHandler4303);
 app.get("/api/test/zerox/access", zeroXAccessHandler4303);
 app.get("/api/test/zero-x/access", zeroXAccessHandler4303);
 app.get("/api/zero-x/base/production-readiness", async (req,res)=>{const r=await zeroXProductionQuoteReadiness4320();return res.status(r.success?200:409).json(r);});
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.32.0_PRODUCTION_QUOTE_READINESS_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/kyberswap/base/route-readiness", async (req,res)=>{const r=await kyberSwapBaseRouteReadiness4330();return res.status(r.success?200:409).json(r);});
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.33.0_KYBERSWAP_READ_ONLY_ROUTE_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6842,7 +6862,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.32.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.33.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
