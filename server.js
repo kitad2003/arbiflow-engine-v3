@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.0.0";
+const VERSION = "4.1.0";
 
 /*
 =========================================================
@@ -4502,12 +4502,12 @@ async function scanAaveBaseLiquidations({ blocks, maxUsers } = {}) {
   const iface = new (require("ethers").Interface)(AAVE_BORROW_EVENT_ABI);
   const borrowTopic = iface.getEvent("Borrow").topicHash;
   const latestBlock = await provider.getBlockNumber();
-  const blockCount = clampInt(blocks, AAVE_LIQUIDATION_DEFAULT_BLOCKS, 1000, AAVE_LIQUIDATION_MAX_BLOCKS);
+  const blockCount = clampInt(blocks, AAVE_LIQUIDATION_DEFAULT_BLOCKS, 10, AAVE_LIQUIDATION_MAX_BLOCKS);
   const userLimit = clampInt(maxUsers, AAVE_LIQUIDATION_DEFAULT_USERS, 10, AAVE_LIQUIDATION_MAX_USERS);
   const fromBlock = Math.max(0, latestBlock - blockCount + 1);
 
   const logs = [];
-  const chunkSize = 2000;
+  const chunkSize = 10;
   for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
     const end = Math.min(latestBlock, start + chunkSize - 1);
     const chunk = await provider.getLogs({
@@ -4811,7 +4811,7 @@ app.get("/api/hunter/base/scan", async (req, res) => {
 
 /*
 =========================================================
-ARBIFLOW ENGINE 4.0 - MULTI-BOT OPPORTUNITY NETWORK
+ARBIFLOW ENGINE 4.1 - MULTI-BOT OPPORTUNITY NETWORK
 
 Read-only/paper discovery orchestration. Bots do not borrow,
 approve, sign, broadcast, or move funds. They discover and
@@ -4829,7 +4829,8 @@ const BOT_NETWORK = {
     "LIQUIDATION_BOT",
     "LARGE_OPPORTUNITY_BOT",
     "DISLOCATION_BOT",
-    "WATCHER_BOT"
+    "WATCHER_BOT",
+    "AGGREGATOR_INTELLIGENCE_BOT"
   ]
 };
 
@@ -4889,7 +4890,7 @@ async function runTriangleBot() {
 async function runLiquidationBot() {
   const startedAt = Date.now();
   try {
-    const result = await scanAaveBaseLiquidations({ blocks:10000, maxUsers:40 });
+    const result = await scanAaveBaseLiquidations({ blocks:500, maxUsers:40 });
     const opportunities = [
       ...result.liquidationEligible.map(x=>({ ...x, opportunityType:"AAVE_LIQUIDATION", score:botScore({ grossPnlUsd:0, confidence:0.8, depthUsd:x.totalDebtUsd }) })),
       ...result.watchlist.map(x=>({ ...x, opportunityType:"AAVE_LIQUIDATION_WATCH", score:botScore({ grossPnlUsd:0, confidence:0.6, depthUsd:x.totalDebtUsd }) }))
@@ -4915,7 +4916,7 @@ async function runDislocationBot() {
   return { bot:"DISLOCATION_BOT", status:"COMPLETE", observations, candidates:observations.filter(x=>x.rawPositive), errors, elapsedMs:Date.now()-startedAt };
 }
 
-function runWatcherBot(spreadBot, triangleBot, dislocationBot) {
+async function runWatcherBot(spreadBot, triangleBot, dislocationBot) {
   const near = [];
   for (const x of spreadBot.observations || []) {
     const p = Number(x.bestDirection?.grossPnl || -Infinity);
@@ -4930,7 +4931,41 @@ function runWatcherBot(spreadBot, triangleBot, dislocationBot) {
     if (p <= 0 && p >= -2) near.push({ source:"DISLOCATION_BOT", pair:x.pair, grossPnl:p, score:x.score });
   }
   near.sort((a,b)=>b.score-a.score);
-  return { bot:"WATCHER_BOT", status:"COMPLETE", rule:"Keep raw near-misses within $2 of break-even hot for future rechecks.", watchlist:near };
+
+  // Freshly re-quote the strongest near-misses instead of only recording them.
+  const rechecks = [];
+  for (const item of near.slice(0, 8)) {
+    try {
+      if (item.pair) {
+        const [baseToken, quoteToken] = item.pair.split("/");
+        const result = await compareBaseDirectVenues({ baseToken, quoteToken, amount:HUNTER_PROBE_USD });
+        const best = bestDirectDirection({ result });
+        rechecks.push({ ...item, freshGrossPnl:Number(best?.grossPnl ?? NaN), freshGrossRoiPercent:Number(best?.grossRoiPercent ?? NaN), becameRawPositive:Boolean(best && Number(best.grossPnl)>0), recheckedAt:now() });
+      } else if (item.venues) {
+        const q = await quoteHunterTriangle(HUNTER_PROBE_USD, item.venues);
+        rechecks.push({ ...item, freshGrossPnl:Number(q.grossPnl), freshGrossRoiPercent:Number(q.grossRoiPercent), becameRawPositive:Boolean(q.rawPositive), recheckedAt:now() });
+      }
+    } catch (error) {
+      rechecks.push({ ...item, recheckError:error.message, recheckedAt:now() });
+    }
+  }
+  return { bot:"WATCHER_BOT", status:"COMPLETE", rule:"Keep raw near-misses within $2 of break-even hot and immediately fresh-requote the strongest items.", watchlist:near, rechecks, promoted:rechecks.filter(x=>x.becameRawPositive) };
+}
+
+async function runAggregatorIntelligenceBot() {
+  const startedAt = Date.now();
+  const network = NETWORKS.base;
+  const observations = [];
+  const errors = [];
+  for (const [sellToken, buyToken] of HUNTER_DIRECT_PAIRS) {
+    try {
+      const forward = await zeroXPrice({ network, sellToken, buyToken, sellAmount:HUNTER_PROBE_USD });
+      observations.push({ provider:"0x", role:"AGGREGATOR_INTELLIGENCE_ONLY", pair:`${sellToken}/${buyToken}`, sellAmount:HUNTER_PROBE_USD, buyAmount:Number(forward.buyAmount), readOnly:true });
+    } catch (error) {
+      errors.push({ provider:"0x", pair:`${sellToken}/${buyToken}`, error:error.message });
+    }
+  }
+  return { bot:"AGGREGATOR_INTELLIGENCE_BOT", status:errors.length===HUNTER_DIRECT_PAIRS.length?"ERROR":"COMPLETE", rule:"Aggregator quotes are route intelligence only and are never counted as independent DEX venues.", providers:["0x"], observations, errors, elapsedMs:Date.now()-startedAt };
 }
 
 async function runLargeOpportunityBot(triangleBot) {
@@ -4948,12 +4983,12 @@ async function runLargeOpportunityBot(triangleBot) {
 
 async function scanBaseBotNetwork() {
   const startedAt = Date.now();
-  const [spreadBot, triangleBot, liquidationBot, dislocationBot] = await Promise.all([
-    runSpreadBot(), runTriangleBot(), runLiquidationBot(), runDislocationBot()
+  const [spreadBot, triangleBot, liquidationBot, dislocationBot, aggregatorBot] = await Promise.all([
+    runSpreadBot(), runTriangleBot(), runLiquidationBot(), runDislocationBot(), runAggregatorIntelligenceBot()
   ]);
-  const watcherBot = runWatcherBot(spreadBot, triangleBot, dislocationBot);
+  const watcherBot = await runWatcherBot(spreadBot, triangleBot, dislocationBot);
   const largeOpportunityBot = await runLargeOpportunityBot(triangleBot);
-  const bots = [spreadBot, triangleBot, liquidationBot, largeOpportunityBot, dislocationBot, watcherBot];
+  const bots = [spreadBot, triangleBot, liquidationBot, largeOpportunityBot, dislocationBot, watcherBot, aggregatorBot];
   const ranked = [];
   for (const x of spreadBot.candidates || []) ranked.push({ source:"SPREAD_BOT", type:"ARBITRAGE", label:x.pair, score:x.score, rawPositive:true });
   for (const x of triangleBot.candidates || []) ranked.push({ source:"TRIANGLE_BOT", type:"TRIANGULAR_ARBITRAGE", label:HUNTER_TRIANGLE.join("->"), venues:x.venues, score:x.score, rawPositive:true });
@@ -4966,7 +5001,7 @@ async function scanBaseBotNetwork() {
     botNetwork:BOT_NETWORK,
     bots,
     rankedOpportunityQueue:ranked,
-    counts:{ botsRun:bots.length, rankedOpportunities:ranked.length, flashCandidates:flashCandidates.length, watcherItems:watcherBot.watchlist.length },
+    counts:{ botsRun:bots.length, rankedOpportunities:ranked.length, flashCandidates:flashCandidates.length, watcherItems:watcherBot.watchlist.length, watcherRechecks:watcherBot.rechecks.length, watcherPromoted:watcherBot.promoted.length, aggregatorObservations:aggregatorBot.observations.length },
     elapsedMs:Date.now()-startedAt,
     executableOpportunities:0,
     executable:false,
@@ -4974,8 +5009,8 @@ async function scanBaseBotNetwork() {
     liveExecutionEnabled:false,
     minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,
     safety:{ discoveryOnly:true, walletRequired:false, privateKeyRequired:false, flashLoanRequested:false, fundsMoved:false, transactionBroadcast:false },
-    nextValidationRequired:["expand direct DEX and token universe","add aggregator intelligence without treating aggregators as independent venues","calculate collateral/debt-specific liquidation economics","fresh quote confirmation","transaction-level gas estimation","atomic receiver contract","full transaction simulation","on-chain minimum-profit protection"],
-    warning:"Engine 4.0 bot network is read-only discovery. Bots rank observations; they do not execute. A raw-positive quote is not a profitable or executable trade until all costs, freshness, atomic simulation, and minimum-profit protections pass."
+    nextValidationRequired:["expand direct DEX and token universe","add 1inch and Velora/ParaSwap intelligence after provider credentials/interfaces are configured; never treat aggregators as independent venues","calculate collateral/debt-specific liquidation economics","fresh quote confirmation","transaction-level gas estimation","atomic receiver contract","full transaction simulation","on-chain minimum-profit protection"],
+    warning:"Engine 4.1 bot network is read-only discovery. Bots rank observations; they do not execute. A raw-positive quote is not a profitable or executable trade until all costs, freshness, atomic simulation, and minimum-profit protections pass."
   };
 }
 
