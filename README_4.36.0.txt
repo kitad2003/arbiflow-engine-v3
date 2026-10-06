@@ -1,0 +1,2 @@
+ArbiFlow 4.36.0 — Production Deployment Readiness Gate
+Preserves 4.35. Adds read-only /api/production/base/deployment-readiness. Requires configured production executor/owner, verifies Base contract bytecode and immutable OWNER/AAVE_POOL/MORPHO bindings, validates minimum-profit, max-gas and Kyber slippage bounds, and keeps live execution disabled. No deployment, signing, broadcasting, or mainnet fund movement.
