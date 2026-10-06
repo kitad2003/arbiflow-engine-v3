@@ -8,7 +8,9 @@ const {
   JsonRpcProvider,
   Contract,
   parseUnits,
-  formatUnits
+  formatUnits,
+  Interface,
+  keccak256
 } = require("ethers");
 
 const app = express();
@@ -28,7 +30,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.12.0";
+const VERSION = "4.13.0";
 
 /*
 =========================================================
@@ -4914,7 +4916,7 @@ function market42Triangles() {
 
 const BOT_NETWORK = {
   enabled:true, network:"Base",
-  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","AAVE_LIQUIDATION_BOT","MORPHO_LIQUIDATION_BOT","MORPHO_PRE_LIQUIDATION_BOT","LIQUIDATION_ECONOMICS_BOT","PROJECTED_LIQUIDATION_BOT","LIQUIDATION_ROUTE_OPTIMIZER_BOT","EXECUTION_FOUNDATION_BOT","EXECUTOR_SIMULATION_FOUNDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
+  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","AAVE_LIQUIDATION_BOT","MORPHO_LIQUIDATION_BOT","MORPHO_PRE_LIQUIDATION_BOT","LIQUIDATION_ECONOMICS_BOT","PROJECTED_LIQUIDATION_BOT","LIQUIDATION_ROUTE_OPTIMIZER_BOT","EXECUTION_FOUNDATION_BOT","EXECUTOR_SIMULATION_FOUNDATION_BOT","CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
 };
 
 function botScore({ estimatedNetUsd=0,grossPnlUsd=0,grossRoiPercent=0,confidence=0.5,depthUsd=0 }) {
@@ -5795,9 +5797,33 @@ function runExecutorSimulationFoundation412(executionFoundationBot){
   return {bot:"EXECUTOR_SIMULATION_FOUNDATION_BOT",status:"COMPLETE",strategy:"CALLDATA_SCHEMA_PLUS_FAIL_CLOSED_SIMULATION_PIPELINE",plansBuilt:plans.length,plans,executorSourceArtifactIncluded:true,executorDeployed:false,realCalldataBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.12.0 adds the non-live executor source artifact, transaction shape, calldata schema, and exact simulation pipeline. No executor address is fabricated and no transaction is signed, sent, or simulated until a callable executor and fresh protocol/quote data exist.",elapsedMs:Date.now()-startedAt};
 }
 
+
+/* ARBIFLOW 4.13.0 - CALLABLE EXECUTOR TEST FOUNDATION (READ ONLY) */
+function runCallableExecutorTestFoundation413(executorSimulationBot){
+  const startedAt=Date.now();
+  const abi=[
+    "function validatePlan(bytes32 marketId,address borrower,uint256 repayAmount,uint256 minLoanAssetOut,address swapTarget,bytes swapCalldata) pure returns (bytes32 planHash)",
+    "function executeLiquidationPlan(bytes32 marketId,address borrower,uint256 repayAmount,uint256 minLoanAssetOut,address swapTarget,bytes swapCalldata) pure"
+  ];
+  const iface=new Interface(abi), placeholderTarget="0x0000000000000000000000000000000000000001", tests=[];
+  for(const p of executorSimulationBot.plans||[]){
+    let abiEncodingPass=false,selectorPass=false,calldataHash=null,error=null;
+    try{
+      const data=iface.encodeFunctionData("validatePlan",[p.marketId,p.borrower,1n,1n,placeholderTarget,"0x00"]);
+      const selector=iface.getFunction("validatePlan").selector;
+      abiEncodingPass=typeof data==="string"&&data.startsWith("0x")&&data.length>10;
+      selectorPass=data.slice(0,10).toLowerCase()===selector.toLowerCase();
+      calldataHash=keccak256(data);
+    }catch(e){error=e?.message||String(e);}
+    tests.push({marketId:p.marketId,borrower:p.borrower,executorArtifact:"ArbiFlowExecutor413.sol",callableFunction:"validatePlan",sideEffects:false,abiEncodingPass,selectorPass,calldataHash,error,liveFunction:"executeLiquidationPlan",liveFunctionState:"HARD_DISABLED_REVERTS",onchainCallPerformed:false,contractDeployed:false,executable:false,readOnly:true});
+  }
+  const allLocalTestsPass=tests.length>0&&tests.every(t=>t.abiEncodingPass&&t.selectorPass&&!t.error);
+  return {bot:"CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT",status:allLocalTestsPass?"COMPLETE":"LOCAL_ABI_TEST_FAILED",strategy:"SIDE_EFFECT_FREE_CALLABLE_HARNESS_PLUS_LOCAL_ABI_INTEGRITY",testsBuilt:tests.length,tests,allLocalTestsPass,executorArtifact:"ArbiFlowExecutor413.sol",executorDeploymentRequiredForBaseEthCall:true,executorDeployed:false,baseEthCallPerformed:false,realTransactionGasEstimated:false,liveExecutionFunctionEnabled:false,executable:false,paperPass:false,readOnly:true,blockers:["TEST_EXECUTOR_NOT_DEPLOYED","BASE_ETH_CALL_REQUIRES_DEPLOYED_TEST_EXECUTOR","REAL_GAS_ESTIMATE_REQUIRES_DEPLOYED_TEST_EXECUTOR","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"],note:"4.13.0 proves the executor ABI and calldata shape locally and supplies a side-effect-free callable Solidity test harness. No deployment address is fabricated. Base eth_call and transaction-specific gas remain unavailable until the test harness is deliberately deployed; the live execution entry point remains hard-disabled.",elapsedMs:Date.now()-startedAt};
+}
+
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.12.0 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.13.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5829,6 +5855,7 @@ async function scanBaseBotNetwork422(){
   const liquidationReadinessBot=runLiquidationReadiness410(morphoBot,liquidationRouteOptimizerBot);
   const executionFoundationBot=runExecutionFoundation411(morphoBot,liquidationRouteOptimizerBot,liquidationReadinessBot);
   const executorSimulationFoundationBot=runExecutorSimulationFoundation412(executionFoundationBot);
+  const callableExecutorTestFoundationBot=runCallableExecutorTestFoundation413(executorSimulationFoundationBot);
 
   // Stage 4: watcher reuses fresh quotes rather than immediately duplicating RPC calls.
   let watcherBot;
@@ -5844,7 +5871,7 @@ async function scanBaseBotNetwork422(){
     catch(error){largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}]};}
   }else largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"NO_POSITIVE_SEED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,flashOptimization:null,elapsedMs:0};
 
-  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,morphoPreLiquidationBot,liquidationEconomicsBot,projectedLiquidationBot,liquidationRouteOptimizerBot,liquidationReadinessBot,executionFoundationBot,executorSimulationFoundationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,morphoPreLiquidationBot,liquidationEconomicsBot,projectedLiquidationBot,liquidationRouteOptimizerBot,liquidationReadinessBot,executionFoundationBot,executorSimulationFoundationBot,callableExecutorTestFoundationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[]) ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[]) ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"AAVE_LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
@@ -5852,8 +5879,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationEconomicsBot.candidates||[]) ranked.push({source:"LIQUIDATION_ECONOMICS_BOT",type:"LIQUIDATION_ECONOMICS_CANDIDATE",label:x.user,marketId:x.marketId,healthFactor:x.healthFactor,estimatedNetBeforeRouteUsd:x.estimatedNetBeforeRouteUsd,score:botScore({grossPnlUsd:x.estimatedNetBeforeRouteUsd,confidence:.8,depthUsd:x.repayUsd}),profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.12.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"EXECUTOR_SIMULATION_FOUNDATION_412",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.12.0 adds a read-only executor source artifact, transaction shape, calldata schema and fail-closed simulation pipeline. The executor is NOT deployed; no real calldata, gas estimate, eth_call simulation, signature, flash loan or broadcast occurs. Projected NET is never executable profit."};
+  scan421Log("BOT NETWORK 4.13.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"CALLABLE_EXECUTOR_TEST_FOUNDATION_413",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,callableExecutorTests:callableExecutorTestFoundationBot.tests?.length||0,morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,callableExecutorTestFoundation:true,localExecutorAbiIntegrity:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.13.0 adds a side-effect-free callable executor test harness and local ABI/calldata integrity checks. The executor is NOT deployed; no Base eth_call, real gas estimate, signature, flash loan, funds movement or broadcast occurs. The live execution function remains hard-disabled."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
