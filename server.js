@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.39.0";
+const VERSION = "4.40.0";
 
 /*
 =========================================================
@@ -6971,7 +6971,41 @@ const runFinalMainnetSafetyGate4390 = async (req,res)=>{
 };
 app.get("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
 app.post("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.39.0_FINAL_MAINNET_EXECUTION_SAFETY_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+
+// 4.40.0: Live candidate -> exact safety gate pipeline. Discovery is read-only.
+// Only candidates already below HF 1.0 at fresh discovery are promoted into the
+// expensive exact-accrual production safety gate. No mainnet transaction can be
+// signed or broadcast by this pipeline.
+let candidateSafetyPipeline4400Active=false;
+const runCandidateSafetyPipeline4400 = async (req,res)=>{
+  const startedAt=Date.now();
+  if(candidateSafetyPipeline4400Active) return res.status(409).json({success:false,version:VERSION,classification:"CANDIDATE_SAFETY_PIPELINE_ALREADY_RUNNING",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+  candidateSafetyPipeline4400Active=true;
+  try{
+    const readiness=await productionDeploymentReadiness4360();
+    if(!readiness.success) return res.status(409).json({success:false,version:VERSION,classification:"CANDIDATE_SAFETY_PIPELINE_BLOCKED",reason:"PRODUCTION_EXECUTOR_CONFIGURATION_NOT_VALIDATED",readiness,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const morpho=await runMorphoLiquidationBot450();
+    const discovered=[...(morpho?.opportunities||[])].filter(x=>x?.marketId&&x?.user&&Number.isFinite(Number(x.healthFactor))&&Number(x.healthFactor)<1).sort((a,b)=>Number(a.healthFactor)-Number(b.healthFactor));
+    const watch=[...(morpho?.watchlist||[])].filter(x=>x?.marketId&&x?.user).sort((a,b)=>Number(a.healthFactor??99)-Number(b.healthFactor??99));
+    if(!discovered.length) return res.json({success:true,version:VERSION,classification:"LIVE_CANDIDATE_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:false,reason:"NO_DISCOVERY_LIQUIDATABLE_MORPHO_CANDIDATE",discovery:{liquidatableCandidates:0,watchCandidates:watch.length,closestWatch:watch[0]?{marketId:watch[0].marketId,user:watch[0].user,healthFactor:watch[0].healthFactor}:null},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),maxCandidates=Math.max(1,Math.min(3,Number(process.env.ARBIFLOW_SAFETY_PIPELINE_MAX_CANDIDATES||3))),evaluated=[];
+    for(const candidate of discovered.slice(0,maxCandidates)){
+      const reportPath=path.join(__dirname,`candidate-safety-pipeline-4400-${String(candidate.user).slice(2,10)}.json`);
+      try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+      const child=spawnSync(hardhatBin,["run","--no-compile","MainnetSafetyGate4390.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_MAINNET_SAFETY_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_MAINNET_SAFETY_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+      let report=null;try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+      if(child.status!==0||!report?.success){evaluated.push({marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor,classification:"SAFETY_GATE_FAILED_CLOSED",readyForExplicitExecutionApproval:false,error:(child.stderr||child.stdout||"SAFETY_GATE_FAILED").slice(-2000)});continue;}
+      evaluated.push({...report,candidateDiscoveryHealthFactor:candidate.healthFactor,readyForExplicitExecutionApproval:report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED"});
+      if(report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED") break;
+    }
+    const passed=evaluated.find(x=>x.readyForExplicitExecutionApproval===true);
+    return res.json({success:true,version:VERSION,classification:passed?"LIVE_CANDIDATE_SAFETY_PIPELINE_PASSED":"LIVE_CANDIDATE_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:Boolean(passed),candidate:passed||null,evaluated,discovery:{liquidatableCandidates:discovered.length,watchCandidates:watch.length},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,nextGate:passed?"SEPARATE_EXPLICIT_USER_APPROVAL_REQUIRED_BEFORE_ANY_MAINNET_TRANSACTION":"CONTINUE_MONITORING",elapsedMs:Date.now()-startedAt});
+  }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"LIVE_CANDIDATE_SAFETY_PIPELINE_ERROR",error:e?.message||String(e),readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
+  finally{candidateSafetyPipeline4400Active=false;}
+};
+app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
+app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.40.0_LIVE_CANDIDATE_SAFETY_PIPELINE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6980,7 +7014,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.39.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.40.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
