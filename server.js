@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.36.0";
+const VERSION = "4.37.0";
 
 /*
 =========================================================
@@ -6900,7 +6900,7 @@ app.get("/api/zero-x/base/production-readiness", async (req,res)=>{const r=await
 app.get("/api/kyberswap/base/route-readiness", async (req,res)=>{const r=await kyberSwapBaseRouteReadiness4330();return res.status(r.success?200:409).json(r);});
 
 const productionDeploymentReadiness4360 = async ()=>{
- const generatedAt=new Date().toISOString(),executor=(process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS||"").trim(),owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"").trim(),minProfitUsd=Number(process.env.ARBIFLOW_PRODUCTION_MIN_NET_PROFIT_USD||BASE_DIRECT_MIN_NET_PROFIT_USD),maxGas=Number(process.env.ARBIFLOW_PRODUCTION_MAX_ATOMIC_GAS||750000),slippageBps=Number(process.env.ARBIFLOW_KYBER_SLIPPAGE_BPS||50),addr=/^0x[a-fA-F0-9]{40}$/;
+ const generatedAt=new Date().toISOString(),executor=(process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS||"").trim(),owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"0x1d997b6f18bb70da65bab5469eac8c7c2a047394").trim(),minProfitUsd=Number(process.env.ARBIFLOW_PRODUCTION_MIN_NET_PROFIT_USD||BASE_DIRECT_MIN_NET_PROFIT_USD),maxGas=Number(process.env.ARBIFLOW_PRODUCTION_MAX_ATOMIC_GAS||750000),slippageBps=Number(process.env.ARBIFLOW_KYBER_SLIPPAGE_BPS||50),addr=/^0x[a-fA-F0-9]{40}$/;
  const checks={baseRpcConfigured:Boolean(RPC_URLS.base),liveExecutionHardDisabled:true,executorAddressConfigured:addr.test(executor),ownerAddressConfigured:addr.test(owner),minimumNetProfitValid:Number.isFinite(minProfitUsd)&&minProfitUsd>=15,maxAtomicGasValid:Number.isInteger(maxGas)&&maxGas>=561349&&maxGas<=1500000,kyberSlippageValid:Number.isInteger(slippageBps)&&slippageBps>0&&slippageBps<=500,atomicArtifactPresent:fs.existsSync(path.join(__dirname,"artifacts",".arbiflow-contracts","ArbiFlowAtomicExecutor430.sol","ArbiFlowAtomicExecutor430.json"))};
  let chainId=null,executorCodeBytes=0,aaveCodeBytes=0,morphoCodeBytes=0,executorOwner=null,executorAavePool=null,executorMorpho=null,executorBindingsVerified=false;
  try{const provider=new JsonRpcProvider(RPC_URLS.base),net=await provider.getNetwork();chainId=Number(net.chainId);checks.baseChainId=chainId===8453;aaveCodeBytes=Math.max(0,((await provider.getCode(AAVE_V3_BASE.pool)).length-2)/2);morphoCodeBytes=Math.max(0,((await provider.getCode(MORPHO_BLUE_4210)).length-2)/2);checks.aavePoolCodePresent=aaveCodeBytes>0;checks.morphoCodePresent=morphoCodeBytes>0;
@@ -6911,7 +6911,28 @@ const productionDeploymentReadiness4360 = async ()=>{
 
 app.get("/api/kyberswap/base/build-readiness", async (req,res)=>{const r=await kyberSwapBaseBuildReadiness4340();return res.status(r.success?200:409).json(r);});
 app.get("/api/production/base/deployment-readiness", async (req,res)=>{const r=await productionDeploymentReadiness4360();return res.status(r.success?200:409).json(r);});
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.36.0_PRODUCTION_DEPLOYMENT_READINESS_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+
+const productionDeploymentPlan4370 = async ()=>{
+ const owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"0x1d997b6f18bb70da65bab5469eac8c7c2a047394").trim(),addr=/^0x[a-fA-F0-9]{40}$/;
+ const artifactPath=path.join(__dirname,"artifacts",".arbiflow-contracts","ArbiFlowAtomicExecutor430.sol","ArbiFlowAtomicExecutor430.json");
+ const out={version:VERSION,success:false,classification:"PRODUCTION_DEPLOYMENT_PLAN_BLOCKED",readOnly:true,unsignedOnly:true,privateKeyRequired:false,signatureRequested:false,transactionSubmitted:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,chain:"base",chainId:8453,ownerAddress:addr.test(owner)?owner:null,aavePool:AAVE_V3_BASE.pool,morpho:MORPHO_BLUE_4210,constructorArguments:[AAVE_V3_BASE.pool,MORPHO_BLUE_4210,addr.test(owner)?owner:null],generatedAt:new Date().toISOString()};
+ try{
+  if(!addr.test(owner))throw new Error("INVALID_PRODUCTION_OWNER_ADDRESS");
+  if(!fs.existsSync(artifactPath))throw new Error("ATOMIC_ARTIFACT_NOT_FOUND");
+  const artifact=JSON.parse(fs.readFileSync(artifactPath,"utf8"));if(!artifact.bytecode||artifact.bytecode==="0x")throw new Error("ATOMIC_BYTECODE_MISSING");
+  const provider=new JsonRpcProvider(RPC_URLS.base),net=await provider.getNetwork();if(Number(net.chainId)!==8453)throw new Error("BASE_CHAIN_ID_MISMATCH");
+  const factory=new ContractFactory(artifact.abi,artifact.bytecode);
+  const tx=await factory.getDeployTransaction(AAVE_V3_BASE.pool,MORPHO_BLUE_4210,owner);
+  const data=tx.data; if(!data||!/^0x[0-9a-fA-F]+$/.test(data))throw new Error("DEPLOYMENT_DATA_BUILD_FAILED");
+  let estimatedGas=null,gasEstimateError=null;
+  try{estimatedGas=(await provider.estimateGas({from:owner,data})).toString()}catch(e){gasEstimateError=e?.shortMessage||e?.message||String(e)}
+  out.success=true;out.classification="UNSIGNED_PRODUCTION_DEPLOYMENT_PLAN_VALIDATED";out.bytecodePresent=true;out.deploymentDataPresent=true;out.deploymentDataBytes=(data.length-2)/2;out.deploymentDataExposed=false;out.estimatedDeploymentGas=estimatedGas;out.gasEstimateError=gasEstimateError;out.ownerBaseEthBalanceWei=(await provider.getBalance(owner)).toString();out.nextGate="EXPLICIT_USER_APPROVAL_AND_WALLET_SIGNATURE_REQUIRED_FOR_ACTUAL_DEPLOYMENT";
+  return out;
+ }catch(e){out.error=e?.message||String(e);return out}
+};
+
+app.get("/api/production/base/deployment-plan", async (req,res)=>{const r=await productionDeploymentPlan4370();return res.status(r.success?200:409).json(r);});
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.37.0_UNSIGNED_PRODUCTION_DEPLOYMENT_PLAN",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
