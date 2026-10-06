@@ -7,7 +7,19 @@ const url = process.env.BASE_RPC_URL || "";
 // in BaseForkTest4170.js, avoiding Hardhat EDR's Base historical-hardfork issue.
 const hardhat = {
   chainId: 8453,
-  hardfork: "cancun"
+  hardfork: "cancun",
+  // Hardhat/EDR treats calls executed at the remote fork block as historical.
+  // Base (8453) is not included in this Hardhat version's built-in Ethereum
+  // hardfork history, so provide a conservative history for the current fork.
+  // ArbiFlow only forks current Base state; it does not use this mapping to
+  // replay old Base eras.
+  chains: {
+    8453: {
+      hardforkHistory: {
+        cancun: 0
+      }
+    }
+  }
 };
 if (url) hardhat.forking = { url };
 
