@@ -13,49 +13,43 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const ZEROX_API_KEY = process.env.ZEROX_API_KEY || "";
 
-/* =========================================================
-   ARBIFLOW ENGINE 3.0
-   ---------------------------------------------------------
-   PAPER TRADING / DISCOVERY ENGINE
+const VERSION = "3.0.1";
 
-   IMPORTANT:
-   - Uses live market quotes when 0x is configured.
-   - Does NOT execute real blockchain transactions.
-   - Does NOT hold private keys.
-   - Does NOT label paper opportunities as LIVE executable.
-   ========================================================= */
+/*
+=========================================================
+ARBIFLOW ENGINE 3.0.1
 
-const VERSION = "3.0.0";
+PHASE:
+Live market discovery + paper simulation.
+
+THIS BUILD DOES:
+- Live 0x indicative pricing
+- Six selectable networks
+- Round-trip routes
+- Triangular routes
+- Fast discovery
+- Near-pass watchlist
+- Adaptive position sizing
+- Gas estimation
+- Risk score
+- Quality score
+- Fresh confirmation
+- Paper simulation
+- Paper history
+
+THIS BUILD DOES NOT:
+- Hold private keys
+- Connect MetaMask yet
+- Broadcast blockchain transactions
+- Claim paper passes are live executable trades
+- Claim 0x liquidity sources are independent venue arbitrage
+=========================================================
+*/
 
 const SETTINGS = {
   defaultCapital: 500,
 
   discoveryProbeUsd: 25,
-
-  sizePercents: [
-    0.025,
-    0.05,
-    0.075,
-    0.10,
-    0.15,
-    0.20,
-    0.30,
-    0.40,
-    0.50
-  ],
-
-  absoluteSizes: [
-    10,
-    25,
-    50,
-    75,
-    100,
-    150,
-    250,
-    500,
-    750,
-    1000
-  ],
 
   maxTradeCapitalPercent: 0.50,
 
@@ -67,7 +61,7 @@ const SETTINGS = {
 
   quoteFreshnessMs: 15000,
 
-  requestDelayMs: 140,
+  requestDelayMs: 160,
 
   retryDelayMs: 1800,
 
@@ -81,12 +75,39 @@ const SETTINGS = {
 
   maxAutoRiskScore: 55,
 
-  maxAutoTradesPerCycle: 1
+  maxAutoTradesPerCycle: 1,
+
+  optimizationPercents: [
+    0.025,
+    0.05,
+    0.075,
+    0.10,
+    0.15,
+    0.20,
+    0.30,
+    0.40,
+    0.50
+  ],
+
+  optimizationFixedSizes: [
+    10,
+    25,
+    50,
+    75,
+    100,
+    150,
+    250,
+    500,
+    750,
+    1000
+  ]
 };
 
-/* =========================================================
-   NETWORKS / TOKENS
-   ========================================================= */
+/*
+=========================================================
+NETWORK CONFIGURATION
+=========================================================
+*/
 
 const NETWORKS = {
   base: {
@@ -95,22 +116,27 @@ const NETWORKS = {
     chainId: 8453,
     gasSymbol: "ETH",
     wrappedNative: "WETH",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        address:
+          "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         decimals: 6,
         stable: true
       },
+
       WETH: {
         symbol: "WETH",
-        address: "0x4200000000000000000000000000000000000006",
+        address:
+          "0x4200000000000000000000000000000000000006",
         decimals: 18
       },
+
       DAI: {
         symbol: "DAI",
-        address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+        address:
+          "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
         decimals: 18,
         stable: true
       }
@@ -123,28 +149,35 @@ const NETWORKS = {
     chainId: 42161,
     gasSymbol: "ETH",
     wrappedNative: "WETH",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        address:
+          "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
         decimals: 6,
         stable: true
       },
+
       USDT: {
         symbol: "USDT",
-        address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+        address:
+          "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
         decimals: 6,
         stable: true
       },
+
       WETH: {
         symbol: "WETH",
-        address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+        address:
+          "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
         decimals: 18
       },
+
       ARB: {
         symbol: "ARB",
-        address: "0x912CE59144191C1204E64559FE8253a0e49E6548",
+        address:
+          "0x912CE59144191C1204E64559FE8253a0e49E6548",
         decimals: 18
       }
     }
@@ -156,28 +189,35 @@ const NETWORKS = {
     chainId: 10,
     gasSymbol: "ETH",
     wrappedNative: "WETH",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        address:
+          "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
         decimals: 6,
         stable: true
       },
+
       USDT: {
         symbol: "USDT",
-        address: "0x94b008aA00579c1307B0EF2c499aD98a8cE58e58",
+        address:
+          "0x94b008aA00579c1307B0EF2c499aD98a8cE58e58",
         decimals: 6,
         stable: true
       },
+
       WETH: {
         symbol: "WETH",
-        address: "0x4200000000000000000000000000000000000006",
+        address:
+          "0x4200000000000000000000000000000000000006",
         decimals: 18
       },
+
       OP: {
         symbol: "OP",
-        address: "0x4200000000000000000000000000000000000042",
+        address:
+          "0x4200000000000000000000000000000000000042",
         decimals: 18
       }
     }
@@ -189,23 +229,28 @@ const NETWORKS = {
     chainId: 137,
     gasSymbol: "POL",
     wrappedNative: "WPOL",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        address:
+          "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
         decimals: 6,
         stable: true
       },
+
       USDT: {
         symbol: "USDT",
-        address: "0xc2132D05D31c914a87C6611C10748AaCBaF9A6b",
+        address:
+          "0xc2132D05D31c914a87C6611C10748AaCBaF9A6b",
         decimals: 6,
         stable: true
       },
+
       WPOL: {
         symbol: "WPOL",
-        address: "0x0d500B1d8E8eD2b9D3a73C1b9bA4C7cC0f4D3C49",
+        address:
+          "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
         decimals: 18
       }
     }
@@ -217,28 +262,35 @@ const NETWORKS = {
     chainId: 1,
     gasSymbol: "ETH",
     wrappedNative: "WETH",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        address:
+          "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
         decimals: 6,
         stable: true
       },
+
       USDT: {
         symbol: "USDT",
-        address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        address:
+          "0xdAC17F958D2ee523a2206206994597C13D831ec7",
         decimals: 6,
         stable: true
       },
+
       WETH: {
         symbol: "WETH",
-        address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        address:
+          "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         decimals: 18
       },
+
       DAI: {
         symbol: "DAI",
-        address: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+        address:
+          "0x6B175474E89094C44Da98b954EedeAC495271d0F",
         decimals: 18,
         stable: true
       }
@@ -251,32 +303,55 @@ const NETWORKS = {
     chainId: 56,
     gasSymbol: "BNB",
     wrappedNative: "WBNB",
-    enabled: true,
+
     tokens: {
       USDC: {
         symbol: "USDC",
-        address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+        address:
+          "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
         decimals: 18,
         stable: true
       },
+
       USDT: {
         symbol: "USDT",
-        address: "0x55d398326f99059fF775485246999027B3197955",
+        address:
+          "0x55d398326f99059fF775485246999027B3197955",
         decimals: 18,
         stable: true
       },
+
       WBNB: {
         symbol: "WBNB",
-        address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        address:
+          "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
         decimals: 18
       }
     }
   }
 };
 
-/* =========================================================
-   STATE
-   ========================================================= */
+/*
+=========================================================
+ACCOUNT
+=========================================================
+*/
+
+const account = {
+  startingBalance: SETTINGS.defaultCapital,
+
+  balance: SETTINGS.defaultCapital,
+
+  realizedPnL: 0,
+
+  simulatedTrades: 0
+};
+
+/*
+=========================================================
+SCANNER STATE
+=========================================================
+*/
 
 const state = {
   startedAt: new Date().toISOString(),
@@ -287,11 +362,11 @@ const state = {
 
   scanPhase: "IDLE",
 
+  progressPercent: 0,
+
   currentNetwork: null,
 
   currentRoute: null,
-
-  progressPercent: 0,
 
   routesGenerated: 0,
 
@@ -303,7 +378,7 @@ const state = {
 
   testsCompleted: 0,
 
-  spreadsDetected: 0,
+  positiveGrossDetected: 0,
 
   watchlistFound: 0,
 
@@ -325,28 +400,25 @@ const state = {
 
   lastError: null,
 
-  errors: [],
-
-  results: [],
+  discovery: [],
 
   watchlist: [],
 
   candidates: [],
 
+  optimized: [],
+
   confirmed: [],
 
   paperPass: [],
 
+  rejected: [],
+
   paperExecuted: [],
 
-  history: []
-};
+  history: [],
 
-const account = {
-  startingBalance: SETTINGS.defaultCapital,
-  balance: SETTINGS.defaultCapital,
-  realizedPnL: 0,
-  simulatedTrades: 0
+  errors: []
 };
 
 let selectedNetworks = [
@@ -358,131 +430,227 @@ let selectedNetworks = [
   "bnb"
 ];
 
-/* =========================================================
-   UTILITIES
-   ========================================================= */
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function round(value, decimals = 6) {
-  const n = Number(value);
-
-  if (!Number.isFinite(n)) {
-    return 0;
-  }
-
-  const factor = 10 ** decimals;
-
-  return Math.round(n * factor) / factor;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
+/*
+=========================================================
+UTILITIES
+=========================================================
+*/
 
 function now() {
   return new Date().toISOString();
 }
 
+function sleep(ms) {
+  return new Promise(resolve =>
+    setTimeout(resolve, ms)
+  );
+}
+
+function round(value, decimals = 6) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  const factor =
+    10 ** decimals;
+
+  return (
+    Math.round(number * factor) /
+    factor
+  );
+}
+
+function clamp(
+  value,
+  minimum,
+  maximum
+) {
+  return Math.max(
+    minimum,
+    Math.min(maximum, value)
+  );
+}
+
 function unique(values) {
-  return [...new Set(values)];
-}
-
-function toBaseUnits(amount, decimals) {
-  const numeric = Number(amount);
-
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    throw new Error("Invalid token amount.");
-  }
-
-  const text = numeric.toFixed(decimals);
-
-  const parts = text.split(".");
-
-  const whole = parts[0];
-
-  const fraction = (parts[1] || "").padEnd(decimals, "0");
-
-  const combined = `${whole}${fraction}`
-    .replace(/^0+/, "") || "0";
-
-  return BigInt(combined).toString();
-}
-
-function fromBaseUnits(amount, decimals) {
-  const raw = BigInt(amount || "0");
-
-  const divisor = 10n ** BigInt(decimals);
-
-  const whole = raw / divisor;
-
-  const fraction = raw % divisor;
-
-  const fractionString = fraction
-    .toString()
-    .padStart(decimals, "0")
-    .replace(/0+$/, "");
-
-  if (!fractionString) {
-    return Number(whole.toString());
-  }
-
-  return Number(`${whole.toString()}.${fractionString}`);
+  return [
+    ...new Set(values)
+  ];
 }
 
 function getNetwork(key) {
   return NETWORKS[key] || null;
 }
 
-function getEnabledNetworks() {
+function getSelectedNetworks() {
   return selectedNetworks
     .map(getNetwork)
     .filter(Boolean);
 }
 
-function networkSummary(network) {
-  return {
-    key: network.key,
-    name: network.name,
-    chainId: network.chainId,
-    gasSymbol: network.gasSymbol,
-    wrappedNative: network.wrappedNative,
-    selected: selectedNetworks.includes(network.key),
-    tokens: Object.keys(network.tokens)
-  };
+function tokenToBaseUnits(
+  amount,
+  decimals
+) {
+  const numeric =
+    Number(amount);
+
+  if (
+    !Number.isFinite(numeric) ||
+    numeric <= 0
+  ) {
+    throw new Error(
+      "Invalid token amount."
+    );
+  }
+
+  /*
+  Avoid floating-point multiplication
+  against very large 18-decimal values.
+  */
+
+  let text =
+    numeric.toFixed(decimals);
+
+  let [
+    whole,
+    fraction = ""
+  ] = text.split(".");
+
+  fraction =
+    fraction.padEnd(
+      decimals,
+      "0"
+    );
+
+  const combined =
+    `${whole}${fraction}`
+      .replace(/^0+/, "") ||
+    "0";
+
+  return BigInt(
+    combined
+  ).toString();
 }
 
-function resetScanCollections() {
-  state.results = [];
-  state.watchlist = [];
-  state.candidates = [];
-  state.confirmed = [];
-  state.paperPass = [];
+function baseUnitsToToken(
+  rawAmount,
+  decimals
+) {
+  const raw =
+    BigInt(
+      rawAmount || "0"
+    );
+
+  const divisor =
+    10n **
+    BigInt(decimals);
+
+  const whole =
+    raw / divisor;
+
+  const remainder =
+    raw % divisor;
+
+  let fraction =
+    remainder
+      .toString()
+      .padStart(
+        decimals,
+        "0"
+      )
+      .replace(
+        /0+$/,
+        ""
+      );
+
+  if (!fraction) {
+    return Number(
+      whole.toString()
+    );
+  }
+
+  return Number(
+    `${whole.toString()}.${fraction}`
+  );
+}
+
+function resetScan() {
+  state.progressPercent = 0;
+
+  state.currentNetwork = null;
+  state.currentRoute = null;
 
   state.routesGenerated = 0;
   state.routesScreened = 0;
+
   state.testsPlanned = 0;
   state.testsAttempted = 0;
   state.testsCompleted = 0;
-  state.spreadsDetected = 0;
+
+  state.positiveGrossDetected = 0;
+
   state.watchlistFound = 0;
   state.candidatesFound = 0;
   state.optimizedFound = 0;
   state.confirmedFound = 0;
   state.paperPassFound = 0;
 
-  state.progressPercent = 0;
-  state.currentNetwork = null;
-  state.currentRoute = null;
-  state.errors = [];
   state.lastError = null;
+
+  state.discovery = [];
+  state.watchlist = [];
+  state.candidates = [];
+  state.optimized = [];
+  state.confirmed = [];
+  state.paperPass = [];
+  state.rejected = [];
+  state.errors = [];
 }
 
-/* =========================================================
-   0x LIVE PRICE PROVIDER
-   ========================================================= */
+/*
+=========================================================
+NETWORK SUMMARY
+=========================================================
+*/
+
+function networkSummary(
+  network
+) {
+  return {
+    key:
+      network.key,
+
+    name:
+      network.name,
+
+    chainId:
+      network.chainId,
+
+    gasSymbol:
+      network.gasSymbol,
+
+    wrappedNative:
+      network.wrappedNative,
+
+    selected:
+      selectedNetworks.includes(
+        network.key
+      ),
+
+    tokens:
+      Object.keys(
+        network.tokens
+      )
+  };
+}
+
+/*
+=========================================================
+0x PRICE PROVIDER
+=========================================================
+*/
 
 async function zeroXPrice({
   network,
@@ -496,64 +664,107 @@ async function zeroXPrice({
     );
   }
 
-  const sell = network.tokens[sellToken];
-  const buy = network.tokens[buyToken];
+  const sell =
+    network.tokens[
+      sellToken
+    ];
+
+  const buy =
+    network.tokens[
+      buyToken
+    ];
 
   if (!sell || !buy) {
     throw new Error(
-      `Unsupported token pair ${sellToken}/${buyToken} on ${network.name}.`
+      `Unsupported ${sellToken}/${buyToken} pair on ${network.name}.`
     );
   }
 
-  const sellAmountBase = toBaseUnits(
-    sellAmount,
-    sell.decimals
-  );
+  const sellAmountBase =
+    tokenToBaseUnits(
+      sellAmount,
+      sell.decimals
+    );
 
-  const params = new URLSearchParams({
-    chainId: String(network.chainId),
-    sellToken: sell.address,
-    buyToken: buy.address,
-    sellAmount: sellAmountBase,
-    slippageBps: String(SETTINGS.slippageBps)
-  });
+  const params =
+    new URLSearchParams({
+      chainId:
+        String(
+          network.chainId
+        ),
+
+      sellToken:
+        sell.address,
+
+      buyToken:
+        buy.address,
+
+      sellAmount:
+        sellAmountBase,
+
+      slippageBps:
+        String(
+          SETTINGS.slippageBps
+        )
+    });
 
   const url =
-    `https://api.0x.org/swap/allowance-holder/price?${params.toString()}`;
+    "https://api.0x.org" +
+    "/swap/allowance-holder/price?" +
+    params.toString();
 
-  let lastError = null;
+  let finalError = null;
 
   for (
     let attempt = 0;
-    attempt <= SETTINGS.maxRetries;
+    attempt <=
+      SETTINGS.maxRetries;
     attempt += 1
   ) {
     try {
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "0x-api-key": ZEROX_API_KEY,
-          "0x-version": "v2",
-          "Content-Type": "application/json"
-        }
-      });
+      const response =
+        await fetch(
+          url,
+          {
+            method: "GET",
 
-      if (response.status === 429) {
-        state.rateLimited = true;
+            headers: {
+              "0x-api-key":
+                ZEROX_API_KEY,
+
+              "0x-version":
+                "v2",
+
+              "Content-Type":
+                "application/json"
+            }
+          }
+        );
+
+      if (
+        response.status === 429
+      ) {
+        state.rateLimited =
+          true;
 
         await sleep(
-          SETTINGS.retryDelayMs * (attempt + 1)
+          SETTINGS.retryDelayMs *
+          (attempt + 1)
         );
 
         continue;
       }
 
-      const text = await response.text();
+      const body =
+        await response.text();
 
       let data = {};
 
       try {
-        data = text ? JSON.parse(text) : {};
+        data =
+          body
+            ? JSON.parse(body)
+            : {};
       } catch {
         data = {};
       }
@@ -562,115 +773,226 @@ async function zeroXPrice({
         const message =
           data.reason ||
           data.message ||
-          data.validationErrors?.[0]?.reason ||
+          data.validationErrors?.[0]
+            ?.reason ||
           `0x HTTP ${response.status}`;
 
-        throw new Error(message);
+        throw new Error(
+          message
+        );
       }
 
-      state.rateLimited = false;
-
-      const buyAmountBase =
-        data.buyAmount ||
-        data.minBuyAmount ||
-        "0";
-
-      const buyAmount = fromBaseUnits(
-        buyAmountBase,
-        buy.decimals
-      );
-
-      const gas = Number(data.gas || 0);
-
-      const gasPrice = Number(data.gasPrice || 0);
-
-      let networkFeeNative = 0;
-
-      if (data.totalNetworkFee) {
-        networkFeeNative =
-          Number(data.totalNetworkFee) / 1e18;
-      } else if (gas && gasPrice) {
-        networkFeeNative =
-          (gas * gasPrice) / 1e18;
+      if (
+        data.liquidityAvailable ===
+        false
+      ) {
+        throw new Error(
+          "No liquidity available."
+        );
       }
 
-      state.lastSuccessfulQuote = {
-        at: now(),
-        network: network.name,
-        sellToken,
-        buyToken,
-        sellAmount: round(sellAmount, 8),
-        buyAmount: round(buyAmount, 8)
-      };
+      if (!data.buyAmount) {
+        throw new Error(
+          "0x returned no buyAmount."
+        );
+      }
+
+      const buyAmount =
+        baseUnitsToToken(
+          data.buyAmount,
+          buy.decimals
+        );
+
+      let networkFeeNative =
+        0;
+
+      /*
+      Current 0x responses can expose
+      totalNetworkFee directly.
+      */
+
+      if (
+        data.totalNetworkFee
+      ) {
+        networkFeeNative =
+          Number(
+            data.totalNetworkFee
+          ) / 1e18;
+      } else {
+        const gas =
+          Number(
+            data.gas || 0
+          );
+
+        const gasPrice =
+          Number(
+            data.gasPrice || 0
+          );
+
+        if (
+          gas > 0 &&
+          gasPrice > 0
+        ) {
+          networkFeeNative =
+            (
+              gas *
+              gasPrice
+            ) /
+            1e18;
+        }
+      }
+
+      state.rateLimited =
+        false;
+
+      state.lastSuccessfulQuote =
+        {
+          at: now(),
+
+          network:
+            network.name,
+
+          chainId:
+            network.chainId,
+
+          sellToken,
+
+          buyToken,
+
+          sellAmount:
+            round(
+              sellAmount,
+              8
+            ),
+
+          buyAmount:
+            round(
+              buyAmount,
+              8
+            )
+        };
 
       return {
-        provider: "0x",
-        venue: "0x Aggregated Liquidity",
-        network: network.name,
-        chainId: network.chainId,
+        provider:
+          "0x Swap API",
+
+        liquidityModel:
+          "AGGREGATED",
+
+        network:
+          network.name,
+
+        networkKey:
+          network.key,
+
+        chainId:
+          network.chainId,
+
         sellToken,
+
         buyToken,
-        sellAmount: Number(sellAmount),
+
+        sellAmount:
+          Number(
+            sellAmount
+          ),
+
         buyAmount,
+
         networkFeeNative,
-        gasSymbol: network.gasSymbol,
-        timestamp: Date.now()
+
+        gasSymbol:
+          network.gasSymbol,
+
+        quoteTimestamp:
+          Date.now()
       };
     } catch (error) {
-      lastError = error;
+      finalError =
+        error;
 
-      if (attempt < SETTINGS.maxRetries) {
+      if (
+        attempt <
+        SETTINGS.maxRetries
+      ) {
         await sleep(
-          SETTINGS.retryDelayMs * (attempt + 1)
+          SETTINGS.retryDelayMs *
+          (attempt + 1)
         );
       }
     }
   }
 
-  throw lastError || new Error("0x quote failed.");
+  throw (
+    finalError ||
+    new Error(
+      "0x price request failed."
+    )
+  );
 }
 
-/* =========================================================
-   GAS ESTIMATION
-   ========================================================= */
+/*
+=========================================================
+NATIVE GAS TOKEN USD VALUE
+=========================================================
+*/
 
-const nativeUsdCache = new Map();
+const nativePriceCache =
+  new Map();
 
-async function getNativeUsd(network) {
+async function getNativeUsd(
+  network
+) {
   const cached =
-    nativeUsdCache.get(network.key);
+    nativePriceCache.get(
+      network.key
+    );
 
   if (
     cached &&
-    Date.now() - cached.timestamp < 120000
+    Date.now() -
+      cached.timestamp <
+      120000
   ) {
     return cached.price;
   }
 
-  const wrappedSymbol =
+  const wrapped =
     network.wrappedNative;
 
   if (
-    !network.tokens[wrappedSymbol] ||
+    !network.tokens[wrapped] ||
     !network.tokens.USDC
   ) {
     return 0;
   }
 
   try {
-    const quote = await zeroXPrice({
-      network,
-      sellToken: wrappedSymbol,
-      buyToken: "USDC",
-      sellAmount: 1
-    });
+    const quote =
+      await zeroXPrice({
+        network,
 
-    const price = quote.buyAmount;
+        sellToken:
+          wrapped,
 
-    nativeUsdCache.set(network.key, {
-      price,
-      timestamp: Date.now()
-    });
+        buyToken:
+          "USDC",
+
+        sellAmount:
+          1
+      });
+
+    const price =
+      quote.buyAmount;
+
+    nativePriceCache.set(
+      network.key,
+      {
+        price,
+        timestamp:
+          Date.now()
+      }
+    );
 
     return price;
   } catch {
@@ -678,16 +1000,20 @@ async function getNativeUsd(network) {
   }
 }
 
-async function gasUsdForQuote(
+async function quoteGasUsd(
   network,
   quote
 ) {
-  if (!quote.networkFeeNative) {
+  if (
+    !quote.networkFeeNative
+  ) {
     return 0;
   }
 
   const nativeUsd =
-    await getNativeUsd(network);
+    await getNativeUsd(
+      network
+    );
 
   if (!nativeUsd) {
     return 0;
@@ -700,79 +1026,136 @@ async function gasUsdForQuote(
   );
 }
 
-/* =========================================================
-   ROUTE GENERATION
-   ========================================================= */
+/*
+=========================================================
+ROUTE GENERATION
+=========================================================
+*/
 
-function generateRoutes(network) {
+function generateRoutes(
+  network
+) {
+  const symbols =
+    Object.keys(
+      network.tokens
+    );
+
   const routes = [];
 
-  const symbols =
-    Object.keys(network.tokens);
-
-  if (!symbols.includes("USDC")) {
+  if (
+    !symbols.includes(
+      "USDC"
+    )
+  ) {
     return routes;
   }
 
   /*
-    Direct round trips:
-    USDC -> TOKEN -> USDC
+  ROUND TRIPS
+
+  USDC -> TOKEN -> USDC
   */
 
-  for (const token of symbols) {
-    if (token === "USDC") {
+  for (
+    const token of symbols
+  ) {
+    if (
+      token === "USDC"
+    ) {
       continue;
     }
 
     routes.push({
-      type: "ROUND_TRIP",
-      network: network.key,
-      legs: [
-        ["USDC", token],
-        [token, "USDC"]
-      ],
+      id:
+        `${network.key}-rt-${token}`,
+
+      type:
+        "ROUND_TRIP",
+
+      networkKey:
+        network.key,
+
       label:
-        `USDC → ${token} → USDC`
+        `USDC → ${token} → USDC`,
+
+      legs: [
+        [
+          "USDC",
+          token
+        ],
+
+        [
+          token,
+          "USDC"
+        ]
+      ]
     });
   }
 
   /*
-    Triangular:
-    USDC -> TOKEN A -> TOKEN B -> USDC
+  TRIANGLES
+
+  USDC -> A -> B -> USDC
   */
 
-  const intermediate =
+  const middleTokens =
     symbols.filter(
-      symbol => symbol !== "USDC"
+      symbol =>
+        symbol !==
+        "USDC"
     );
 
   for (
-    let i = 0;
-    i < intermediate.length;
-    i += 1
+    let a = 0;
+    a <
+      middleTokens.length;
+    a += 1
   ) {
     for (
-      let j = 0;
-      j < intermediate.length;
-      j += 1
+      let b = 0;
+      b <
+        middleTokens.length;
+      b += 1
     ) {
-      if (i === j) {
+      if (a === b) {
         continue;
       }
 
-      const a = intermediate[i];
-      const b = intermediate[j];
+      const tokenA =
+        middleTokens[a];
+
+      const tokenB =
+        middleTokens[b];
 
       routes.push({
-        type: "TRIANGULAR",
-        network: network.key,
-        legs: [
-          ["USDC", a],
-          [a, b],
-          [b, "USDC"]
-        ],
+        id:
+          `${network.key}-tri-${tokenA}-${tokenB}`,
+
+        type:
+          "TRIANGULAR",
+
+        networkKey:
+          network.key,
+
         label:
-          `USDC → ${a} → ${b} → USDC`
+          `USDC → ${tokenA} → ${tokenB} → USDC`,
+
+        legs: [
+          [
+            "USDC",
+            tokenA
+          ],
+
+          [
+            tokenA,
+            tokenB
+          ],
+
+          [
+            tokenB,
+            "USDC"
+          ]
+        ]
       });
     }
   }
@@ -780,9 +1163,11 @@ function generateRoutes(network) {
   return routes;
 }
 
-/* =========================================================
-   ROUTE QUOTING
-   ========================================================= */
+/*
+=========================================================
+ROUTE QUOTE
+=========================================================
+*/
 
 async function quoteRoute({
   network,
@@ -790,50 +1175,82 @@ async function quoteRoute({
   tradeSize
 }) {
   let currentAmount =
-    Number(tradeSize);
+    Number(
+      tradeSize
+    );
 
   let totalGasUsd = 0;
 
   const legs = [];
 
   for (
-    let i = 0;
-    i < route.legs.length;
-    i += 1
+    let index = 0;
+    index <
+      route.legs.length;
+    index += 1
   ) {
-    const [sellToken, buyToken] =
-      route.legs[i];
+    const [
+      sellToken,
+      buyToken
+    ] =
+      route.legs[index];
 
     await sleep(
       SETTINGS.requestDelayMs
     );
 
-    const quote = await zeroXPrice({
-      network,
-      sellToken,
-      buyToken,
-      sellAmount: currentAmount
-    });
+    const quote =
+      await zeroXPrice({
+        network,
+
+        sellToken,
+
+        buyToken,
+
+        sellAmount:
+          currentAmount
+      });
 
     const gasUsd =
-      await gasUsdForQuote(
+      await quoteGasUsd(
         network,
         quote
       );
 
-    totalGasUsd += gasUsd;
+    totalGasUsd +=
+      gasUsd;
 
     legs.push({
-      leg: i + 1,
-      venue: quote.venue,
+      leg:
+        index + 1,
+
+      provider:
+        quote.provider,
+
+      liquidityModel:
+        quote.liquidityModel,
+
       sellToken,
+
       buyToken,
+
       sellAmount:
-        round(currentAmount, 8),
+        round(
+          currentAmount,
+          8
+        ),
+
       buyAmount:
-        round(quote.buyAmount, 8),
+        round(
+          quote.buyAmount,
+          8
+        ),
+
       estimatedGasUsd:
-        round(gasUsd, 6)
+        round(
+          gasUsd,
+          6
+        )
     });
 
     currentAmount =
@@ -841,51 +1258,92 @@ async function quoteRoute({
   }
 
   const finalValue =
-    Number(currentAmount);
+    Number(
+      currentAmount
+    );
 
   const gross =
-    finalValue - tradeSize;
-
-  const estimatedGasUsd =
-    totalGasUsd;
+    finalValue -
+    Number(
+      tradeSize
+    );
 
   const estimatedNet =
-    gross - estimatedGasUsd;
+    gross -
+    totalGasUsd;
 
   const roiPercent =
     tradeSize > 0
-      ? (estimatedNet / tradeSize) * 100
+      ? (
+          estimatedNet /
+          tradeSize
+        ) *
+        100
       : 0;
 
   return {
-    network: network.name,
-    networkKey: network.key,
-    chainId: network.chainId,
-    gasSymbol: network.gasSymbol,
+    routeId:
+      route.id,
 
-    routeType: route.type,
-    route: route.label,
+    network:
+      network.name,
+
+    networkKey:
+      network.key,
+
+    chainId:
+      network.chainId,
+
+    gasSymbol:
+      network.gasSymbol,
+
+    routeType:
+      route.type,
+
+    route:
+      route.label,
 
     tradeSize:
-      round(tradeSize, 6),
+      round(
+        tradeSize,
+        6
+      ),
 
     startingValue:
-      round(tradeSize, 6),
+      round(
+        tradeSize,
+        6
+      ),
 
     finalValue:
-      round(finalValue, 6),
+      round(
+        finalValue,
+        6
+      ),
 
     gross:
-      round(gross, 6),
+      round(
+        gross,
+        6
+      ),
 
     estimatedGasUsd:
-      round(estimatedGasUsd, 6),
+      round(
+        totalGasUsd,
+        6
+      ),
 
     estimatedNet:
-      round(estimatedNet, 6),
+      round(
+        estimatedNet,
+        6
+      ),
 
     roiPercent:
-      round(roiPercent, 6),
+      round(
+        roiPercent,
+        6
+      ),
 
     legs,
 
@@ -897,24 +1355,41 @@ async function quoteRoute({
   };
 }
 
-/* =========================================================
-   QUALITY / RISK
-   ========================================================= */
+/*
+=========================================================
+RISK
+=========================================================
+*/
 
-function calculateRisk(result) {
-  let score = 15;
+function calculateRisk(
+  result
+) {
+  let score = 10;
 
   if (
-    result.routeType === "TRIANGULAR"
+    result.routeType ===
+    "TRIANGULAR"
   ) {
     score += 15;
   }
 
-  if (result.legs.length >= 3) {
+  if (
+    result.legs.length >= 3
+  ) {
     score += 10;
   }
 
-  if (result.tradeSize >= 500) {
+  if (
+    result.tradeSize >=
+    500
+  ) {
+    score += 10;
+  }
+
+  if (
+    result.tradeSize >=
+    1000
+  ) {
     score += 10;
   }
 
@@ -922,24 +1397,38 @@ function calculateRisk(result) {
     result.estimatedGasUsd >
     Math.max(
       0.25,
-      Math.abs(result.estimatedNet)
+      Math.abs(
+        result.estimatedNet
+      )
     )
   ) {
     score += 15;
   }
 
-  if (result.roiPercent < 0) {
+  if (
+    result.roiPercent < 0
+  ) {
     score += 10;
   }
 
-  score = clamp(score, 0, 100);
+  score =
+    clamp(
+      score,
+      0,
+      100
+    );
 
-  let level = "LOW";
+  let level =
+    "LOW";
 
   if (score >= 65) {
-    level = "HIGH";
-  } else if (score >= 40) {
-    level = "MEDIUM";
+    level =
+      "HIGH";
+  } else if (
+    score >= 40
+  ) {
+    level =
+      "MEDIUM";
   }
 
   return {
@@ -948,45 +1437,73 @@ function calculateRisk(result) {
   };
 }
 
-function calculateQuality(result) {
-  let score = 50;
+/*
+=========================================================
+QUALITY SCORE
+=========================================================
+*/
 
-  if (result.estimatedNet > 0) {
-    score += 15;
-  }
-
-  if (result.roiPercent > 0.10) {
-    score += 10;
-  }
-
-  if (result.roiPercent > 0.25) {
-    score += 10;
-  }
+function calculateQuality(
+  result
+) {
+  let score = 40;
 
   if (
-    result.estimatedGasUsd <
-    Math.max(
-      0.05,
-      result.estimatedNet * 0.25
-    )
+    result.gross > 0
   ) {
     score += 10;
   }
 
   if (
-    result.routeType === "TRIANGULAR"
+    result.estimatedNet > 0
+  ) {
+    score += 20;
+  }
+
+  if (
+    result.roiPercent >=
+    0.05
+  ) {
+    score += 10;
+  }
+
+  if (
+    result.roiPercent >=
+    0.10
+  ) {
+    score += 10;
+  }
+
+  if (
+    result.estimatedNet <
+    0
+  ) {
+    score -= 25;
+  }
+
+  if (
+    result.routeType ===
+    "TRIANGULAR"
   ) {
     score -= 5;
   }
 
-  if (result.estimatedNet < 0) {
-    score -= 25;
-  }
-
-  return clamp(score, 0, 100);
+  return clamp(
+    score,
+    0,
+    100
+  );
 }
 
-function classifyDiscovery(result) {
+/*
+=========================================================
+STATUS CLASSIFICATION
+=========================================================
+*/
+
+function classify(
+  result
+) {
   if (
     result.estimatedNet >=
       SETTINGS.minimumPaperPassUsd &&
@@ -1006,40 +1523,173 @@ function classifyDiscovery(result) {
   return "REJECTED";
 }
 
-/* =========================================================
-   POSITION SIZE OPTIMIZATION
-   ========================================================= */
+function enrichResult(
+  result
+) {
+  const risk =
+    calculateRisk(
+      result
+    );
+
+  const quality =
+    calculateQuality(
+      result
+    );
+
+  return {
+    ...result,
+
+    riskScore:
+      risk.score,
+
+    riskLevel:
+      risk.level,
+
+    qualityScore:
+      quality,
+
+    status:
+      classify(
+        result
+      )
+  };
+}
+
+/*
+=========================================================
+POSITION SIZE GENERATION
+=========================================================
+*/
 
 function generateTradeSizes() {
   const capital =
     account.balance;
 
-  const maxAllowed =
+  const maximum =
     capital *
     SETTINGS.maxTradeCapitalPercent;
 
-  const percentSizes =
-    SETTINGS.sizePercents.map(
-      percent =>
-        round(capital * percent, 2)
-    );
+  const percentageSizes =
+    SETTINGS.optimizationPercents
+      .map(
+        percent =>
+          round(
+            capital *
+            percent,
+            2
+          )
+      );
 
-  const absolute =
-    SETTINGS.absoluteSizes.filter(
-      size => size <= maxAllowed
-    );
+  const fixedSizes =
+    SETTINGS
+      .optimizationFixedSizes
+      .filter(
+        size =>
+          size <=
+          maximum
+      );
 
   return unique([
-    ...percentSizes,
-    ...absolute
+    ...percentageSizes,
+    ...fixedSizes
   ])
     .filter(
       size =>
         size > 0 &&
-        size <= maxAllowed
+        size <= maximum
     )
-    .sort((a, b) => a - b);
+    .sort(
+      (a, b) =>
+        a - b
+    );
 }
+
+/*
+=========================================================
+DISCOVERY PROBE
+=========================================================
+*/
+
+async function discoveryProbe({
+  network,
+  route
+}) {
+  const maximum =
+    account.balance *
+    SETTINGS.maxTradeCapitalPercent;
+
+  const probeSize =
+    Math.min(
+      SETTINGS.discoveryProbeUsd,
+      maximum
+    );
+
+  if (
+    probeSize <= 0
+  ) {
+    return null;
+  }
+
+  state.testsPlanned += 1;
+  state.testsAttempted += 1;
+
+  try {
+    const raw =
+      await quoteRoute({
+        network,
+        route,
+        tradeSize:
+          probeSize
+      });
+
+    const result =
+      enrichResult(
+        raw
+      );
+
+    state.testsCompleted += 1;
+    state.routesScreened += 1;
+
+    state.discovery.push(
+      result
+    );
+
+    if (
+      result.gross > 0
+    ) {
+      state.positiveGrossDetected += 1;
+    }
+
+    return result;
+  } catch (error) {
+    state.testsCompleted += 1;
+    state.routesScreened += 1;
+
+    state.errors.push({
+      at: now(),
+
+      network:
+        network.name,
+
+      route:
+        route.label,
+
+      phase:
+        "DISCOVERY",
+
+      message:
+        error.message
+    });
+
+    return null;
+  }
+}
+
+/*
+=========================================================
+ADAPTIVE OPTIMIZATION
+=========================================================
+*/
 
 async function optimizeRoute({
   network,
@@ -1048,165 +1698,96 @@ async function optimizeRoute({
   const sizes =
     generateTradeSizes();
 
-  const tests = [];
+  const results = [];
 
-  for (const size of sizes) {
+  for (
+    const tradeSize of sizes
+  ) {
     state.testsPlanned += 1;
     state.testsAttempted += 1;
 
     try {
-      const result =
+      const raw =
         await quoteRoute({
           network,
           route,
-          tradeSize: size
+          tradeSize
         });
 
-      const risk =
-        calculateRisk(result);
-
-      const quality =
-        calculateQuality(result);
-
-      const status =
-        classifyDiscovery(result);
-
-      const enriched = {
-        ...result,
-
-        riskScore:
-          risk.score,
-
-        riskLevel:
-          risk.level,
-
-        qualityScore:
-          quality,
-
-        status
-      };
-
-      tests.push(enriched);
-
-      state.results.push(enriched);
+      const result =
+        enrichResult(
+          raw
+        );
 
       state.testsCompleted += 1;
+
+      results.push(
+        result
+      );
     } catch (error) {
       state.testsCompleted += 1;
 
       state.errors.push({
         at: now(),
-        network: network.name,
-        route: route.label,
-        size,
-        message: error.message
+
+        network:
+          network.name,
+
+        route:
+          route.label,
+
+        tradeSize,
+
+        phase:
+          "OPTIMIZATION",
+
+        message:
+          error.message
       });
     }
   }
 
-  tests.sort(
+  results.sort(
     (a, b) =>
       b.estimatedNet -
       a.estimatedNet
   );
 
   return {
-    best: tests[0] || null,
-    tests
+    best:
+      results[0] ||
+      null,
+
+    tests:
+      results
   };
 }
 
-/* =========================================================
-   FAST DISCOVERY
-   ========================================================= */
-
-async function discoveryProbe({
-  network,
-  route
-}) {
-  state.testsPlanned += 1;
-  state.testsAttempted += 1;
-
-  try {
-    const result =
-      await quoteRoute({
-        network,
-        route,
-        tradeSize:
-          Math.min(
-            SETTINGS.discoveryProbeUsd,
-            account.balance *
-              SETTINGS.maxTradeCapitalPercent
-          )
-      });
-
-    const risk =
-      calculateRisk(result);
-
-    const quality =
-      calculateQuality(result);
-
-    const status =
-      classifyDiscovery(result);
-
-    const enriched = {
-      ...result,
-
-      riskScore:
-        risk.score,
-
-      riskLevel:
-        risk.level,
-
-      qualityScore:
-        quality,
-
-      status
-    };
-
-    state.testsCompleted += 1;
-    state.routesScreened += 1;
-
-    return enriched;
-  } catch (error) {
-    state.testsCompleted += 1;
-    state.routesScreened += 1;
-
-    state.errors.push({
-      at: now(),
-      network: network.name,
-      route: route.label,
-      message: error.message
-    });
-
-    return null;
-  }
-}
-
-/* =========================================================
-   FRESH CONFIRMATION
-   ========================================================= */
+/*
+=========================================================
+FRESH CONFIRMATION
+=========================================================
+*/
 
 async function confirmOpportunity(
-  candidate
+  opportunity
 ) {
   const network =
     getNetwork(
-      candidate.networkKey
+      opportunity.networkKey
     );
 
   if (!network) {
     return null;
   }
 
-  const allRoutes =
-    generateRoutes(network);
-
   const route =
-    allRoutes.find(
+    generateRoutes(
+      network
+    ).find(
       item =>
-        item.label ===
-        candidate.route
+        item.id ===
+        opportunity.routeId
     );
 
   if (!route) {
@@ -1214,19 +1795,20 @@ async function confirmOpportunity(
   }
 
   try {
-    const fresh =
+    const raw =
       await quoteRoute({
         network,
+
         route,
+
         tradeSize:
-          candidate.tradeSize
+          opportunity.tradeSize
       });
 
-    const risk =
-      calculateRisk(fresh);
-
-    const quality =
-      calculateQuality(fresh);
+    const fresh =
+      enrichResult(
+        raw
+      );
 
     const ageMs =
       Date.now() -
@@ -1243,77 +1825,80 @@ async function confirmOpportunity(
     return {
       ...fresh,
 
-      riskScore:
-        risk.score,
-
-      riskLevel:
-        risk.level,
-
-      qualityScore:
-        quality,
-
       confirmationAgeMs:
         ageMs,
+
+      confirmedAt:
+        now(),
 
       status:
         passes
           ? "PAPER_PASS"
-          : "EXPIRED",
-
-      confirmedAt:
-        now()
+          : "CONFIRMATION_REJECTED"
     };
   } catch (error) {
     state.errors.push({
       at: now(),
+
       network:
-        candidate.network,
+        opportunity.network,
+
       route:
-        candidate.route,
+        opportunity.route,
+
+      phase:
+        "CONFIRMATION",
+
       message:
-        `Confirmation failed: ${error.message}`
+        error.message
     });
 
     return null;
   }
 }
 
-/* =========================================================
-   PAPER EXECUTION
-   ========================================================= */
+/*
+=========================================================
+PAPER SIMULATION
+=========================================================
+*/
 
 async function simulatePaperTrade(
-  opportunity
+  opportunity,
+  executionMode = "MANUAL"
 ) {
-  const fresh =
+  const confirmed =
     await confirmOpportunity(
       opportunity
     );
 
   if (
-    !fresh ||
-    fresh.status !== "PAPER_PASS"
+    !confirmed ||
+    confirmed.status !==
+      "PAPER_PASS"
   ) {
     return {
       success: false,
-      reason:
-        "Opportunity no longer passes fresh confirmation."
+
+      message:
+        "The opportunity no longer passes fresh confirmation."
     };
   }
 
   const pnl =
-    fresh.estimatedNet;
+    confirmed.estimatedNet;
 
   account.balance =
     round(
-      account.balance + pnl,
+      account.balance +
+      pnl,
       6
     );
 
   account.realizedPnL =
     round(
       account.balance -
-        account.startingBalance,
+      account.startingBalance,
       6
     );
 
@@ -1325,47 +1910,58 @@ async function simulatePaperTrade(
         .toString(16)
         .slice(2)}`,
 
-    mode: "PAPER",
+    mode:
+      "PAPER",
 
-    executionMode: "MANUAL",
+    executionMode,
 
-    executedAt: now(),
+    executedAt:
+      now(),
 
     network:
-      fresh.network,
+      confirmed.network,
 
     networkKey:
-      fresh.networkKey,
+      confirmed.networkKey,
+
+    chainId:
+      confirmed.chainId,
 
     route:
-      fresh.route,
+      confirmed.route,
 
     routeType:
-      fresh.routeType,
+      confirmed.routeType,
 
     tradeSize:
-      fresh.tradeSize,
+      confirmed.tradeSize,
+
+    startingValue:
+      confirmed.startingValue,
 
     finalValue:
-      fresh.finalValue,
+      confirmed.finalValue,
+
+    gross:
+      confirmed.gross,
 
     gasUsd:
-      fresh.estimatedGasUsd,
+      confirmed.estimatedGasUsd,
 
     netProfit:
-      fresh.estimatedNet,
+      confirmed.estimatedNet,
 
     roiPercent:
-      fresh.roiPercent,
+      confirmed.roiPercent,
 
     riskScore:
-      fresh.riskScore,
+      confirmed.riskScore,
 
     riskLevel:
-      fresh.riskLevel,
+      confirmed.riskLevel,
 
     qualityScore:
-      fresh.qualityScore,
+      confirmed.qualityScore,
 
     status:
       "SIMULATED_SUCCESS",
@@ -1384,25 +1980,34 @@ async function simulatePaperTrade(
 
   return {
     success: true,
+
     trade,
-    account
+
+    account: {
+      ...account
+    }
   };
 }
 
-/* =========================================================
-   MAIN SCAN CYCLE
-   ========================================================= */
+/*
+=========================================================
+MAIN SCAN
+=========================================================
+*/
 
 async function runScanCycle() {
   if (state.running) {
     return {
       started: false,
+
       message:
         "A scan is already running."
     };
   }
 
-  state.running = true;
+  state.running =
+    true;
+
   state.cycle += 1;
 
   state.scanPhase =
@@ -1411,13 +2016,15 @@ async function runScanCycle() {
   state.lastScanStarted =
     now();
 
-  resetScanCollections();
+  resetScan();
 
   try {
     const networks =
-      getEnabledNetworks();
+      getSelectedNetworks();
 
-    if (!networks.length) {
+    if (
+      networks.length === 0
+    ) {
       throw new Error(
         "No networks selected."
       );
@@ -1425,12 +2032,16 @@ async function runScanCycle() {
 
     const routePlan = [];
 
-    for (const network of networks) {
-      const networkRoutes =
-        generateRoutes(network);
+    for (
+      const network of networks
+    ) {
+      const routes =
+        generateRoutes(
+          network
+        );
 
       for (
-        const route of networkRoutes
+        const route of routes
       ) {
         routePlan.push({
           network,
@@ -1443,22 +2054,24 @@ async function runScanCycle() {
       routePlan.length;
 
     /*
-      PHASE 1:
-      Broad discovery probes
+    PHASE 1
+    FAST DISCOVERY
     */
 
     state.scanPhase =
       "DISCOVERING";
 
-    const promising = [];
+    const promisingMap =
+      new Map();
 
     for (
-      let i = 0;
-      i < routePlan.length;
-      i += 1
+      let index = 0;
+      index <
+        routePlan.length;
+      index += 1
     ) {
       const item =
-        routePlan[i];
+        routePlan[index];
 
       state.currentNetwork =
         item.network.name;
@@ -1468,10 +2081,14 @@ async function runScanCycle() {
 
       state.progressPercent =
         round(
-          (i / Math.max(
-            routePlan.length,
-            1
-          )) * 45,
+          (
+            index /
+            Math.max(
+              routePlan.length,
+              1
+            )
+          ) *
+          45,
           2
         );
 
@@ -1485,25 +2102,6 @@ async function runScanCycle() {
       }
 
       if (
-        probe.estimatedNet > 0
-      ) {
-        state.spreadsDetected += 1;
-      }
-
-      if (
-        probe.status ===
-        "WATCHLIST"
-      ) {
-        state.watchlist.push(
-          probe
-        );
-
-        state.watchlistFound += 1;
-
-        promising.push(item);
-      }
-
-      if (
         probe.status ===
         "CANDIDATE"
       ) {
@@ -1513,37 +2111,59 @@ async function runScanCycle() {
 
         state.candidatesFound += 1;
 
-        promising.push(item);
-      }
-
-      if (
+        promisingMap.set(
+          item.route.id,
+          item
+        );
+      } else if (
         probe.status ===
-        "REJECTED"
+        "WATCHLIST"
       ) {
-        state.results.push(
+        state.watchlist.push(
+          probe
+        );
+
+        state.watchlistFound += 1;
+
+        promisingMap.set(
+          item.route.id,
+          item
+        );
+      } else {
+        state.rejected.push(
           probe
         );
       }
     }
 
     /*
-      PHASE 2:
-      Optimize only promising routes
+    PHASE 2
+    OPTIMIZATION
+
+    Only optimize routes that survived
+    discovery. This avoids wasting API
+    requests on clearly weak routes.
     */
 
     state.scanPhase =
       "OPTIMIZING";
 
+    const promising =
+      Array.from(
+        promisingMap.values()
+      );
+
     const optimizedCandidates =
       [];
 
     for (
-      let i = 0;
-      i < promising.length;
-      i += 1
+      let index = 0;
+      index <
+        promising.length;
+      index += 1
     ) {
       const item =
-        promising[i];
+        promising[index];
 
       state.currentNetwork =
         item.network.name;
@@ -1555,7 +2175,7 @@ async function runScanCycle() {
         round(
           45 +
           (
-            i /
+            index /
             Math.max(
               promising.length,
               1
@@ -1565,17 +2185,28 @@ async function runScanCycle() {
           2
         );
 
-      const optimized =
+      const optimization =
         await optimizeRoute(
           item
         );
 
-      if (!optimized.best) {
+      if (
+        !optimization.best
+      ) {
         continue;
       }
 
       const best =
-        optimized.best;
+        optimization.best;
+
+      state.optimized.push({
+        ...best,
+
+        optimizationTests:
+          optimization.tests
+      });
+
+      state.optimizedFound += 1;
 
       if (
         best.status ===
@@ -1584,8 +2215,6 @@ async function runScanCycle() {
         optimizedCandidates.push(
           best
         );
-
-        state.optimizedFound += 1;
       } else if (
         best.status ===
         "WATCHLIST"
@@ -1597,8 +2226,8 @@ async function runScanCycle() {
     }
 
     /*
-      PHASE 3:
-      Fresh confirmation
+    PHASE 3
+    FRESH CONFIRMATION
     */
 
     state.scanPhase =
@@ -1611,13 +2240,13 @@ async function runScanCycle() {
     );
 
     for (
-      let i = 0;
-      i <
-      optimizedCandidates.length;
-      i += 1
+      let index = 0;
+      index <
+        optimizedCandidates.length;
+      index += 1
     ) {
       const candidate =
-        optimizedCandidates[i];
+        optimizedCandidates[index];
 
       state.currentNetwork =
         candidate.network;
@@ -1629,7 +2258,7 @@ async function runScanCycle() {
         round(
           80 +
           (
-            i /
+            index /
             Math.max(
               optimizedCandidates.length,
               1
@@ -1667,16 +2296,17 @@ async function runScanCycle() {
     }
 
     /*
-      Optional AUTO PAPER.
-      OFF by default.
+    OPTIONAL AUTO PAPER
+
+    Disabled by default.
     */
 
     if (
       SETTINGS.autoPaperTrading &&
-      state.paperPass.length
+      state.paperPass.length > 0
     ) {
       const eligible =
-        state.paperPass
+        [...state.paperPass]
           .filter(
             opportunity =>
               opportunity.riskScore <=
@@ -1689,28 +2319,22 @@ async function runScanCycle() {
           )
           .slice(
             0,
-            SETTINGS.maxAutoTradesPerCycle
+            SETTINGS
+              .maxAutoTradesPerCycle
           );
 
       for (
         const opportunity of eligible
       ) {
-        const result =
-          await simulatePaperTrade(
-            opportunity
-          );
-
-        if (
-          result.success &&
-          result.trade
-        ) {
-          result.trade.executionMode =
-            "AUTO";
-        }
+        await simulatePaperTrade(
+          opportunity,
+          "AUTO"
+        );
       }
     }
 
-    state.progressPercent = 100;
+    state.progressPercent =
+      100;
 
     state.scanPhase =
       "COMPLETE";
@@ -1720,9 +2344,29 @@ async function runScanCycle() {
 
     return {
       started: true,
+
       completed: true,
+
+      routesGenerated:
+        state.routesGenerated,
+
+      routesScreened:
+        state.routesScreened,
+
+      watchlist:
+        state.watchlistFound,
+
+      candidates:
+        state.candidatesFound,
+
+      optimized:
+        state.optimizedFound,
+
+      confirmed:
+        state.confirmedFound,
+
       paperPass:
-        state.paperPass.length
+        state.paperPassFound
     };
   } catch (error) {
     state.scanPhase =
@@ -1733,41 +2377,105 @@ async function runScanCycle() {
 
     state.errors.push({
       at: now(),
-      message: error.message
+
+      phase:
+        "SCAN",
+
+      message:
+        error.message
     });
 
     return {
       started: true,
+
       completed: false,
-      error: error.message
+
+      error:
+        error.message
     };
   } finally {
-    state.running = false;
-    state.currentNetwork = null;
-    state.currentRoute = null;
+    state.running =
+      false;
+
+    state.currentNetwork =
+      null;
+
+    state.currentRoute =
+      null;
   }
 }
 
-/* =========================================================
-   API
-   ========================================================= */
+/*
+=========================================================
+ROOT
+=========================================================
+*/
 
-app.get("/", (req, res) => {
-  res.json({
-    engine:
-      "ArbiFlow Opportunity Engine",
-    version: VERSION,
-    online: true,
-    mode: "paper-trading",
-    liveExecutionEnabled: false,
-    provider:
-      "0x Swap API",
-    message:
-      "ArbiFlow Engine 3.0 is online."
-  });
-});
+app.get(
+  "/",
+  (req, res) => {
+    res.json({
+      engine:
+        "ArbiFlow Opportunity Engine",
 
-/* ---------------- STATUS ---------------- */
+      version:
+        VERSION,
+
+      online:
+        true,
+
+      mode:
+        "paper-trading",
+
+      provider:
+        "0x Swap API",
+
+      liquidityModel:
+        "aggregated",
+
+      liveExecutionEnabled:
+        false,
+
+      message:
+        "ArbiFlow Engine 3.0.1 is online."
+    });
+  }
+);
+
+/*
+=========================================================
+HEALTH
+=========================================================
+*/
+
+app.get(
+  "/api/health",
+  (req, res) => {
+    res.json({
+      ok: true,
+
+      engine:
+        "ArbiFlow Opportunity Engine",
+
+      version:
+        VERSION,
+
+      providerConfigured:
+        Boolean(
+          ZEROX_API_KEY
+        ),
+
+      time:
+        now()
+    });
+  }
+);
+
+/*
+=========================================================
+STATUS
+=========================================================
+*/
 
 app.get(
   "/api/status",
@@ -1776,15 +2484,22 @@ app.get(
       engine:
         "ArbiFlow Opportunity Engine",
 
-      version: VERSION,
+      version:
+        VERSION,
 
-      online: true,
+      online:
+        true,
 
       provider:
         "0x Swap API",
 
+      liquidityModel:
+        "aggregated",
+
       liveProviderConfigured:
-        Boolean(ZEROX_API_KEY),
+        Boolean(
+          ZEROX_API_KEY
+        ),
 
       liveExecutionEnabled:
         false,
@@ -1819,33 +2534,43 @@ app.get(
       lastSuccessfulQuote:
         state.lastSuccessfulQuote,
 
+      lastError:
+        state.lastError,
+
       selectedNetworks,
 
       networks:
-        Object.values(
-          NETWORKS
-        ).map(
-          networkSummary
-        )
+        Object
+          .values(
+            NETWORKS
+          )
+          .map(
+            networkSummary
+          )
     });
   }
 );
 
-/* ---------------- NETWORKS ---------------- */
+/*
+=========================================================
+NETWORK SELECTION
+=========================================================
+*/
 
 app.get(
   "/api/networks",
   (req, res) => {
     res.json({
-      selected:
-        selectedNetworks,
+      selectedNetworks,
 
       networks:
-        Object.values(
-          NETWORKS
-        ).map(
-          networkSummary
-        )
+        Object
+          .values(
+            NETWORKS
+          )
+          .map(
+            networkSummary
+          )
     });
   }
 );
@@ -1853,6 +2578,17 @@ app.get(
 app.post(
   "/api/networks",
   (req, res) => {
+    if (state.running) {
+      return res
+        .status(409)
+        .json({
+          success: false,
+
+          message:
+            "Wait for the current scan to finish before changing networks."
+        });
+    }
+
     const requested =
       Array.isArray(
         req.body.networks
@@ -1870,12 +2606,17 @@ app.post(
         )
       );
 
-    if (!valid.length) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Select at least one supported network."
-      });
+    if (
+      valid.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+
+          message:
+            "Select at least one supported network."
+        });
     }
 
     selectedNetworks =
@@ -1883,24 +2624,33 @@ app.post(
 
     return res.json({
       success: true,
+
       selectedNetworks,
+
       networks:
-        Object.values(
-          NETWORKS
-        ).map(
-          networkSummary
-        )
+        Object
+          .values(
+            NETWORKS
+          )
+          .map(
+            networkSummary
+          )
     });
   }
 );
 
-/* ---------------- ACCOUNT ---------------- */
+/*
+=========================================================
+PAPER ACCOUNT
+=========================================================
+*/
 
 app.get(
   "/api/account",
   (req, res) => {
     res.json({
-      mode: "PAPER",
+      mode:
+        "PAPER",
 
       startingBalance:
         account.startingBalance,
@@ -1921,11 +2671,14 @@ app.post(
   "/api/account/capital",
   (req, res) => {
     if (state.running) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "Wait for the current scan to finish before changing paper capital."
-      });
+      return res
+        .status(409)
+        .json({
+          success: false,
+
+          message:
+            "Wait for the current scan to finish before changing paper capital."
+        });
     }
 
     const capital =
@@ -1934,236 +2687,331 @@ app.post(
       );
 
     if (
-      !Number.isFinite(capital) ||
+      !Number.isFinite(
+        capital
+      ) ||
       capital <= 0
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Capital must be greater than zero."
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+
+          message:
+            "Capital must be greater than zero."
+        });
     }
 
     account.startingBalance =
-      round(capital, 2);
+      round(
+        capital,
+        2
+      );
 
     account.balance =
-      round(capital, 2);
+      round(
+        capital,
+        2
+      );
 
-    account.realizedPnL = 0;
+    account.realizedPnL =
+      0;
 
-    account.simulatedTrades = 0;
+    account.simulatedTrades =
+      0;
 
-    state.paperExecuted = [];
+    state.paperExecuted =
+      [];
 
-    state.history = [];
+    state.history =
+      [];
 
     return res.json({
       success: true,
-      account
+
+      account: {
+        ...account
+      }
     });
   }
 );
 
-/* ---------------- OPPORTUNITIES ---------------- */
+/*
+=========================================================
+SCAN START
+=========================================================
+*/
+
+app.post(
+  "/api/scan/start",
+  (req, res) => {
+    if (state.running) {
+      return res
+        .status(409)
+        .json({
+          success: false,
+
+          message:
+            "A scan is already running."
+        });
+    }
+
+    res.json({
+      success: true,
+
+      message:
+        "ArbiFlow Engine 3.0.1 scan started.",
+
+      selectedNetworks
+    });
+
+    runScanCycle()
+      .catch(
+        error => {
+          state.lastError =
+            error.message;
+
+          state.scanPhase =
+            "ERROR";
+
+          state.running =
+            false;
+        }
+      );
+  }
+);
+
+/*
+=========================================================
+OPPORTUNITIES
+=========================================================
+*/
 
 app.get(
   "/api/opportunities",
   (req, res) => {
-    const bestResults =
-      [...state.results]
+    const topDiscovery =
+      [...state.discovery]
         .sort(
           (a, b) =>
             b.estimatedNet -
             a.estimatedNet
         )
-        .slice(0, 100);
+        .slice(
+          0,
+          100
+        );
 
     res.json({
       engine:
         "ArbiFlow Opportunity Engine",
 
-      version: VERSION,
+      version:
+        VERSION,
 
       mode:
-        "paper-trading",
+        "PAPER",
 
       liveExecutionEnabled:
         false,
 
-      balance:
-        account.balance,
+      /*
+      Must stay zero until we add:
+      - firm executable quote
+      - taker wallet
+      - transaction simulation
+      - allowance validation
+      - min-profit protection
+      - live transaction workflow
+      */
 
-      startingBalance:
-        account.startingBalance,
+      executableOpportunities:
+        0,
 
-      realizedPnL:
-        account.realizedPnL,
+      account: {
+        startingBalance:
+          account.startingBalance,
 
-      simulatedTrades:
-        account.simulatedTrades,
+        balance:
+          account.balance,
 
-      running:
-        state.running,
+        realizedPnL:
+          account.realizedPnL,
 
-      cycle:
-        state.cycle,
+        simulatedTrades:
+          account.simulatedTrades
+      },
 
-      scanPhase:
-        state.scanPhase,
+      scanner: {
+        running:
+          state.running,
 
-      progressPercent:
-        state.progressPercent,
+        cycle:
+          state.cycle,
 
-      currentNetwork:
-        state.currentNetwork,
+        scanPhase:
+          state.scanPhase,
 
-      currentRoute:
-        state.currentRoute,
+        progressPercent:
+          state.progressPercent,
 
-      selectedNetworks,
+        currentNetwork:
+          state.currentNetwork,
 
-      routesGenerated:
-        state.routesGenerated,
+        currentRoute:
+          state.currentRoute,
 
-      routesScreened:
-        state.routesScreened,
+        selectedNetworks
+      },
 
-      testsPlanned:
-        state.testsPlanned,
+      funnel: {
+        routesGenerated:
+          state.routesGenerated,
 
-      testsAttempted:
-        state.testsAttempted,
+        routesScreened:
+          state.routesScreened,
 
-      testsCompleted:
-        state.testsCompleted,
+        testsPlanned:
+          state.testsPlanned,
 
-      spreadsDetected:
-        state.spreadsDetected,
+        testsAttempted:
+          state.testsAttempted,
 
-      watchlistFound:
-        state.watchlistFound,
+        testsCompleted:
+          state.testsCompleted,
 
-      candidatesFound:
-        state.candidatesFound,
+        positiveGrossDetected:
+          state.positiveGrossDetected,
 
-      optimizedFound:
-        state.optimizedFound,
+        watchlistFound:
+          state.watchlistFound,
 
-      confirmedFound:
-        state.confirmedFound,
+        candidatesFound:
+          state.candidatesFound,
 
-      paperPassFound:
-        state.paperPassFound,
+        optimizedFound:
+          state.optimizedFound,
 
-      watchlist:
-        state.watchlist,
+        confirmedFound:
+          state.confirmedFound,
 
-      candidates:
-        state.candidates,
-
-      confirmed:
-        state.confirmed,
+        paperPassFound:
+          state.paperPassFound
+      },
 
       paperPass:
         state.paperPass,
 
-      bestTests:
-        bestResults,
+      confirmed:
+        state.confirmed,
+
+      optimized:
+        state.optimized,
+
+      candidates:
+        state.candidates,
+
+      watchlist:
+        state.watchlist,
+
+      topDiscovery,
+
+      rejected:
+        state.rejected
+          .sort(
+            (a, b) =>
+              b.estimatedNet -
+              a.estimatedNet
+          )
+          .slice(
+            0,
+            100
+          ),
 
       paperExecuted:
         state.paperExecuted,
 
-      executableOpportunities: 0,
-
       errors:
-        state.errors.slice(-25)
+        state.errors
+          .slice(-25)
     });
   }
 );
 
-/* ---------------- SCAN ---------------- */
-
-app.post(
-  "/api/scan/start",
-  async (req, res) => {
-    if (state.running) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "A scan is already running."
-      });
-    }
-
-    res.json({
-      success: true,
-      message:
-        "Engine 3.0 scan started.",
-      selectedNetworks
-    });
-
-    runScanCycle().catch(
-      error => {
-        state.lastError =
-          error.message;
-
-        state.running = false;
-
-        state.scanPhase =
-          "ERROR";
-      }
-    );
-  }
-);
-
-/* ---------------- PAPER EXECUTE ---------------- */
+/*
+=========================================================
+PAPER SIMULATE
+=========================================================
+*/
 
 app.post(
   "/api/paper/execute",
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     const index =
       Number(
         req.body.index
       );
 
     if (
-      !Number.isInteger(index) ||
+      !Number.isInteger(
+        index
+      ) ||
       index < 0 ||
       index >=
         state.paperPass.length
     ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid PAPER PASS opportunity."
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+
+          message:
+            "Invalid PAPER PASS opportunity."
+        });
     }
 
     const opportunity =
-      state.paperPass[index];
+      state.paperPass[
+        index
+      ];
 
     const result =
       await simulatePaperTrade(
-        opportunity
+        opportunity,
+        "MANUAL"
       );
 
-    if (!result.success) {
-      return res.status(409).json(
-        result
-      );
+    if (
+      !result.success
+    ) {
+      return res
+        .status(409)
+        .json(
+          result
+        );
     }
 
-    return res.json(result);
+    return res.json(
+      result
+    );
   }
 );
 
-/* ---------------- HISTORY ---------------- */
+/*
+=========================================================
+HISTORY
+=========================================================
+*/
 
 app.get(
   "/api/history",
   (req, res) => {
     res.json({
-      mode: "PAPER",
+      mode:
+        "PAPER",
 
       count:
         state.history.length,
@@ -2174,18 +3022,30 @@ app.get(
   }
 );
 
-/* ---------------- SETTINGS ---------------- */
+/*
+=========================================================
+SETTINGS
+=========================================================
+*/
 
 app.get(
   "/api/settings",
   (req, res) => {
     res.json({
-      version: VERSION,
+      engineVersion:
+        VERSION,
 
-      paperOnly: true,
+      paperOnly:
+        true,
 
       liveExecutionEnabled:
         false,
+
+      provider:
+        "0x Swap API",
+
+      liquidityModel:
+        "aggregated",
 
       minimumPaperPassUsd:
         SETTINGS.minimumPaperPassUsd,
@@ -2199,6 +3059,9 @@ app.get(
       maxTradeCapitalPercent:
         SETTINGS.maxTradeCapitalPercent,
 
+      quoteFreshnessMs:
+        SETTINGS.quoteFreshnessMs,
+
       slippageBps:
         SETTINGS.slippageBps,
 
@@ -2211,26 +3074,11 @@ app.get(
   }
 );
 
-/* =========================================================
-   HEALTH
-   ========================================================= */
-
-app.get(
-  "/api/health",
-  (req, res) => {
-    res.json({
-      ok: true,
-      engine:
-        "ArbiFlow Opportunity Engine",
-      version: VERSION,
-      time: now()
-    });
-  }
-);
-
-/* =========================================================
-   START SERVER
-   ========================================================= */
+/*
+=========================================================
+SERVER
+=========================================================
+*/
 
 app.listen(
   PORT,
