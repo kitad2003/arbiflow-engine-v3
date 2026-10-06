@@ -21,7 +21,7 @@ polygon: process.env.POLYGON_RPC_URL || "",
 ethereum: process.env.ETHEREUM_RPC_URL || "",
 bnb: process.env.BNB_RPC_URL || ""
 };
-const VERSION = "3.1.0";
+const VERSION = "3.2.0";
 /*
 =========================================================
 DIRECT VENUE CONFIGURATION
@@ -47,7 +47,28 @@ const AERODROME_ROUTER_ABI = [
 ];
 /*
 =========================================================
-ARBIFLOW ENGINE 3.1.0
+UNISWAP V3 BASE - READ ONLY
+Official Base deployment used by Engine 3.2.0:
+View-only Quoter: 0x222ca98f00ed15b1fae10b61c277703a194cf5d2
+V3 Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD
+This layer is read only. It does not approve tokens, sign,
+broadcast, execute swaps, or affect paper capital.
+=========================================================
+*/
+const UNISWAP_V3_BASE = {
+quoter: "0x222ca98f00ed15b1fae10b61c277703a194cf5d2",
+factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+feeTiers: [100, 500, 3000, 10000]
+};
+const UNISWAP_V3_QUOTER_ABI = [
+"function quoteExactInputSingle(address tokenIn,address tokenOut,uint24 fee,uint256 amountIn,uint160 sqrtPriceLimitX96) view returns (uint256 amountOut)"
+];
+const UNISWAP_V3_FACTORY_ABI = [
+"function getPool(address tokenA,address tokenB,uint24 fee) view returns (address pool)"
+];
+/*
+=========================================================
+ARBIFLOW ENGINE 3.2.0
 PHASE:
 Live market discovery + paper simulation.
 THIS BUILD DOES:
@@ -70,6 +91,9 @@ THIS BUILD DOES:
 - Latest-block verification
 - Read-only Aerodrome direct venue quoting on Base
 - Stable and volatile Aerodrome route comparison
+- Read-only Uniswap V3 direct venue quoting on Base
+- Uniswap V3 fee-tier comparison
+- Aerodrome and Uniswap remain isolated from the main scanner until direct venue tests pass
 THIS BUILD DOES NOT:
 - Hold private keys
 - Connect MetaMask yet
@@ -77,6 +101,7 @@ THIS BUILD DOES NOT:
 - Claim paper passes are live executable trades
 - Claim 0x liquidity sources are independent venue arbitrage
 - Broadcast or execute Aerodrome transactions
+- Broadcast or execute Uniswap transactions
 =========================================================
 */
 const SETTINGS = {
@@ -1004,6 +1029,194 @@ readOnly:
 true,
 error:
 error.message
+};
+}
+}
+/*
+=========================================================
+UNISWAP V3 DIRECT VENUE QUOTING - BASE ONLY
+=========================================================
+*/
+async function uniswapV3QuoteOne({
+sellToken,
+buyToken,
+sellAmount,
+fee
+}) {
+const network = NETWORKS.base;
+const sell = network.tokens[sellToken];
+const buy = network.tokens[buyToken];
+if (!sell || !buy) {
+throw new Error(
+`Unsupported Base token pair: ${sellToken}/${buyToken}.`
+);
+}
+if (sellToken === buyToken) {
+throw new Error(
+"Sell token and buy token must be different."
+);
+}
+const numericAmount = Number(sellAmount);
+if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+throw new Error(
+"Sell amount must be greater than zero."
+);
+}
+if (!UNISWAP_V3_BASE.feeTiers.includes(Number(fee))) {
+throw new Error(`Unsupported Uniswap V3 fee tier: ${fee}.`);
+}
+const provider = getBaseProvider();
+const factory = new Contract(
+UNISWAP_V3_BASE.factory,
+UNISWAP_V3_FACTORY_ABI,
+provider
+);
+const pool = await factory.getPool(
+sell.address,
+buy.address,
+Number(fee)
+);
+if (
+!pool ||
+String(pool).toLowerCase() ===
+"0x0000000000000000000000000000000000000000"
+) {
+throw new Error(
+`No Uniswap V3 ${fee} fee-tier pool for ${sellToken}/${buyToken}.`
+);
+}
+const quoter = new Contract(
+UNISWAP_V3_BASE.quoter,
+UNISWAP_V3_QUOTER_ABI,
+provider
+);
+const amountIn = parseUnits(
+String(sellAmount),
+sell.decimals
+);
+const rawOutput = await quoter.quoteExactInputSingle(
+sell.address,
+buy.address,
+Number(fee),
+amountIn,
+0
+);
+const buyAmount = Number(
+formatUnits(rawOutput, buy.decimals)
+);
+if (!Number.isFinite(buyAmount) || buyAmount <= 0) {
+throw new Error(
+`Uniswap V3 returned an invalid ${fee} fee-tier quote.`
+);
+}
+return {
+provider: "Uniswap V3",
+liquidityModel: "DIRECT_VENUE",
+network: network.name,
+networkKey: network.key,
+chainId: network.chainId,
+quoter: UNISWAP_V3_BASE.quoter,
+factory: UNISWAP_V3_BASE.factory,
+pool,
+feeTier: Number(fee),
+feePercent: Number(fee) / 10000,
+sellToken,
+buyToken,
+sellAmount: numericAmount,
+buyAmount: round(buyAmount, 12),
+rawBuyAmount: rawOutput.toString(),
+quoteTimestamp: Date.now(),
+readOnly: true
+};
+}
+async function uniswapV3BestQuote({
+sellToken,
+buyToken,
+sellAmount
+}) {
+const attempts = await Promise.allSettled(
+UNISWAP_V3_BASE.feeTiers.map(fee =>
+uniswapV3QuoteOne({
+sellToken,
+buyToken,
+sellAmount,
+fee
+})
+)
+);
+const successful = attempts
+.filter(item => item.status === "fulfilled")
+.map(item => item.value);
+const failures = attempts
+.filter(item => item.status === "rejected")
+.map(item => item.reason?.message || "Uniswap V3 quote failed.");
+if (successful.length === 0) {
+throw new Error(
+failures.join(" | ") || "No Uniswap V3 quote was available."
+);
+}
+successful.sort((a, b) => b.buyAmount - a.buyAmount);
+return {
+best: successful[0],
+alternatives: successful,
+failures
+};
+}
+async function uniswapV3Health() {
+const network = NETWORKS.base;
+if (!RPC_URLS.base) {
+return {
+configured: false,
+reachable: false,
+contractReadable: false,
+network: network.name,
+chainId: network.chainId,
+venue: "Uniswap V3",
+quoter: UNISWAP_V3_BASE.quoter,
+factory: UNISWAP_V3_BASE.factory,
+error: "BASE_RPC_URL is not configured."
+};
+}
+const started = Date.now();
+try {
+const provider = getBaseProvider();
+const actualNetwork = await provider.getNetwork();
+const quoterCode = await provider.getCode(UNISWAP_V3_BASE.quoter);
+const factoryCode = await provider.getCode(UNISWAP_V3_BASE.factory);
+const chainId = Number(actualNetwork.chainId);
+const quoterReadable = quoterCode && quoterCode !== "0x";
+const factoryReadable = factoryCode && factoryCode !== "0x";
+return {
+configured: true,
+reachable: true,
+contractReadable: Boolean(quoterReadable && factoryReadable),
+network: network.name,
+expectedChainId: network.chainId,
+reportedChainId: chainId,
+chainIdMatches: chainId === network.chainId,
+venue: "Uniswap V3",
+quoter: UNISWAP_V3_BASE.quoter,
+factory: UNISWAP_V3_BASE.factory,
+quoterReadable: Boolean(quoterReadable),
+factoryReadable: Boolean(factoryReadable),
+feeTiers: UNISWAP_V3_BASE.feeTiers,
+latencyMs: Date.now() - started,
+readOnly: true,
+error: null
+};
+} catch (error) {
+return {
+configured: true,
+reachable: false,
+contractReadable: false,
+network: network.name,
+chainId: network.chainId,
+venue: "Uniswap V3",
+quoter: UNISWAP_V3_BASE.quoter,
+factory: UNISWAP_V3_BASE.factory,
+latencyMs: Date.now() - started,
+readOnly: true,
+error: error.message
 };
 }
 }
@@ -2470,7 +2683,7 @@ liquidityModel:
 liveExecutionEnabled:
 false,
 message:
-"ArbiFlow Engine 3.1.0 is online."
+"ArbiFlow Engine 3.2.0 is online."
 });
 }
 );
@@ -2661,6 +2874,86 @@ error:
 error.message,
 time:
 now()
+});
+}
+}
+);
+/*
+=========================================================
+DIRECT VENUE STATUS - UNISWAP V3 BASE
+=========================================================
+*/
+app.get(
+"/api/venues/base/uniswap-v3/status",
+async (req, res) => {
+const health = await uniswapV3Health();
+res
+.status(health.contractReadable ? 200 : 503)
+.json({
+engine: "ArbiFlow Opportunity Engine",
+version: VERSION,
+liveExecutionEnabled: false,
+venue: health,
+time: now()
+});
+}
+);
+/*
+=========================================================
+DIRECT VENUE QUOTE - UNISWAP V3 BASE
+Examples:
+?sellToken=USDC&buyToken=WETH&amount=25
+?sellToken=WETH&buyToken=USDC&amount=0.01
+This endpoint is read only.
+It does not execute a swap.
+=========================================================
+*/
+app.get(
+"/api/venues/base/uniswap-v3/quote",
+async (req, res) => {
+try {
+const sellToken = String(
+req.query.sellToken || "USDC"
+)
+.trim()
+.toUpperCase();
+const buyToken = String(
+req.query.buyToken || "WETH"
+)
+.trim()
+.toUpperCase();
+const amount = req.query.amount ?? "25";
+const result = await uniswapV3BestQuote({
+sellToken,
+buyToken,
+sellAmount: amount
+});
+return res.json({
+success: true,
+engine: "ArbiFlow Opportunity Engine",
+version: VERSION,
+mode: "READ_ONLY_QUOTE",
+liveExecutionEnabled: false,
+affectsPaperBalance: false,
+venue: "Uniswap V3",
+network: "Base",
+bestQuote: result.best,
+routeResults: result.alternatives,
+routeErrors: result.failures,
+time: now()
+});
+} catch (error) {
+return res.status(400).json({
+success: false,
+engine: "ArbiFlow Opportunity Engine",
+version: VERSION,
+mode: "READ_ONLY_QUOTE",
+liveExecutionEnabled: false,
+affectsPaperBalance: false,
+venue: "Uniswap V3",
+network: "Base",
+error: error.message,
+time: now()
 });
 }
 }
@@ -2897,7 +3190,7 @@ message:
 res.json({
 success: true,
 message:
-"ArbiFlow Engine 3.1.0 scan started.",
+"ArbiFlow Engine 3.2.0 scan started.",
 selectedNetworks
 });
 runScanCycle()
