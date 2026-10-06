@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.38.0";
+const VERSION = "4.39.0";
 
 /*
 =========================================================
@@ -6901,7 +6901,7 @@ app.get("/api/zero-x/base/production-readiness", async (req,res)=>{const r=await
 app.get("/api/kyberswap/base/route-readiness", async (req,res)=>{const r=await kyberSwapBaseRouteReadiness4330();return res.status(r.success?200:409).json(r);});
 
 const productionDeploymentReadiness4360 = async ()=>{
- const generatedAt=new Date().toISOString(),executor=(process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS||"").trim(),owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"0x1d997b6f18bb70da65bab5469eac8c7c2a047394").trim(),minProfitUsd=Number(process.env.ARBIFLOW_PRODUCTION_MIN_NET_PROFIT_USD||BASE_DIRECT_MIN_NET_PROFIT_USD),maxGas=Number(process.env.ARBIFLOW_PRODUCTION_MAX_ATOMIC_GAS||750000),slippageBps=Number(process.env.ARBIFLOW_KYBER_SLIPPAGE_BPS||50),addr=/^0x[a-fA-F0-9]{40}$/;
+ const generatedAt=new Date().toISOString(),executor=(process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS||"").trim(),owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"0x1d997b6f18bb70da65bab5469eac8c7c2a047394").trim(),minProfitUsd=Number(process.env.ARBIFLOW_PRODUCTION_MIN_NET_PROFIT_USD||BASE_DIRECT_MIN_NET_PROFIT_USD),maxGas=Number(process.env.ARBIFLOW_PRODUCTION_MAX_ATOMIC_GAS||900000),slippageBps=Number(process.env.ARBIFLOW_KYBER_SLIPPAGE_BPS||50),addr=/^0x[a-fA-F0-9]{40}$/;
  const checks={baseRpcConfigured:Boolean(RPC_URLS.base),liveExecutionHardDisabled:true,executorAddressConfigured:addr.test(executor),ownerAddressConfigured:addr.test(owner),minimumNetProfitValid:Number.isFinite(minProfitUsd)&&minProfitUsd>=15,maxAtomicGasValid:Number.isInteger(maxGas)&&maxGas>=561349&&maxGas<=1500000,kyberSlippageValid:Number.isInteger(slippageBps)&&slippageBps>0&&slippageBps<=500,atomicArtifactPresent:fs.existsSync(path.join(__dirname,"artifacts",".arbiflow-contracts","ArbiFlowAtomicExecutor430.sol","ArbiFlowAtomicExecutor430.json"))};
  let chainId=null,executorCodeBytes=0,aaveCodeBytes=0,morphoCodeBytes=0,executorOwner=null,executorAavePool=null,executorMorpho=null,executorBindingsVerified=false;
  try{const provider=new JsonRpcProvider(RPC_URLS.base),net=await provider.getNetwork();chainId=Number(net.chainId);checks.baseChainId=chainId===8453;aaveCodeBytes=Math.max(0,((await provider.getCode(AAVE_V3_BASE.pool)).length-2)/2);morphoCodeBytes=Math.max(0,((await provider.getCode(MORPHO_BLUE_4210)).length-2)/2);checks.aavePoolCodePresent=aaveCodeBytes>0;checks.morphoCodePresent=morphoCodeBytes>0;
@@ -6952,7 +6952,26 @@ const runProductionBoundForkValidation4380 = async (req,res)=>{
 };
 app.get("/api/test/base/production-bound-fork",runProductionBoundForkValidation4380);
 app.post("/api/test/base/production-bound-fork",runProductionBoundForkValidation4380);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.38.0_PRODUCTION_BOUND_FORK_VALIDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+const runFinalMainnetSafetyGate4390 = async (req,res)=>{
+  const startedAt=Date.now();
+  try{
+    const readiness=await productionDeploymentReadiness4360();
+    if(!readiness.success) return res.status(409).json({success:false,version:VERSION,classification:"MAINNET_EXECUTION_SAFETY_GATE_BLOCKED",blocker:"PRODUCTION_EXECUTOR_CONFIGURATION_NOT_VALIDATED",readiness,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+    const morpho=await runMorphoLiquidationBot450();
+    const pool=[...(morpho?.opportunities||[]),...(morpho?.watchlist||[])].filter(x=>x?.marketId&&x?.user).sort((a,b)=>Number(a.healthFactor??99)-Number(b.healthFactor??99));
+    if(!pool.length) return res.json({success:true,version:VERSION,classification:"MAINNET_EXECUTION_SAFETY_GATE_WAIT",readyForExplicitExecutionApproval:false,reason:"NO_MORPHO_CANDIDATE_AVAILABLE",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const candidate=pool[0],hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),reportPath=path.join(__dirname,"mainnet-safety-gate-report-4390.json");
+    try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+    const child=spawnSync(hardhatBin,["run","--no-compile","MainnetSafetyGate4390.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_MAINNET_SAFETY_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_MAINNET_SAFETY_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+    let report=null;try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+    if(child.status!==0||!report?.success) return res.status(409).json({success:false,version:VERSION,classification:"MAINNET_EXECUTION_SAFETY_GATE_FAILED_CLOSED",candidate:{marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor},error:(child.stderr||child.stdout||"MAINNET_SAFETY_GATE_FAILED").slice(-4000),report,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    if(report.classification==="MAINNET_EXECUTION_SAFETY_GATE_WAIT") return res.json({...report,candidateDiscoveryHealthFactor:candidate.healthFactor,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    return res.json({...report,classification:"MAINNET_EXECUTION_SAFETY_GATE_PASSED",candidateDiscoveryHealthFactor:candidate.healthFactor,readyForExplicitExecutionApproval:true,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,nextGate:"SEPARATE_EXPLICIT_USER_APPROVAL_REQUIRED_BEFORE_ANY_MAINNET_TRANSACTION",elapsedMs:Date.now()-startedAt});
+  }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"MAINNET_EXECUTION_SAFETY_GATE_ERROR",error:e?.message||String(e),readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
+};
+app.get("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
+app.post("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.39.0_FINAL_MAINNET_EXECUTION_SAFETY_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6961,7 +6980,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.35.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.39.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
