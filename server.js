@@ -48,7 +48,7 @@ const AERODROME_ROUTER_ABI = [
 /*
 =========================================================
 UNISWAP V3 BASE - READ ONLY
-Official Base deployment used by Engine 3.2.0:
+Official Base deployment used by Engine 3.2.1:
 View-only Quoter: 0x222ca98f00ed15b1fae10b61c277703a194cf5d2
 V3 Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD
 This layer is read only. It does not approve tokens, sign,
@@ -1101,8 +1101,10 @@ fee: Number(fee),
 sqrtPriceLimitX96: 0
 });
 const rawOutput = quoteResult.amountOut ?? quoteResult[0];
-const sqrtPriceX96After = quoteResult.sqrtPriceX96After ?? quoteResult[1];
-const initializedTicksCrossed = quoteResult.initializedTicksCrossed ?? quoteResult[2];
+const sqrtPriceX96After =
+quoteResult.sqrtPriceX96After ?? quoteResult[1];
+const initializedTicksCrossed =
+quoteResult.initializedTicksCrossed ?? quoteResult[2];
 const gasEstimate = quoteResult.gasEstimate ?? quoteResult[3];
 const buyAmount = Number(
 formatUnits(rawOutput, buy.decimals)
@@ -1128,9 +1130,9 @@ buyToken,
 sellAmount: numericAmount,
 buyAmount: round(buyAmount, 12),
 rawBuyAmount: rawOutput.toString(),
-sqrtPriceX96After: sqrtPriceX96After?.toString?.() ?? null,
-initializedTicksCrossed: initializedTicksCrossed?.toString?.() ?? null,
-quoteGasEstimate: gasEstimate?.toString?.() ?? null,
+sqrtPriceX96After: sqrtPriceX96After.toString(),
+initializedTicksCrossed: Number(initializedTicksCrossed),
+quoterGasEstimate: gasEstimate.toString(),
 quoteTimestamp: Date.now(),
 readOnly: true
 };
@@ -2689,7 +2691,7 @@ liquidityModel:
 liveExecutionEnabled:
 false,
 message:
-"ArbiFlow Engine 3.2.0 is online."
+"ArbiFlow Engine 3.2.1 is online."
 });
 }
 );
@@ -3196,7 +3198,7 @@ message:
 res.json({
 success: true,
 message:
-"ArbiFlow Engine 3.2.0 scan started.",
+"ArbiFlow Engine 3.2.1 scan started.",
 selectedNetworks
 });
 runScanCycle()
