@@ -21,7 +21,7 @@ polygon: process.env.POLYGON_RPC_URL || "",
 ethereum: process.env.ETHEREUM_RPC_URL || "",
 bnb: process.env.BNB_RPC_URL || ""
 };
-const VERSION = "3.2.1";
+const VERSION = "3.2.2";
 /*
 =========================================================
 DIRECT VENUE CONFIGURATION
@@ -48,7 +48,7 @@ const AERODROME_ROUTER_ABI = [
 /*
 =========================================================
 UNISWAP V3 BASE - READ ONLY
-Official Base deployment used by Engine 3.2.1:
+Official Base deployment used by Engine 3.2.2:
 View-only Quoter: 0x222ca98f00ed15b1fae10b61c277703a194cf5d2
 V3 Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD
 This layer is read only. It does not approve tokens, sign,
@@ -61,13 +61,49 @@ factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
 feeTiers: [100, 500, 3000, 10000]
 };
 const UNISWAP_V3_QUOTER_ABI = [
-"function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) view returns (uint256 amountOut,];
+{
+type: "function",
+name: "quoteExactInputSingle",
+stateMutability: "view",
+inputs: [
+{
+name: "params",
+type: "tuple",
+components: [
+{ name: "tokenIn", type: "address" },
+{ name: "tokenOut", type: "address" },
+{ name: "amountIn", type: "uint256" },
+{ name: "fee", type: "uint24" },
+{ name: "sqrtPriceLimitX96", type: "uint160" }
+]
+}
+],
+outputs: [
+{ name: "amountOut", type: "uint256" },
+{ name: "sqrtPriceX96After", type: "uint160" },
+{ name: "initializedTicksCrossed", type: "uint32" },
+{ name: "gasEstimate", type: "uint256" }
+]
+}
+];
 const UNISWAP_V3_FACTORY_ABI = [
-"function getPool(address tokenA,address tokenB,uint24 fee) view returns (address pool)"
+{
+type: "function",
+name: "getPool",
+stateMutability: "view",
+inputs: [
+{ name: "tokenA", type: "address" },
+{ name: "tokenB", type: "address" },
+{ name: "fee", type: "uint24" }
+],
+outputs: [
+{ name: "pool", type: "address" }
+]
+}
 ];
 /*
 =========================================================
-ARBIFLOW ENGINE 3.2.1
+ARBIFLOW ENGINE 3.2.2
 PHASE:
 Live market discovery + paper simulation.
 THIS BUILD DOES:
@@ -2683,7 +2719,7 @@ liquidityModel:
 liveExecutionEnabled:
 false,
 message:
-"ArbiFlow Engine 3.2.1 is online."
+"ArbiFlow Engine 3.2.2 is online."
 });
 }
 );
@@ -3190,7 +3226,7 @@ message:
 res.json({
 success: true,
 message:
-"ArbiFlow Engine 3.2.1 scan started.",
+"ArbiFlow Engine 3.2.2 scan started.",
 selectedNetworks
 });
 runScanCycle()
