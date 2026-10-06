@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "3.4.0";
+const VERSION = "3.5.0";
 
 /*
 =========================================================
@@ -171,7 +171,7 @@ const SETTINGS = {
 
   maxTradeCapitalPercent: 0.50,
 
-  minimumPaperPassUsd: 0.02,
+  minimumPaperPassUsd: 15,
 
   minimumPaperPassRoiPercent: 0.01,
 
@@ -3876,6 +3876,52 @@ included yet, so scanner results are never executable.
 */
 
 const BASE_DIRECT_SCAN_DEFAULT_SIZES = [10, 25, 50, 100, 250];
+const BASE_DIRECT_MIN_NET_PROFIT_USD = 15;
+const BASE_DIRECT_GOOD_NET_PROFIT_USD = 25;
+const BASE_DIRECT_STRONG_NET_PROFIT_USD = 50;
+const BASE_DIRECT_PREMIUM_NET_PROFIT_USD = 100;
+// Conservative discovery-only gas model for two Base swap transactions.
+// This is NOT transaction-level eth_estimateGas and does not make a route executable.
+const BASE_DIRECT_MODELED_GAS_UNITS = 500000;
+
+async function getBaseModeledGasCostUsd() {
+  const provider = getBaseProvider();
+  const feeData = await provider.getFeeData();
+  const gasPriceWei = feeData.maxFeePerGas || feeData.gasPrice;
+
+  if (!gasPriceWei) {
+    throw new Error("Unable to read current Base gas price.");
+  }
+
+  const nativeUsd = await getNativeUsd(NETWORKS.base);
+  if (!nativeUsd) {
+    throw new Error("Unable to price Base ETH gas in USD.");
+  }
+
+  const gasPriceGwei = Number(formatUnits(gasPriceWei, "gwei"));
+  const gasNative = Number(formatUnits(gasPriceWei * BigInt(BASE_DIRECT_MODELED_GAS_UNITS), 18));
+  const modeledGasUsd = gasNative * nativeUsd * SETTINGS.gasSafetyMultiplier;
+
+  return {
+    method: "LIVE_GAS_PRICE_MODELED_UNITS",
+    gasPriceGwei: round(gasPriceGwei, 6),
+    modeledGasUnits: BASE_DIRECT_MODELED_GAS_UNITS,
+    gasSafetyMultiplier: SETTINGS.gasSafetyMultiplier,
+    nativeSymbol: "ETH",
+    nativeUsd: round(nativeUsd, 6),
+    modeledGasNative: round(gasNative * SETTINGS.gasSafetyMultiplier, 10),
+    modeledGasUsd: round(modeledGasUsd, 6),
+    transactionLevelEstimate: false
+  };
+}
+
+function baseDirectProfitTier(netProfitUsd) {
+  if (netProfitUsd >= BASE_DIRECT_PREMIUM_NET_PROFIT_USD) return "PREMIUM";
+  if (netProfitUsd >= BASE_DIRECT_STRONG_NET_PROFIT_USD) return "STRONG";
+  if (netProfitUsd >= BASE_DIRECT_GOOD_NET_PROFIT_USD) return "GOOD";
+  if (netProfitUsd >= BASE_DIRECT_MIN_NET_PROFIT_USD) return "QUALIFYING";
+  return "BELOW_MINIMUM";
+}
 const BASE_DIRECT_SCAN_MAX_SIZES = 10;
 const BASE_DIRECT_NEAR_PASS_FLOOR_USD = -0.50;
 
@@ -3904,12 +3950,13 @@ function parseBaseDirectScanSizes(rawSizes) {
 
 function classifyBaseDirectScanResult(result) {
   const best = result.bestDirection;
+  const netAfterModeledGas = Number(best.netAfterModeledGas ?? best.grossPnl);
 
-  if (best.grossPnl > 0) {
-    return "RAW_CANDIDATE";
+  if (netAfterModeledGas >= BASE_DIRECT_MIN_NET_PROFIT_USD) {
+    return "NET_CANDIDATE";
   }
 
-  if (best.grossPnl >= BASE_DIRECT_NEAR_PASS_FLOOR_USD) {
+  if (best.grossPnl > 0 || netAfterModeledGas >= BASE_DIRECT_NEAR_PASS_FLOOR_USD) {
     return "WATCHLIST";
   }
 
@@ -3923,6 +3970,7 @@ async function scanBaseDirectVenues({
 }) {
   const startedAt = Date.now();
   const results = [];
+  const gasModel = await getBaseModeledGasCostUsd();
 
   // Run sequentially to avoid hammering public RPC/provider limits and to
   // keep each comparison's quote window easy to interpret.
@@ -3934,11 +3982,28 @@ async function scanBaseDirectVenues({
         amount: size
       });
 
+      const bestWithGas = {
+        ...comparison.bestDirection,
+        modeledGasUsd: gasModel.modeledGasUsd,
+        netAfterModeledGas: round(
+          comparison.bestDirection.grossPnl - gasModel.modeledGasUsd,
+          6
+        )
+      };
+
+      const enrichedComparison = {
+        ...comparison,
+        bestDirection: bestWithGas,
+        gasModel,
+        minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+        profitTier: baseDirectProfitTier(bestWithGas.netAfterModeledGas)
+      };
+
       results.push({
+        ...enrichedComparison,
         success: true,
         size,
-        classification: classifyBaseDirectScanResult(comparison),
-        ...comparison
+        classification: classifyBaseDirectScanResult(enrichedComparison)
       });
     } catch (error) {
       results.push({
@@ -3954,9 +4019,9 @@ async function scanBaseDirectVenues({
 
   const successful = results.filter(item => item.success);
   const ranked = [...successful].sort(
-    (a, b) => b.bestDirection.grossPnl - a.bestDirection.grossPnl
+    (a, b) => b.bestDirection.netAfterModeledGas - a.bestDirection.netAfterModeledGas
   );
-  const rawCandidates = ranked.filter(item => item.classification === "RAW_CANDIDATE");
+  const netCandidates = ranked.filter(item => item.classification === "NET_CANDIDATE");
   const watchlist = ranked.filter(item => item.classification === "WATCHLIST");
   const rejected = ranked.filter(item => item.classification === "REJECTED");
   const errors = results.filter(item => !item.success);
@@ -3967,16 +4032,24 @@ async function scanBaseDirectVenues({
     baseToken,
     quoteToken,
     requestedSizes: sizes,
+    minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+    profitTiersUsd: {
+      qualifying: BASE_DIRECT_MIN_NET_PROFIT_USD,
+      good: BASE_DIRECT_GOOD_NET_PROFIT_USD,
+      strong: BASE_DIRECT_STRONG_NET_PROFIT_USD,
+      premium: BASE_DIRECT_PREMIUM_NET_PROFIT_USD
+    },
+    gasModel,
     venues: ["Aerodrome", "Uniswap V3"],
     bestResult: ranked[0] || null,
-    rawCandidates,
+    netCandidates,
     watchlist,
     rejected,
     errors,
     counts: {
       tested: results.length,
       successful: successful.length,
-      rawCandidates: rawCandidates.length,
+      netCandidates: netCandidates.length,
       watchlist: watchlist.length,
       rejected: rejected.length,
       errors: errors.length
@@ -3987,17 +4060,18 @@ async function scanBaseDirectVenues({
     paperPass: false,
     costsIncluded: {
       dexFees: true,
-      gas: false,
+      gas: true,
+      gasMethod: "live gas price + conservative modeled gas units",
       transactionSimulation: false,
       atomicExecutionProtection: false
     },
     nextValidationRequired: [
-      "gas estimation",
+      "transaction-level gas estimation",
       "fresh quote confirmation",
       "transaction simulation",
       "minimum-profit protection"
     ],
-    warning: "Discovery scanner only. RAW_CANDIDATE means positive before gas and transaction-level protections; it is not an executable or paper-pass trade."
+    warning: "Discovery scanner only. NET_CANDIDATE means at least $15 after the modeled Base gas reserve, but transaction-level gas estimation, slippage protection, fresh confirmation, and simulation are still required. It is not executable or a paper pass."
   };
 }
 
