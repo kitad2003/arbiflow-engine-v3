@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.31.1";
+const VERSION = "4.32.0";
 
 /*
 =========================================================
@@ -6781,6 +6781,31 @@ const zeroXAccessPreflight4302 = async ()=>{
   finally{clearTimeout(timer);}
 };
 
+const zeroXProductionQuoteReadiness4320 = async ()=>{
+  const executor=(process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS||"").trim();
+  const base={version:VERSION,readOnly:true,liveExecutionEnabled:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,productionZeroXQuoteValidated:false};
+  if(!ZEROX_API_KEY) return {...base,success:false,classification:"ZEROX_API_KEY_NOT_CONFIGURED"};
+  // Indicative price proves route/liquidity access independently of a future production taker.
+  const sellToken="0x4200000000000000000000000000000000000006"; // WETH Base
+  const buyToken="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // USDC Base
+  const sellAmount=process.env.ARBIFLOW_ZEROX_READINESS_SELL_AMOUNT||"100000000000000"; // 0.0001 WETH
+  const headers={"0x-api-key":ZEROX_API_KEY,"0x-version":"v2","Content-Type":"application/json"};
+  const request=async(path,params)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await fetch("https://api.0x.org"+path+"?"+new URLSearchParams(params),{headers,signal:c.signal});const body=await r.text();let data=null;try{data=JSON.parse(body)}catch{};return {ok:r.ok,status:r.status,data,body:body.slice(0,500)}}finally{clearTimeout(t)}};
+  try{
+    const price=await request("/swap/allowance-holder/price",{chainId:"8453",sellToken,buyToken,sellAmount});
+    if(!price.ok) return {...base,success:false,classification:"ZEROX_INDICATIVE_PRICE_FAILED",indicativePriceStatus:price.status,message:price.data?.message||price.body};
+    const route={status:price.status,liquidityAvailable:price.data?.liquidityAvailable??null,buyAmount:price.data?.buyAmount??null,blockNumber:price.data?.blockNumber??null};
+    if(!/^0x[a-fA-F0-9]{40}$/.test(executor)) return {...base,success:false,classification:"PRODUCTION_EXECUTOR_ADDRESS_NOT_CONFIGURED",indicativeRouteAvailable:true,indicativeRoute:route,requiredEnv:"ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS",note:"Configure only an already-deployed Base executor address. This endpoint never deploys one."};
+    const code=await baseProvider.getCode(executor);
+    if(!code||code==="0x") return {...base,success:false,classification:"PRODUCTION_EXECUTOR_NOT_DEPLOYED_ON_BASE",productionExecutorAddress:executor,productionExecutorCodeBytes:0,indicativeRouteAvailable:true,indicativeRoute:route,note:"Firm quote was not requested because the configured taker has no Base bytecode."};
+    const quote=await request("/swap/allowance-holder/quote",{chainId:"8453",sellToken,buyToken,sellAmount,taker:executor,slippageBps:String(process.env.ARBIFLOW_CONTROLLED_SLIPPAGE_BPS||100)});
+    if(!quote.ok) return {...base,success:false,classification:"PRODUCTION_EXECUTOR_FIRM_QUOTE_REJECTED",productionExecutorAddress:executor,productionExecutorCodeBytes:(code.length-2)/2,indicativeRouteAvailable:true,indicativeRoute:route,firmQuoteStatus:quote.status,requestId:quote.data?.request_id??quote.data?.requestId??null,message:quote.data?.message||quote.body};
+    const tx=quote.data?.transaction||{};const spender=quote.data?.issues?.allowance?.spender||quote.data?.allowanceTarget||null;
+    const shapeOk=Boolean(tx.to&&tx.data&&quote.data?.buyAmount&&quote.data?.minBuyAmount);
+    return {...base,success:shapeOk,classification:shapeOk?"PRODUCTION_EXECUTOR_FIRM_QUOTE_VALIDATED":"PRODUCTION_EXECUTOR_FIRM_QUOTE_SHAPE_INVALID",productionZeroXQuoteValidated:shapeOk,productionExecutorAddress:executor,productionExecutorCodeBytes:(code.length-2)/2,indicativeRouteAvailable:true,indicativeRoute:route,firmQuoteStatus:quote.status,firmQuote:{blockNumber:quote.data?.blockNumber??null,buyAmount:quote.data?.buyAmount??null,minBuyAmount:quote.data?.minBuyAmount??null,allowanceSpender:spender,transactionTo:tx.to??null,calldataPresent:Boolean(tx.data),calldataExposed:false},note:"Read-only validation only. No approval, signature, deployment, transaction submission, or broadcast occurred."};
+  }catch(e){return {...base,success:false,classification:"PRODUCTION_QUOTE_READINESS_ERROR",message:e?.message||String(e)}};
+};
+
 const runControlledAtomicForkTest4302 = async (req,res)=>{
   const startedAt=Date.now();
   try{
@@ -6807,7 +6832,8 @@ const zeroXAccessHandler4303 = async (req,res)=>{ const zeroXAccess=await zeroXA
 app.get("/api/zero-x/base/access", zeroXAccessHandler4303);
 app.get("/api/test/zerox/access", zeroXAccessHandler4303);
 app.get("/api/test/zero-x/access", zeroXAccessHandler4303);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.31.1_CONTROLLED_FORK_RESERVE_LIQUIDITY_FIX",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/zero-x/base/production-readiness", async (req,res)=>{const r=await zeroXProductionQuoteReadiness4320();return res.status(r.success?200:409).json(r);});
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.32.0_PRODUCTION_QUOTE_READINESS_GATE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -6816,7 +6842,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.31.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.32.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
