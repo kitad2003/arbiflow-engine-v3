@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.2.0";
+const VERSION = "4.2.1";
 
 /*
 =========================================================
@@ -4816,9 +4816,61 @@ app.get("/api/hunter/base/scan", async (req, res) => {
 });
 
 
+
 /*
 =========================================================
-ARBIFLOW ENGINE 4.2 - MARKET EXPANSION BOT NETWORK
+ENGINE 4.2.1 - SCAN RELIABILITY / TIMEOUT GUARD
+=========================================================
+*/
+const SCAN421 = {
+  providerTimeoutMs: 6500,
+  botTimeoutMs: 45000,
+  routeConcurrency: 6,
+  aggregatorConcurrency: 4
+};
+
+function scan421Log(stage, detail = "") {
+  console.log(`[ArbiFlow ${VERSION}] ${stage}${detail ? ` :: ${detail}` : ""}`);
+}
+
+async function withTimeout421(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} TIMEOUT after ${ms}ms`)), ms);
+  });
+  try { return await Promise.race([promise, timeout]); }
+  finally { clearTimeout(timer); }
+}
+
+async function fetch421(url, options = {}, timeoutMs = SCAN421.providerTimeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`HTTP TIMEOUT after ${timeoutMs}ms`);
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+
+async function mapLimit421(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function runner() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      try { results[i] = await worker(items[i], i); }
+      catch (error) { results[i] = { __error: error }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length || 1) }, runner));
+  return results;
+}
+
+/*
+=========================================================
+ARBIFLOW ENGINE 4.2.1 - MARKET EXPANSION BOT NETWORK
 
 Read-only/paper discovery. 4.2 expands the hunting ground:
 - dynamic Base pair/triangle generation across USDC, DAI, WETH, cbBTC
@@ -4901,10 +4953,19 @@ async function runSpreadBot(){
 
 async function runTriangleBot(){
   const startedAt=Date.now(),observations=[],errors=[];
-  for(const route of market42Triangles()) for(const venues of market42VenueCombos()) try{
-    const q=await quoteMarket42Triangle(MARKET42.probeUsd,route,venues); observations.push({...q,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})});
-  }catch(error){errors.push({route,venues,error:error.message});}
-  observations.sort((a,b)=>b.score-a.score); return {bot:"TRIANGLE_BOT",status:"COMPLETE",routesGenerated:market42Triangles().length,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
+  const jobs=[];
+  for(const route of market42Triangles()) for(const venues of market42VenueCombos()) jobs.push({route,venues});
+  scan421Log("TRIANGLE_BOT START", `${jobs.length} probes, concurrency ${SCAN421.routeConcurrency}`);
+  const rows=await mapLimit421(jobs,SCAN421.routeConcurrency,async({route,venues})=>{
+    try{
+      const q=await withTimeout421(quoteMarket42Triangle(MARKET42.probeUsd,route,venues),SCAN421.providerTimeoutMs*3,`triangle ${route.join("->")} ${venues.join("/")}`);
+      return {ok:true,value:{...q,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}};
+    }catch(error){return {ok:false,error:{route,venues,error:error.message}};}
+  });
+  for(const row of rows){if(row?.ok) observations.push(row.value); else if(row?.error) errors.push(row.error); else if(row?.__error) errors.push({error:row.__error.message});}
+  observations.sort((a,b)=>b.score-a.score);
+  scan421Log("TRIANGLE_BOT COMPLETE", `${observations.length} observations, ${errors.length} errors, ${Date.now()-startedAt}ms`);
+  return {bot:"TRIANGLE_BOT",status:"COMPLETE",routesGenerated:market42Triangles().length,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function runLiquidationBot(){
@@ -4941,23 +5002,33 @@ async function lifi42Quote(sellToken,buyToken,sellAmount){
   const u=new URL("https://li.quest/v1/quote");
   u.searchParams.set("fromChain","8453");u.searchParams.set("toChain","8453");u.searchParams.set("fromToken",s.address);u.searchParams.set("toToken",b.address);u.searchParams.set("fromAmount",raw);u.searchParams.set("fromAddress",LIFI_PROBE_ADDRESS);u.searchParams.set("toAddress",LIFI_PROBE_ADDRESS);u.searchParams.set("slippage","0.003");u.searchParams.set("allowBridges","none");
   const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
-  const r=await fetch(u,{headers}); const text=await r.text(); let data; try{data=JSON.parse(text)}catch{throw new Error(`LI.FI non-JSON response (${r.status})`)} if(!r.ok) throw new Error(data?.message||data?.error||`LI.FI HTTP ${r.status}`);
+  const r=await fetch421(u,{headers}); const text=await r.text(); let data; try{data=JSON.parse(text)}catch{throw new Error(`LI.FI non-JSON response (${r.status})`)} if(!r.ok) throw new Error(data?.message||data?.error||`LI.FI HTTP ${r.status}`);
   const toAmount=data?.estimate?.toAmount; if(!toAmount) throw new Error("LI.FI quote missing estimate.toAmount");
   return {provider:"LI.FI",role:"AGGREGATOR_INTELLIGENCE_ONLY",tool:data.tool||null,pair:`${sellToken}/${buyToken}`,sellAmount:Number(sellAmount),buyAmount:Number(ethers.formatUnits(toAmount,b.decimals)),toAmountMin:data?.estimate?.toAmountMin?Number(ethers.formatUnits(data.estimate.toAmountMin,b.decimals)):null,readOnly:true};
 }
 
 async function runAggregatorIntelligenceBot(){
   const startedAt=Date.now(),network=NETWORKS.base,observations=[],errors=[]; const pairs=market42DirectPairs();
-  for(const [sellToken,buyToken] of pairs){
-    try{const q=await zeroXPrice({network,sellToken,buyToken,sellAmount:MARKET42.probeUsd});observations.push({provider:"0x",role:"AGGREGATOR_INTELLIGENCE_ONLY",pair:`${sellToken}/${buyToken}`,sellAmount:MARKET42.probeUsd,buyAmount:Number(q.buyAmount),readOnly:true});}catch(error){errors.push({provider:"0x",pair:`${sellToken}/${buyToken}`,error:error.message});}
-    try{observations.push(await lifi42Quote(sellToken,buyToken,MARKET42.probeUsd));}catch(error){errors.push({provider:"LI.FI",pair:`${sellToken}/${buyToken}`,error:error.message});}
-  }
+  const jobs=[]; for(const [sellToken,buyToken] of pairs){jobs.push({provider:"0x",sellToken,buyToken});jobs.push({provider:"LI.FI",sellToken,buyToken});}
+  scan421Log("AGGREGATOR_BOT START", `${jobs.length} quote jobs`);
+  const rows=await mapLimit421(jobs,SCAN421.aggregatorConcurrency,async job=>{
+    const {provider,sellToken,buyToken}=job;
+    try{
+      if(provider==="0x"){
+        const q=await withTimeout421(zeroXPrice({network,sellToken,buyToken,sellAmount:MARKET42.probeUsd}),SCAN421.providerTimeoutMs,`0x ${sellToken}/${buyToken}`);
+        return {ok:true,value:{provider:"0x",role:"AGGREGATOR_INTELLIGENCE_ONLY",pair:`${sellToken}/${buyToken}`,sellAmount:MARKET42.probeUsd,buyAmount:Number(q.buyAmount),readOnly:true}};
+      }
+      return {ok:true,value:await lifi42Quote(sellToken,buyToken,MARKET42.probeUsd)};
+    }catch(error){return {ok:false,error:{provider,pair:`${sellToken}/${buyToken}`,error:error.message}};}
+  });
+  for(const row of rows){if(row?.ok) observations.push(row.value); else if(row?.error) errors.push(row.error); else if(row?.__error) errors.push({provider:"UNKNOWN",error:row.__error.message});}
   const providerStatus=[
     {provider:"0x",configured:Boolean(process.env.ZEROX_API_KEY),active:true},
-    {provider:"LI.FI",configured:Boolean(process.env.LIFI_API_KEY),active:true,note:process.env.LIFI_API_KEY?"API key supplied":"attempting public/read-only quote access; add LIFI_API_KEY if provider requires registration"},
+    {provider:"LI.FI",configured:Boolean(process.env.LIFI_API_KEY),active:true,note:process.env.LIFI_API_KEY?"API key supplied":"public/read-only quote access with hard timeout"},
     {provider:"1inch",configured:Boolean(process.env.ONEINCH_API_KEY),active:false,note:"credential-aware placeholder; no requests are made until an approved API integration is configured"},
     {provider:"Velora/ParaSwap",configured:Boolean(process.env.VELORA_API_KEY),active:false,note:"credential-aware placeholder; no requests are made until provider interface is configured"}
   ];
+  scan421Log("AGGREGATOR_BOT COMPLETE", `${observations.length} observations, ${errors.length} errors, ${Date.now()-startedAt}ms`);
   return {bot:"AGGREGATOR_INTELLIGENCE_BOT",status:observations.length?"COMPLETE":"NO_PROVIDER_QUOTES",rule:"Aggregators are routing intelligence only; overlapping underlying liquidity is never counted as an independent arbitrage venue.",providers:providerStatus,observations,errors,elapsedMs:Date.now()-startedAt};
 }
 
@@ -4968,14 +5039,28 @@ async function runLargeOpportunityBot(triangleBot){
 }
 
 async function scanBaseBotNetwork(){
-  const startedAt=Date.now(); const marketBot=await runMarketDiscoveryBot();
-  const [spreadBot,triangleBot,liquidationBot,dislocationBot,aggregatorBot]=await Promise.all([runSpreadBot(),runTriangleBot(),runLiquidationBot(),runDislocationBot(),runAggregatorIntelligenceBot()]);
-  const watcherBot=await runWatcherBot(spreadBot,triangleBot,dislocationBot), largeOpportunityBot=await runLargeOpportunityBot(triangleBot); const bots=[marketBot,spreadBot,triangleBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const startedAt=Date.now(); scan421Log("BOT NETWORK START");
+  const marketBot=await runMarketDiscoveryBot();
+  const specs=[
+    ["SPREAD_BOT",runSpreadBot], ["TRIANGLE_BOT",runTriangleBot], ["LIQUIDATION_BOT",runLiquidationBot],
+    ["DISLOCATION_BOT",runDislocationBot], ["AGGREGATOR_INTELLIGENCE_BOT",runAggregatorIntelligenceBot]
+  ];
+  const settled=await Promise.all(specs.map(async([name,fn])=>{
+    scan421Log(`${name} START`);
+    try{const value=await withTimeout421(fn(),SCAN421.botTimeoutMs,name);scan421Log(`${name} FINISH`,`${value.status} ${value.elapsedMs??"?"}ms`);return value;}
+    catch(error){scan421Log(`${name} ISOLATED`,error.message);return {bot:name,status:"TIMEOUT_OR_ERROR",observations:[],candidates:[],opportunities:[],errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
+  }));
+  const byName=Object.fromEntries(settled.map(x=>[x.bot,x]));
+  const spreadBot=byName.SPREAD_BOT||{observations:[],candidates:[]}, triangleBot=byName.TRIANGLE_BOT||{observations:[],candidates:[]}, liquidationBot=byName.LIQUIDATION_BOT||{opportunities:[]}, dislocationBot=byName.DISLOCATION_BOT||{observations:[],candidates:[]}, aggregatorBot=byName.AGGREGATOR_INTELLIGENCE_BOT||{observations:[]};
+  let watcherBot; try{watcherBot=await withTimeout421(runWatcherBot(spreadBot,triangleBot,dislocationBot),30000,"WATCHER_BOT");}catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIMEOUT_OR_ERROR",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
+  let largeOpportunityBot; try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot(triangleBot),45000,"LARGE_OPPORTUNITY_BOT");}catch(error){largeOpportunityBot={bot:"LARGE_OPPORTUNITY_BOT",status:"TIMEOUT_OR_ERROR",flashOptimization:null,errors:[{error:error.message}]};}
+  const bots=[marketBot,spreadBot,triangleBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[])ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[])ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[])ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false}); ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  return {mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:marketBot.counts.totalTriangleProbes,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist.length,watcherRechecks:watcherBot.rechecks.length,watcherPromoted:watcherBot.promoted.length,aggregatorObservations:aggregatorBot.observations.length},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},nextValidationRequired:["validate cbBTC direct-liquidity coverage on Aerodrome/Uniswap V3","add a third independently quoted Base DEX after its official quote interface is verified","activate approved 1inch and Velora API adapters when credentials/interfaces are configured","calculate collateral/debt-specific liquidation economics","transaction-level gas estimation","atomic receiver contract","full transaction simulation","on-chain minimum-profit protection"],warning:"Engine 4.2 is read-only market expansion. Raw-positive quotes are not executable trades until costs, freshness, atomic simulation and minimum-profit protections pass."};
+  scan421Log("BOT NETWORK COMPLETE",`${Date.now()-startedAt}ms`);
+  return {mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:marketBot.counts.totalTriangleProbes,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0},scanReliability:{providerTimeoutMs:SCAN421.providerTimeoutMs,botTimeoutMs:SCAN421.botTimeoutMs,routeConcurrency:SCAN421.routeConcurrency,aggregatorConcurrency:SCAN421.aggregatorConcurrency,isolatedFailures:bots.filter(x=>x.status==="TIMEOUT_OR_ERROR").map(x=>x.bot)},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.1 is read-only market expansion with timeout isolation. Slow providers may fail independently without blocking the entire bot-network response."};
 }
 
 app.get("/api/bots/status",(req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,market:MARKET42,liveExecutionEnabled:false,time:now()}));
