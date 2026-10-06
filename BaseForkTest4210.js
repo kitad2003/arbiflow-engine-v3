@@ -77,7 +77,18 @@ async function main() {
   const [tester] = await hre.ethers.getSigners();
   const forkNetwork = await hre.ethers.provider.getNetwork();
   if (forkNetwork.chainId !== 8453n) throw new Error(`Expected local Base fork chainId 8453, got ${forkNetwork.chainId}`);
+  const sourceForkBlockNumber = await hre.ethers.provider.getBlockNumber();
+
+  // Hardhat/EDR classifies execution at the remote fork block as historical for
+  // unusual chain IDs. Mine one disposable local block before calling Base
+  // protocol bytecode. Execution then occurs in a non-historical local block
+  // and uses networks.hardhat.hardfork (Cancun) directly. No mainnet state is
+  // changed; this block exists only inside the ephemeral fork.
+  await hre.network.provider.send("evm_mine");
   const forkBlockNumber = await hre.ethers.provider.getBlockNumber();
+  if (forkBlockNumber <= sourceForkBlockNumber) {
+    throw new Error(`Local fork advance failed: source ${sourceForkBlockNumber}, current ${forkBlockNumber}`);
+  }
 
   // 4.21: execute Morpho's real state-changing accrueInterest on the disposable Base fork.
   // This mirrors the first state transition performed by Morpho liquidation before health is checked.
@@ -130,7 +141,10 @@ async function main() {
     baseBlockNumber,
     forkStarted: true,
     chainId: Number(forkNetwork.chainId),
+    sourceForkBlockNumber,
     forkBlockNumber,
+    localForkAdvanceBlocks: forkBlockNumber - sourceForkBlockNumber,
+    protocolExecutionBlockIsLocalNonHistorical: forkBlockNumber > sourceForkBlockNumber,
     executor: executorAddress,
     forkContractDeployed: true,
     contractCodeBytes: (code.length - 2) / 2,

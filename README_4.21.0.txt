@@ -14,3 +14,11 @@ Changes from 4.20.0:
 
 Important scope:
 4.21 proves real Morpho interest accrual and post-accrual health evaluation on the ephemeral fork. It does not yet execute a Morpho liquidation, bind a firm 0x transaction quote, or perform the complete Aave flash-loan -> liquidation -> collateral swap -> flash repayment sequence.
+
+
+4.21.0 Render EDR correction 2:
+- After attaching to the latest Base fork, the harness records sourceForkBlockNumber.
+- It mines exactly one ephemeral local block before any Morpho bytecode is executed through Hardhat.
+- This makes protocol execution non-historical and forces Hardhat to use the configured Cancun hardfork.
+- Report fields localForkAdvanceBlocks and protocolExecutionBlockIsLocalNonHistorical prove the path used.
+- No mainnet transaction, deployment, signature, or funds movement is enabled.
