@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.2.5";
+const VERSION = "4.3.0";
 
 /*
 =========================================================
@@ -4886,7 +4886,7 @@ const MARKET42 = {
   network: "Base",
   stableAnchors: ["USDC", "DAI"],
   routeTokens: ["USDC", "DAI", "WETH", "cbBTC"],
-  directVenues: ["AERODROME", "UNISWAP_V3"],
+  directVenues: ["AERODROME", "UNISWAP_V3", "PANCAKESWAP_V3"],
   intelligenceProviders: ["0x", "LI.FI", "1inch", "Velora/ParaSwap"],
   probeUsd: 100,
   watcherNearMissUsd: 2,
@@ -5009,6 +5009,7 @@ async function fastWatcherDirectPath425(item){
 function venueKey425(name){
   if(String(name||"").toLowerCase().includes("aerodrome")) return "AERODROME";
   if(String(name||"").toLowerCase().includes("uniswap")) return "UNISWAP_V3";
+  if(String(name||"").toLowerCase().includes("pancake")) return "PANCAKESWAP_V3";
   return null;
 }
 
@@ -5119,7 +5120,7 @@ const SCAN422 = {
   liquidationMaxUsersPerRequest: 20,
   watcherLimit: 6,
   deepTriangleRoutes: 1,
-  deepTriangleVenueCombos: 8
+  deepTriangleVenueCombos: 12
 };
 let scan422Active = false;
 let scan422Sequence = 0;
@@ -5219,14 +5220,162 @@ async function runLiquidationBatch422(){
   }catch(error){return {bot:"LIQUIDATION_BOT",status:"ERROR",stage:"BATCHED_DISCOVERY",opportunities:[],errors:[{error:error.message}],profitabilityValidated:false,elapsedMs:Date.now()-startedAt};}
 }
 
+
+/*
+=========================================================
+ENGINE 4.3.0 - OPPORTUNITY EXPANSION
+=========================================================
+Adds PancakeSwap V3 as a third independent Base liquidity venue. To avoid
+inventing a PancakeSwap quoter address, read-only pricing is requested through
+LI.FI with allowExchanges constrained to the live PancakeSwap exchange tool.
+LI.FI is quote transport only; the returned exchange is validated as PancakeSwap
+before the quote is admitted as a direct venue observation.
+
+Fast discovery compares three independent venues, deep triangle discovery uses
+12 shortlisted three-venue combinations, and any raw-positive direct OR triangle
+seed may enter adaptive Aave flash-loan economics. Execution remains disabled.
+=========================================================
+*/
+let pancakeTool430Cache = { key:null, checkedAt:0 };
+
+async function getPancakeTool430(){
+  if(pancakeTool430Cache.key && Date.now()-pancakeTool430Cache.checkedAt < 3600000) return pancakeTool430Cache.key;
+  const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
+  const r=await fetch421("https://li.quest/v1/tools",{headers},5000);
+  const text=await r.text(); let data; try{data=JSON.parse(text)}catch{throw new Error(`LI.FI tools non-JSON response (${r.status})`)}
+  if(!r.ok) throw new Error(data?.message||data?.error||`LI.FI tools HTTP ${r.status}`);
+  const exchanges=Array.isArray(data?.exchanges)?data.exchanges:[];
+  const match=exchanges.find(x=>/pancake/i.test(`${x?.key||""} ${x?.name||""}`));
+  if(!match?.key) throw new Error("PancakeSwap exchange tool not available from LI.FI /tools");
+  pancakeTool430Cache={key:String(match.key),checkedAt:Date.now()};
+  return pancakeTool430Cache.key;
+}
+
+async function pancakeSwapV3Quote430(sellToken,buyToken,sellAmount){
+  const network=NETWORKS.base, s=network.tokens[sellToken], b=network.tokens[buyToken];
+  if(!s||!b) throw new Error("Unsupported PancakeSwap Base token");
+  const toolKey=await getPancakeTool430();
+  const raw=parseUnits(String(sellAmount),s.decimals).toString();
+  const u=new URL("https://li.quest/v1/quote");
+  u.searchParams.set("fromChain","8453"); u.searchParams.set("toChain","8453");
+  u.searchParams.set("fromToken",s.address); u.searchParams.set("toToken",b.address);
+  u.searchParams.set("fromAmount",raw); u.searchParams.set("fromAddress",LIFI_PROBE_ADDRESS);
+  u.searchParams.set("toAddress",LIFI_PROBE_ADDRESS); u.searchParams.set("slippage","0.003");
+  u.searchParams.set("allowBridges","none"); u.searchParams.append("allowExchanges",toolKey);
+  const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
+  const r=await fetch421(u,{headers},5500); const text=await r.text(); let data;
+  try{data=JSON.parse(text)}catch{throw new Error(`PancakeSwap constrained quote non-JSON response (${r.status})`)}
+  if(!r.ok) throw new Error(data?.message||data?.error||`PancakeSwap constrained quote HTTP ${r.status}`);
+  const used=String(data?.tool||"");
+  if(!used || !/pancake/i.test(used)) throw new Error(`Constrained quote returned unexpected exchange: ${used||"unknown"}`);
+  const toAmount=data?.estimate?.toAmount; if(!toAmount) throw new Error("PancakeSwap constrained quote missing estimate.toAmount");
+  return {provider:"PancakeSwap V3",quoteTransport:"LI.FI_CONSTRAINED_EXCHANGE",liquidityModel:"INDEPENDENT_VENUE",network:"Base",networkKey:"base",chainId:8453,exchangeTool:used,sellToken,buyToken,sellAmount:Number(sellAmount),buyAmount:Number(formatUnits(toAmount,b.decimals)),rawBuyAmount:String(toAmount),quoteTimestamp:Date.now(),readOnly:true};
+}
+
+async function market43VenueQuote(venue,sellToken,buyToken,sellAmount){
+  if(venue==="AERODROME") return (await aerodromeBestQuote({sellToken,buyToken,sellAmount})).best;
+  if(venue==="UNISWAP_V3") return (await uniswapV3BestQuote({sellToken,buyToken,sellAmount})).best;
+  if(venue==="PANCAKESWAP_V3") return await pancakeSwapV3Quote430(sellToken,buyToken,sellAmount);
+  throw new Error(`Unsupported 4.3 direct venue: ${venue}`);
+}
+
+function venueLabel430(v){return v==="AERODROME"?"Aerodrome":v==="UNISWAP_V3"?"Uniswap V3":v==="PANCAKESWAP_V3"?"PancakeSwap V3":v;}
+
+async function compareBaseExpandedVenues430({baseToken="USDC",quoteToken="WETH",amount=100}){
+  const start=Number(amount); if(!Number.isFinite(start)||start<=0) throw new Error("Amount must be positive");
+  const startedAt=Date.now(), forward={}, errors=[];
+  const rows=await mapLimit421(MARKET42.directVenues,3,async venue=>{
+    try{return {venue,quote:await withTimeout421(market43VenueQuote(venue,baseToken,quoteToken,start),6000,`${venue} ${baseToken}/${quoteToken}`)}}catch(error){return {venue,error:error.message}}
+  });
+  for(const x of rows){if(x.quote)forward[x.venue]=x.quote;else errors.push({venue:x.venue,leg:"FORWARD",error:x.error});}
+  const jobs=[];
+  for(const buyVenue of Object.keys(forward)) for(const sellVenue of MARKET42.directVenues) if(sellVenue!==buyVenue) jobs.push({buyVenue,sellVenue});
+  const rev=await mapLimit421(jobs,4,async job=>{
+    try{const first=forward[job.buyVenue];const second=await withTimeout421(market43VenueQuote(job.sellVenue,quoteToken,baseToken,Number(first.buyAmount)),6000,`${job.sellVenue} reverse ${quoteToken}/${baseToken}`);return {...job,first,second};}
+    catch(error){return {...job,error:error.message};}
+  });
+  const directions=[];
+  for(const x of rev){
+    if(x.error){errors.push({buyVenue:x.buyVenue,sellVenue:x.sellVenue,leg:"REVERSE",error:x.error});continue;}
+    const grossPnl=Number(x.second.buyAmount)-start;
+    directions.push({direction:`${x.buyVenue}_TO_${x.sellVenue}`,buyVenue:venueLabel430(x.buyVenue),sellVenue:venueLabel430(x.sellVenue),buyVenueKey:x.buyVenue,sellVenueKey:x.sellVenue,startAmount:start,startToken:baseToken,intermediateAmount:Number(x.first.buyAmount),intermediateToken:quoteToken,finalAmount:Number(x.second.buyAmount),finalToken:baseToken,buyQuote:x.first,sellQuote:x.second,grossPnl:round(grossPnl,8),grossRoiPercent:round(grossPnl/start*100,6),rawPositive:grossPnl>0,status:grossPnl>0?"RAW_SPREAD_FOUND":"NO_RAW_PROFIT"});
+  }
+  directions.sort((a,b)=>b.grossPnl-a.grossPnl);
+  return {network:"Base",comparisonMode:"THREE_INDEPENDENT_VENUES_READ_ONLY",baseToken,quoteToken,startAmount:start,venuesAttempted:MARKET42.directVenues,forwardQuotes:forward,directions,bestDirection:directions[0]||null,errors,quoteWindowMs:Date.now()-startedAt,executable:false,paperPass:false};
+}
+
+async function quoteMarket43Triangle(amount,route,venues){
+  const startedAt=Date.now();let current=Number(amount);const legs=[];
+  for(let i=0;i<3;i++){const q=await market43VenueQuote(venues[i],route[i],route[i+1],current);legs.push(q);current=Number(q.buyAmount);}
+  const grossPnl=current-Number(amount);
+  return {success:true,route,venues,startAmount:round(Number(amount),6),finalAmount:round(current,6),grossPnl:round(grossPnl,6),grossRoiPercent:round(grossPnl/Number(amount)*100,6),rawPositive:grossPnl>0,quoteWindowMs:Date.now()-startedAt,legs};
+}
+
+async function runFastSpreadBot430(){
+  const startedAt=Date.now(),observations=[],errors=[];const pairs=[["USDC","DAI"],["USDC","WETH"],["USDC","cbBTC"],["DAI","WETH"]];
+  const rows=await mapLimit421(pairs,3,async([baseToken,quoteToken])=>{try{const result=await compareBaseExpandedVenues430({baseToken,quoteToken,amount:MARKET42.probeUsd});const best=result.bestDirection;return{ok:true,value:{type:"EXPANDED_DIRECT_SPREAD",pair:`${baseToken}/${quoteToken}`,probeAmount:MARKET42.probeUsd,bestDirection:best,rawPositive:Boolean(best&&Number(best.grossPnl)>0),venueErrors:result.errors,score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{pair:`${baseToken}/${quoteToken}`,error:error.message}}}});
+  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);} observations.sort((a,b)=>b.score-a.score);
+  return{bot:"SPREAD_BOT",status:"COMPLETE",stage:"THREE_VENUE_EXPANDED_DISCOVERY",pairsPlanned:pairs.length,venues:MARKET42.directVenues,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
+}
+
+function triangleCombos430(){
+  const all=market42VenueCombos();
+  // Mixed-venue routes first; single-venue loops remain available but lower priority.
+  return all.sort((a,b)=>new Set(b).size-new Set(a).size).slice(0,SCAN422.deepTriangleVenueCombos);
+}
+
+async function runFastTriangleBot430(spreadBot){
+  const startedAt=Date.now(),observations=[],errors=[];
+  const btc=spreadBot.observations?.find(x=>x.pair==="USDC/cbBTC"),eth=spreadBot.observations?.find(x=>x.pair==="USDC/WETH");
+  const middle=(Number(btc?.score||0)>Number(eth?.score||0))?"cbBTC":"WETH";const route=["USDC",middle,"DAI","USDC"],combos=triangleCombos430();
+  const rows=await mapLimit421(combos,4,async venues=>{try{const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),12000,`4.3 triangle ${venues.join("/")}`);return{ok:true,value:{...q,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{route,venues,error:error.message}}}});
+  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);}observations.sort((a,b)=>b.score-a.score);
+  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"THREE_VENUE_SHORTLIST_DEEP_CHECK",routesGenerated:market42Triangles().length,routesDeepChecked:1,route,probesPlanned:combos.length,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
+}
+
+async function fastWatcherDirectPath430(item){
+  const [baseToken,quoteToken]=item.pair.split("/");const buyVenue=item.buyVenueKey,sellVenue=item.sellVenueKey;if(!buyVenue||!sellVenue)throw new Error("Watcher missing selected venue path");
+  const first=await market43VenueQuote(buyVenue,baseToken,quoteToken,MARKET42.probeUsd);const second=await market43VenueQuote(sellVenue,quoteToken,baseToken,Number(first.buyAmount));const grossPnl=Number(second.buyAmount)-Number(MARKET42.probeUsd);
+  return{freshGrossPnl:round(grossPnl,6),freshGrossRoiPercent:round(grossPnl/Number(MARKET42.probeUsd)*100,6),becameRawPositive:grossPnl>0,fastPath:[buyVenue,sellVenue]};
+}
+
+async function runFastWatcher430(spreadBot,triangleBot,dislocationBot){
+  const startedAt=Date.now(),near=[];
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:x.bestDirection?.buyVenueKey||venueKey425(x.bestDirection?.buyVenue),sellVenueKey:x.bestDirection?.sellVenueKey||venueKey425(x.bestDirection?.sellVenue)});}
+  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score,buyVenueKey:venueKey425(x.bestDirection?.buyVenue),sellVenueKey:venueKey425(x.bestDirection?.sellVenue)});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score});}
+  near.sort((a,b)=>b.score-a.score);const shortlist=near.slice(0,SCAN422.watcherLimit);
+  const rows=await mapLimit421(shortlist,3,async item=>{try{if(item.pair){const fresh=await withTimeout421(fastWatcherDirectPath430(item),5500,`4.3 watcher ${item.pair}`);return{...item,...fresh,recheckedAt:now()};}return{...item,freshGrossPnl:item.grossPnl,freshGrossRoiPercent:round(Number(item.grossPnl)/Number(MARKET42.probeUsd)*100,6),becameRawPositive:false,recheckMode:"RECENT_DEEP_QUOTE_REUSED",recheckedAt:now()};}catch(error){return{...item,recheckError:error.message,becameRawPositive:false,recheckedAt:now()}}});
+  return{bot:"WATCHER_BOT",status:"COMPLETE",stage:"THREE_VENUE_SELECTED_PATH_RECHECK",rule:`Select strongest ${SCAN422.watcherLimit} near-misses; re-quote only selected venue path.`,watchlist:shortlist,rechecks:rows,promoted:rows.filter(x=>x.becameRawPositive),elapsedMs:Date.now()-startedAt};
+}
+
+async function quoteDirectSeed430(amount,seed){
+  const [baseToken,quoteToken]=seed.pair.split("/");const b=seed.bestDirection?.buyVenueKey||venueKey425(seed.bestDirection?.buyVenue),s=seed.bestDirection?.sellVenueKey||venueKey425(seed.bestDirection?.sellVenue);
+  const first=await market43VenueQuote(b,baseToken,quoteToken,amount),second=await market43VenueQuote(s,quoteToken,baseToken,Number(first.buyAmount));const grossPnl=Number(second.buyAmount)-Number(amount);
+  return{seedType:"DIRECT",pair:seed.pair,venues:[b,s],startAmount:Number(amount),finalAmount:Number(second.buyAmount),grossPnl:round(grossPnl,6),grossRoiPercent:round(grossPnl/Number(amount)*100,6)};
+}
+
+async function runLargeOpportunityBot430(spreadBot,triangleBot){
+  const startedAt=Date.now();const seeds=[];
+  for(const x of spreadBot.candidates||[])seeds.push({kind:"DIRECT",grossPnl:Number(x.bestDirection?.grossPnl||0),data:x});
+  for(const x of triangleBot.candidates||[])seeds.push({kind:"TRIANGLE",grossPnl:Number(x.grossPnl||0),data:x});
+  seeds.sort((a,b)=>b.grossPnl-a.grossPnl);if(!seeds.length)return{bot:"LARGE_OPPORTUNITY_BOT",status:"NO_POSITIVE_SEED",flashOptimization:null,elapsedMs:Date.now()-startedAt};
+  const chosen=seeds[0];
+  try{const[aave,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);const sizes=buildAdaptiveFlashSizes(aave.availableLiquidity),results=[];
+    for(const amount of sizes)try{const q=chosen.kind==="DIRECT"?await quoteDirectSeed430(amount,chosen.data):await quoteMarket43Triangle(amount,chosen.data.route,chosen.data.venues);const premiumUsd=Number(amount)*Number(aave.flashLoanPremiumBps)/10000,net=Number(q.grossPnl)-premiumUsd-gasModel.modeledGasUsd,required=flashRequiredNetProfitUsd(Number(amount));results.push({...q,flashLoanAmount:Number(amount),flashPremiumUsd:round(premiumUsd,6),modeledGasUsd:gasModel.modeledGasUsd,estimatedNetProfitUsd:round(net,6),requiredNetProfitUsd:round(required,6),qualifies:net>=required});}catch(error){results.push({flashLoanAmount:Number(amount),qualifies:false,error:error.message});}
+    const flashOptimization={seedType:chosen.kind,seed:chosen.data,sizesTested:sizes.length,results,candidates:results.filter(x=>x.qualifies).sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd)};
+    return{bot:"LARGE_OPPORTUNITY_BOT",status:"COMPLETE",seedType:chosen.kind,flashLiquidityUsd:aave.availableLiquidity,flashOptimization,elapsedMs:Date.now()-startedAt};
+  }catch(error){return{bot:"LARGE_OPPORTUNITY_BOT",status:"ERROR",flashOptimization:null,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
+}
+
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.2.5 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.3.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
   const [spreadBot,dislocationBot,aggregatorBot,liquidationBot]=await Promise.all([
-    withTimeout421(runFastSpreadBot422(),SCAN422.fastBotBudgetMs,"SPREAD_BOT").catch(()=>timeoutResult422("SPREAD_BOT",SCAN422.fastBotBudgetMs,startedAt)),
+    withTimeout421(runFastSpreadBot430(),SCAN422.fastBotBudgetMs,"SPREAD_BOT").catch(()=>timeoutResult422("SPREAD_BOT",SCAN422.fastBotBudgetMs,startedAt)),
     withTimeout421(runDislocationBot(),SCAN422.fastBotBudgetMs,"DISLOCATION_BOT").catch(()=>timeoutResult422("DISLOCATION_BOT",SCAN422.fastBotBudgetMs,startedAt)),
     withTimeout421(runAggregatorIntelligenceBot(),SCAN422.fastBotBudgetMs,"AGGREGATOR_INTELLIGENCE_BOT").catch(()=>timeoutResult422("AGGREGATOR_INTELLIGENCE_BOT",SCAN422.fastBotBudgetMs,startedAt)),
     withTimeout421(runLiquidationBatch422(),SCAN422.fastBotBudgetMs,"LIQUIDATION_BOT").catch(()=>timeoutResult422("LIQUIDATION_BOT",SCAN422.fastBotBudgetMs,startedAt))
@@ -5234,19 +5383,19 @@ async function scanBaseBotNetwork422(){
 
   // Stage 2: deep quote only a shortlisted triangle, not all 48 probes.
   let triangleBot;
-  try{triangleBot=await withTimeout421(runFastTriangleBot422(spreadBot),SCAN422.fastBotBudgetMs,"TRIANGLE_BOT");}
+  try{triangleBot=await withTimeout421(runFastTriangleBot430(spreadBot),SCAN422.fastBotBudgetMs,"TRIANGLE_BOT");}
   catch{triangleBot=timeoutResult422("TRIANGLE_BOT",SCAN422.fastBotBudgetMs,startedAt);}
 
   // Stage 3: shortlist first, then requote only the strongest bounded set.
   let watcherBot;
   try{
-    watcherBot=await withTimeout421(runFastWatcher425(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
+    watcherBot=await withTimeout421(runFastWatcher430(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
   }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",stage:"SELECTED_PATH_FAST_RECHECK",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
 
   // Stage 4: expensive flash sizing remains gated behind a raw-positive seed.
   let largeOpportunityBot;
-  if((triangleBot.candidates||[]).length){
-    try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot(triangleBot),12000,"LARGE_OPPORTUNITY_BOT");}
+  if((spreadBot.candidates||[]).length || (triangleBot.candidates||[]).length){
+    try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot430(spreadBot,triangleBot),12000,"LARGE_OPPORTUNITY_BOT");}
     catch(error){largeOpportunityBot={bot:"LARGE_OPPORTUNITY_BOT",status:"TIME_BUDGET_REACHED",flashOptimization:null,errors:[{error:error.message}]};}
   }else largeOpportunityBot={bot:"LARGE_OPPORTUNITY_BOT",status:"NO_POSITIVE_SEED",flashOptimization:null,elapsedMs:0};
 
@@ -5256,8 +5405,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.2.4 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"FAST_STAGED_MARKET_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.5 uses staged, bounded discovery with LI.FI quote repair, liquidation rechecks, and selected-path fast Watcher requotes. A raw-positive quote is not executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
+  scan421Log("BOT NETWORK 4.3.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"EXPANDED_THREE_VENUE_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapConstrainedVenue:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.3.0 expands read-only Base discovery to Aerodrome, Uniswap V3, and PancakeSwap V3. PancakeSwap pricing is constrained to its independent exchange through LI.FI quote transport. Raw-positive direct or triangle seeds may enter adaptive flash economics, but nothing is executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
