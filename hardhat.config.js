@@ -1,19 +1,16 @@
 require("@nomicfoundation/hardhat-ethers");
 const path = require("path");
 const url = process.env.BASE_RPC_URL || "";
-const baseFork = {
+
+// Hardhat is used only for ArbiFlow's local executor safety harness.
+// Base protocol reads are deliberately performed against BASE_RPC_URL directly
+// in BaseForkTest4152.js, avoiding Hardhat EDR's Base historical-hardfork issue.
+const hardhat = {
   chainId: 8453,
-  hardfork: "cancun",
-  chains: {
-    8453: {
-      // Base is not included in Hardhat 2's built-in hardfork history.
-      // The fork block used by ArbiFlow is post-Cancun/Ecotone, so historical
-      // eth_call execution on the pinned/current fork must resolve to Cancun.
-      hardforkHistory: { cancun: 0 }
-    }
-  }
+  hardfork: "cancun"
 };
-if (url) baseFork.forking = { url };
+if (url) hardhat.forking = { url };
+
 module.exports = {
   paths: {
     sources: path.join(__dirname, ".arbiflow-contracts"),
@@ -24,5 +21,5 @@ module.exports = {
     version: "0.8.24",
     settings: { optimizer: { enabled: true, runs: 200 }, evmVersion: "cancun" }
   },
-  networks: { hardhat: baseFork }
+  networks: { hardhat }
 };
