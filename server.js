@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.30.0";
+const VERSION = "4.30.1";
 
 /*
 =========================================================
@@ -6765,7 +6765,7 @@ app.get(
 4.30 CONTROLLED DISPOSABLE-FORK ATOMIC TEST
 =========================================================
 */
-app.post("/api/test/base/controlled-atomic", async (req,res)=>{
+const runControlledAtomicForkTest4301 = async (req,res)=>{
   const startedAt=Date.now();
   try{
     if(!ZEROX_API_KEY) return res.status(409).json({success:false,version:VERSION,status:"BLOCKED",blocker:"ZEROX_API_KEY_NOT_CONFIGURED",readOnly:true,mainnetBroadcast:false});
@@ -6781,7 +6781,11 @@ app.post("/api/test/base/controlled-atomic", async (req,res)=>{
     if(child.status!==0||!report?.success){return res.status(409).json({success:false,version:VERSION,status:"CONTROLLED_FORK_ATOMIC_TEST_FAILED_CLOSED",candidate:{marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor},syntheticForkOnly:true,currentMainnetEligibilityClaimed:false,error:(child.stderr||child.stdout||"CONTROLLED_TEST_FAILED").slice(-4000),report,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
     return res.json({...report,status:"CONTROLLED_FORK_ATOMIC_TEST_PASSED",candidateDiscoveryHealthFactor:candidate.healthFactor,currentMainnetEligibilityClaimed:false,elapsedMs:Date.now()-startedAt});
   }catch(e){return res.status(500).json({success:false,version:VERSION,status:"CONTROLLED_FORK_ATOMIC_TEST_ERROR",error:e?.message||String(e),syntheticForkOnly:true,currentMainnetEligibilityClaimed:false,mainnetBroadcast:false,elapsedMs:Date.now()-startedAt});}
-});
+};
+
+// Browser-accessible trigger plus POST compatibility. Both execute the same disposable-fork-only test.
+app.get("/api/test/base/controlled-atomic", runControlledAtomicForkTest4301);
+app.post("/api/test/base/controlled-atomic", runControlledAtomicForkTest4301);
 
 /*
 =========================================================
