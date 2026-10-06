@@ -10,6 +10,7 @@ const { spawnSync } = require("child_process");
 const {
   JsonRpcProvider,
   Contract,
+  ContractFactory,
   parseUnits,
   formatUnits,
   Interface,
@@ -33,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.37.0";
+const VERSION = "4.37.1";
 
 /*
 =========================================================
