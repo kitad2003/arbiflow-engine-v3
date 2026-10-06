@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.1.0";
+const VERSION = "4.2.0";
 
 /*
 =========================================================
@@ -287,6 +287,13 @@ const NETWORKS = {
           "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
         decimals: 18,
         stable: true
+      },
+
+      cbBTC: {
+        symbol: "cbBTC",
+        address:
+          "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+        decimals: 8
       }
     }
   },
@@ -4811,221 +4818,168 @@ app.get("/api/hunter/base/scan", async (req, res) => {
 
 /*
 =========================================================
-ARBIFLOW ENGINE 4.1 - MULTI-BOT OPPORTUNITY NETWORK
+ARBIFLOW ENGINE 4.2 - MARKET EXPANSION BOT NETWORK
 
-Read-only/paper discovery orchestration. Bots do not borrow,
-approve, sign, broadcast, or move funds. They discover and
-rank opportunities, then the existing adaptive flash optimizer
-is invoked only when discovery economics justify deeper work.
+Read-only/paper discovery. 4.2 expands the hunting ground:
+- dynamic Base pair/triangle generation across USDC, DAI, WETH, cbBTC
+- 10-block-chunk Aave liquidation discovery over a wider window
+- 0x + LI.FI route intelligence
+- explicit configuration reporting for 1inch and Velora
+- adaptive flash sizing only after a raw-positive direct triangle seed
+No wallet, signature, loan, swap, liquidation, or transaction is executed.
 =========================================================
 */
 
-const BOT_NETWORK = {
-  enabled: true,
+const MARKET42 = {
   network: "Base",
-  bots: [
-    "SPREAD_BOT",
-    "TRIANGLE_BOT",
-    "LIQUIDATION_BOT",
-    "LARGE_OPPORTUNITY_BOT",
-    "DISLOCATION_BOT",
-    "WATCHER_BOT",
-    "AGGREGATOR_INTELLIGENCE_BOT"
-  ]
+  stableAnchors: ["USDC", "DAI"],
+  routeTokens: ["USDC", "DAI", "WETH", "cbBTC"],
+  directVenues: ["AERODROME", "UNISWAP_V3"],
+  intelligenceProviders: ["0x", "LI.FI", "1inch", "Velora/ParaSwap"],
+  probeUsd: 100,
+  watcherNearMissUsd: 2,
+  liquidationBlocks: 2000,
+  liquidationMaxUsers: 120
 };
 
-function botScore({ estimatedNetUsd = 0, grossPnlUsd = 0, grossRoiPercent = 0, confidence = 0.5, depthUsd = 0 }) {
-  const pnl = Number.isFinite(Number(estimatedNetUsd)) ? Number(estimatedNetUsd) : Number(grossPnlUsd) || 0;
-  const roi = Number(grossRoiPercent) || 0;
-  const depth = Math.max(0, Number(depthUsd) || 0);
-  const score = 50 + Math.max(-35, Math.min(35, pnl / 5)) + Math.max(-10, Math.min(10, roi * 5)) + Math.min(5, Math.log10(depth + 1)) + (Number(confidence) - 0.5) * 10;
-  return round(Math.max(0, Math.min(100, score)), 2);
-}
-
-function bestDirectDirection(pairRow) {
-  const dirs = pairRow?.result?.directions || [];
-  return [...dirs].sort((a,b) => Number(b.grossPnl || 0) - Number(a.grossPnl || 0))[0] || null;
-}
-
-async function runSpreadBot() {
-  const startedAt = Date.now();
-  const observations = [];
-  const errors = [];
-  for (const [baseToken, quoteToken] of HUNTER_DIRECT_PAIRS) {
-    try {
-      const result = await compareBaseDirectVenues({ baseToken, quoteToken, amount: HUNTER_PROBE_USD });
-      const best = bestDirectDirection({ result });
-      observations.push({
-        type: "DIRECT_SPREAD",
-        pair: `${baseToken}/${quoteToken}`,
-        probeAmount: HUNTER_PROBE_USD,
-        bestDirection: best,
-        rawPositive: Boolean(best && Number(best.grossPnl) > 0),
-        score: botScore({ grossPnlUsd: best?.grossPnl, grossRoiPercent: best?.grossRoiPercent, depthUsd: HUNTER_PROBE_USD })
-      });
-    } catch (error) {
-      errors.push({ pair: `${baseToken}/${quoteToken}`, error: error.message });
+function market42DirectPairs() {
+  const out=[];
+  for (const anchor of MARKET42.stableAnchors) {
+    for (const token of MARKET42.routeTokens) {
+      if (anchor !== token) out.push([anchor, token]);
     }
   }
-  observations.sort((a,b) => b.score - a.score);
-  return { bot:"SPREAD_BOT", status:"COMPLETE", observations, candidates:observations.filter(x=>x.rawPositive), errors, elapsedMs:Date.now()-startedAt };
+  const seen=new Set();
+  return out.filter(([a,b])=>{ const k=[a,b].sort().join("/"); if(seen.has(k)) return false; seen.add(k); return true; });
 }
 
-async function runTriangleBot() {
-  const startedAt = Date.now();
-  const observations = [];
-  const errors = [];
-  for (const venues of hunterVenueCombos()) {
-    try {
-      const q = await quoteHunterTriangle(HUNTER_PROBE_USD, venues);
-      observations.push({ ...q, score:botScore({ grossPnlUsd:q.grossPnl, grossRoiPercent:q.grossRoiPercent, depthUsd:HUNTER_PROBE_USD }) });
-    } catch (error) {
-      errors.push({ venues, error:error.message });
-    }
-  }
-  observations.sort((a,b)=>b.score-a.score);
-  return { bot:"TRIANGLE_BOT", status:"COMPLETE", route:HUNTER_TRIANGLE, observations, candidates:observations.filter(x=>x.rawPositive), errors, elapsedMs:Date.now()-startedAt };
+function market42Triangles() {
+  const mids=MARKET42.routeTokens.filter(x=>x!=="USDC");
+  const out=[];
+  for (const a of mids) for (const b of mids) if (a!==b) out.push(["USDC",a,b,"USDC"]);
+  return out;
 }
 
-async function runLiquidationBot() {
-  const startedAt = Date.now();
-  try {
-    const result = await scanAaveBaseLiquidations({ blocks:500, maxUsers:40 });
-    const opportunities = [
-      ...result.liquidationEligible.map(x=>({ ...x, opportunityType:"AAVE_LIQUIDATION", score:botScore({ grossPnlUsd:0, confidence:0.8, depthUsd:x.totalDebtUsd }) })),
-      ...result.watchlist.map(x=>({ ...x, opportunityType:"AAVE_LIQUIDATION_WATCH", score:botScore({ grossPnlUsd:0, confidence:0.6, depthUsd:x.totalDebtUsd }) }))
-    ].sort((a,b)=>b.score-a.score);
-    return { bot:"LIQUIDATION_BOT", status:"COMPLETE", opportunities, counts:result.counts, errors:result.errors, profitabilityValidated:false, elapsedMs:Date.now()-startedAt };
-  } catch (error) {
-    return { bot:"LIQUIDATION_BOT", status:"ERROR", opportunities:[], errors:[{error:error.message}], profitabilityValidated:false, elapsedMs:Date.now()-startedAt };
-  }
+const BOT_NETWORK = {
+  enabled:true, network:"Base",
+  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","LIQUIDATION_BOT","LARGE_OPPORTUNITY_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
+};
+
+function botScore({ estimatedNetUsd=0,grossPnlUsd=0,grossRoiPercent=0,confidence=0.5,depthUsd=0 }) {
+  const pnl=Number.isFinite(Number(estimatedNetUsd))?Number(estimatedNetUsd):Number(grossPnlUsd)||0;
+  const roi=Number(grossRoiPercent)||0, depth=Math.max(0,Number(depthUsd)||0);
+  return round(Math.max(0,Math.min(100,50+Math.max(-35,Math.min(35,pnl/5))+Math.max(-10,Math.min(10,roi*5))+Math.min(5,Math.log10(depth+1))+(Number(confidence)-0.5)*10)),2);
+}
+function bestDirectDirection(pairRow){ const dirs=pairRow?.result?.directions||[]; return [...dirs].sort((a,b)=>Number(b.grossPnl||0)-Number(a.grossPnl||0))[0]||null; }
+
+function market42VenueCombos(){ const out=[]; for(const a of MARKET42.directVenues) for(const b of MARKET42.directVenues) for(const c of MARKET42.directVenues) out.push([a,b,c]); return out; }
+async function market42VenueQuote(venue,sellToken,buyToken,sellAmount){
+  if(venue==="AERODROME") return (await aerodromeBestQuote({sellToken,buyToken,sellAmount})).best;
+  if(venue==="UNISWAP_V3") return (await uniswapV3BestQuote({sellToken,buyToken,sellAmount})).best;
+  throw new Error(`Unsupported 4.2 direct venue: ${venue}`);
+}
+async function quoteMarket42Triangle(amount,route,venues){
+  const startedAt=Date.now(); let current=Number(amount); const legs=[];
+  for(let i=0;i<3;i++){ const q=await market42VenueQuote(venues[i],route[i],route[i+1],current); legs.push(q); current=Number(q.buyAmount); }
+  const grossPnl=current-Number(amount);
+  return {success:true,route,venues,startAmount:round(Number(amount),6),finalAmount:round(current,6),grossPnl:round(grossPnl,6),grossRoiPercent:round(grossPnl/Number(amount)*100,6),rawPositive:grossPnl>0,quoteWindowMs:Date.now()-startedAt,legs};
 }
 
-async function runDislocationBot() {
-  const startedAt = Date.now();
-  const observations = [];
-  const errors = [];
-  for (const pair of [["USDC","DAI"],["DAI","USDC"]]) {
-    try {
-      const result = await compareBaseDirectVenues({ baseToken:pair[0], quoteToken:pair[1], amount:HUNTER_PROBE_USD });
-      const best = bestDirectDirection({ result });
-      observations.push({ pair:`${pair[0]}/${pair[1]}`, bestDirection:best, rawPositive:Boolean(best && Number(best.grossPnl)>0), score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:HUNTER_PROBE_USD}) });
-    } catch (error) { errors.push({pair:`${pair[0]}/${pair[1]}`,error:error.message}); }
-  }
-  observations.sort((a,b)=>b.score-a.score);
-  return { bot:"DISLOCATION_BOT", status:"COMPLETE", observations, candidates:observations.filter(x=>x.rawPositive), errors, elapsedMs:Date.now()-startedAt };
+async function runMarketDiscoveryBot(){
+  const pairs=market42DirectPairs(), triangles=market42Triangles();
+  return {bot:"MARKET_DISCOVERY_BOT",status:"COMPLETE",tokenUniverse:MARKET42.routeTokens,directPairUniverse:pairs.map(x=>x.join("/")),triangleUniverse:triangles.map(x=>x.join("->")),directVenues:MARKET42.directVenues,intelligenceProviders:MARKET42.intelligenceProviders,counts:{tokens:MARKET42.routeTokens.length,directPairs:pairs.length,triangleRoutes:triangles.length,venueCombinationsPerTriangle:market42VenueCombos().length,totalTriangleProbes:triangles.length*market42VenueCombos().length}};
 }
 
-async function runWatcherBot(spreadBot, triangleBot, dislocationBot) {
-  const near = [];
-  for (const x of spreadBot.observations || []) {
-    const p = Number(x.bestDirection?.grossPnl || -Infinity);
-    if (p <= 0 && p >= -2) near.push({ source:"SPREAD_BOT", pair:x.pair, grossPnl:p, score:x.score });
-  }
-  for (const x of triangleBot.observations || []) {
-    const p = Number(x.grossPnl || -Infinity);
-    if (p <= 0 && p >= -2) near.push({ source:"TRIANGLE_BOT", venues:x.venues, grossPnl:p, score:x.score });
-  }
-  for (const x of dislocationBot.observations || []) {
-    const p = Number(x.bestDirection?.grossPnl || -Infinity);
-    if (p <= 0 && p >= -2) near.push({ source:"DISLOCATION_BOT", pair:x.pair, grossPnl:p, score:x.score });
-  }
-  near.sort((a,b)=>b.score-a.score);
-
-  // Freshly re-quote the strongest near-misses instead of only recording them.
-  const rechecks = [];
-  for (const item of near.slice(0, 8)) {
-    try {
-      if (item.pair) {
-        const [baseToken, quoteToken] = item.pair.split("/");
-        const result = await compareBaseDirectVenues({ baseToken, quoteToken, amount:HUNTER_PROBE_USD });
-        const best = bestDirectDirection({ result });
-        rechecks.push({ ...item, freshGrossPnl:Number(best?.grossPnl ?? NaN), freshGrossRoiPercent:Number(best?.grossRoiPercent ?? NaN), becameRawPositive:Boolean(best && Number(best.grossPnl)>0), recheckedAt:now() });
-      } else if (item.venues) {
-        const q = await quoteHunterTriangle(HUNTER_PROBE_USD, item.venues);
-        rechecks.push({ ...item, freshGrossPnl:Number(q.grossPnl), freshGrossRoiPercent:Number(q.grossRoiPercent), becameRawPositive:Boolean(q.rawPositive), recheckedAt:now() });
-      }
-    } catch (error) {
-      rechecks.push({ ...item, recheckError:error.message, recheckedAt:now() });
-    }
-  }
-  return { bot:"WATCHER_BOT", status:"COMPLETE", rule:"Keep raw near-misses within $2 of break-even hot and immediately fresh-requote the strongest items.", watchlist:near, rechecks, promoted:rechecks.filter(x=>x.becameRawPositive) };
+async function runSpreadBot(){
+  const startedAt=Date.now(), observations=[],errors=[];
+  for(const [baseToken,quoteToken] of market42DirectPairs()) try{
+    const result=await compareBaseDirectVenues({baseToken,quoteToken,amount:MARKET42.probeUsd}); const best=bestDirectDirection({result});
+    observations.push({type:"DIRECT_SPREAD",pair:`${baseToken}/${quoteToken}`,probeAmount:MARKET42.probeUsd,bestDirection:best,rawPositive:Boolean(best&&Number(best.grossPnl)>0),score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:MARKET42.probeUsd})});
+  }catch(error){errors.push({pair:`${baseToken}/${quoteToken}`,error:error.message});}
+  observations.sort((a,b)=>b.score-a.score); return {bot:"SPREAD_BOT",status:"COMPLETE",observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
-async function runAggregatorIntelligenceBot() {
-  const startedAt = Date.now();
-  const network = NETWORKS.base;
-  const observations = [];
-  const errors = [];
-  for (const [sellToken, buyToken] of HUNTER_DIRECT_PAIRS) {
-    try {
-      const forward = await zeroXPrice({ network, sellToken, buyToken, sellAmount:HUNTER_PROBE_USD });
-      observations.push({ provider:"0x", role:"AGGREGATOR_INTELLIGENCE_ONLY", pair:`${sellToken}/${buyToken}`, sellAmount:HUNTER_PROBE_USD, buyAmount:Number(forward.buyAmount), readOnly:true });
-    } catch (error) {
-      errors.push({ provider:"0x", pair:`${sellToken}/${buyToken}`, error:error.message });
-    }
-  }
-  return { bot:"AGGREGATOR_INTELLIGENCE_BOT", status:errors.length===HUNTER_DIRECT_PAIRS.length?"ERROR":"COMPLETE", rule:"Aggregator quotes are route intelligence only and are never counted as independent DEX venues.", providers:["0x"], observations, errors, elapsedMs:Date.now()-startedAt };
+async function runTriangleBot(){
+  const startedAt=Date.now(),observations=[],errors=[];
+  for(const route of market42Triangles()) for(const venues of market42VenueCombos()) try{
+    const q=await quoteMarket42Triangle(MARKET42.probeUsd,route,venues); observations.push({...q,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})});
+  }catch(error){errors.push({route,venues,error:error.message});}
+  observations.sort((a,b)=>b.score-a.score); return {bot:"TRIANGLE_BOT",status:"COMPLETE",routesGenerated:market42Triangles().length,observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
-async function runLargeOpportunityBot(triangleBot) {
-  const startedAt = Date.now();
-  const positive = (triangleBot.candidates || []).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl));
-  if (!positive.length) return { bot:"LARGE_OPPORTUNITY_BOT", status:"NO_POSITIVE_SEED", flashOptimization:null, elapsedMs:Date.now()-startedAt };
-  try {
-    const [aave, gasModel] = await Promise.all([getAaveBaseFlashState("USDC"), getBaseFlashModeledGasCostUsd()]);
-    const flashOptimization = await optimizeHunterTriangle(positive[0], aave, gasModel);
-    return { bot:"LARGE_OPPORTUNITY_BOT", status:"COMPLETE", seed:positive[0], flashLiquidityUsd:aave.availableLiquidity, flashOptimization, elapsedMs:Date.now()-startedAt };
-  } catch (error) {
-    return { bot:"LARGE_OPPORTUNITY_BOT", status:"ERROR", flashOptimization:null, errors:[{error:error.message}], elapsedMs:Date.now()-startedAt };
-  }
+async function runLiquidationBot(){
+  const startedAt=Date.now(); try{
+    const result=await scanAaveBaseLiquidations({blocks:MARKET42.liquidationBlocks,maxUsers:MARKET42.liquidationMaxUsers});
+    const opportunities=[...result.liquidationEligible.map(x=>({...x,opportunityType:"AAVE_LIQUIDATION",score:botScore({confidence:.8,depthUsd:x.totalDebtUsd})})),...result.watchlist.map(x=>({...x,opportunityType:"AAVE_LIQUIDATION_WATCH",score:botScore({confidence:.6,depthUsd:x.totalDebtUsd})}))].sort((a,b)=>b.score-a.score);
+    return {bot:"LIQUIDATION_BOT",status:"COMPLETE",scanWindowBlocks:MARKET42.liquidationBlocks,maxUsers:MARKET42.liquidationMaxUsers,opportunities,counts:result.counts,errors:result.errors,profitabilityValidated:false,elapsedMs:Date.now()-startedAt};
+  }catch(error){return {bot:"LIQUIDATION_BOT",status:"ERROR",opportunities:[],errors:[{error:error.message}],profitabilityValidated:false,elapsedMs:Date.now()-startedAt};}
 }
 
-async function scanBaseBotNetwork() {
-  const startedAt = Date.now();
-  const [spreadBot, triangleBot, liquidationBot, dislocationBot, aggregatorBot] = await Promise.all([
-    runSpreadBot(), runTriangleBot(), runLiquidationBot(), runDislocationBot(), runAggregatorIntelligenceBot()
-  ]);
-  const watcherBot = await runWatcherBot(spreadBot, triangleBot, dislocationBot);
-  const largeOpportunityBot = await runLargeOpportunityBot(triangleBot);
-  const bots = [spreadBot, triangleBot, liquidationBot, largeOpportunityBot, dislocationBot, watcherBot, aggregatorBot];
-  const ranked = [];
-  for (const x of spreadBot.candidates || []) ranked.push({ source:"SPREAD_BOT", type:"ARBITRAGE", label:x.pair, score:x.score, rawPositive:true });
-  for (const x of triangleBot.candidates || []) ranked.push({ source:"TRIANGLE_BOT", type:"TRIANGULAR_ARBITRAGE", label:HUNTER_TRIANGLE.join("->"), venues:x.venues, score:x.score, rawPositive:true });
-  for (const x of liquidationBot.opportunities || []) ranked.push({ source:"LIQUIDATION_BOT", type:x.opportunityType, label:x.user, score:x.score, profitabilityValidated:false });
-  ranked.sort((a,b)=>b.score-a.score);
-  const flashCandidates = largeOpportunityBot.flashOptimization?.candidates || [];
-  return {
-    mode:"MULTI_BOT_OPPORTUNITY_DISCOVERY",
-    network:"Base",
-    botNetwork:BOT_NETWORK,
-    bots,
-    rankedOpportunityQueue:ranked,
-    counts:{ botsRun:bots.length, rankedOpportunities:ranked.length, flashCandidates:flashCandidates.length, watcherItems:watcherBot.watchlist.length, watcherRechecks:watcherBot.rechecks.length, watcherPromoted:watcherBot.promoted.length, aggregatorObservations:aggregatorBot.observations.length },
-    elapsedMs:Date.now()-startedAt,
-    executableOpportunities:0,
-    executable:false,
-    paperPass:false,
-    liveExecutionEnabled:false,
-    minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,
-    safety:{ discoveryOnly:true, walletRequired:false, privateKeyRequired:false, flashLoanRequested:false, fundsMoved:false, transactionBroadcast:false },
-    nextValidationRequired:["expand direct DEX and token universe","add 1inch and Velora/ParaSwap intelligence after provider credentials/interfaces are configured; never treat aggregators as independent venues","calculate collateral/debt-specific liquidation economics","fresh quote confirmation","transaction-level gas estimation","atomic receiver contract","full transaction simulation","on-chain minimum-profit protection"],
-    warning:"Engine 4.1 bot network is read-only discovery. Bots rank observations; they do not execute. A raw-positive quote is not a profitable or executable trade until all costs, freshness, atomic simulation, and minimum-profit protections pass."
-  };
+async function runDislocationBot(){
+  const startedAt=Date.now(),observations=[],errors=[];
+  for(const pair of [["USDC","DAI"],["DAI","USDC"]]) try{ const result=await compareBaseDirectVenues({baseToken:pair[0],quoteToken:pair[1],amount:MARKET42.probeUsd}); const best=bestDirectDirection({result}); observations.push({pair:pair.join("/"),bestDirection:best,rawPositive:Boolean(best&&Number(best.grossPnl)>0),score:botScore({grossPnlUsd:best?.grossPnl,grossRoiPercent:best?.grossRoiPercent,depthUsd:MARKET42.probeUsd})}); }catch(error){errors.push({pair:pair.join("/"),error:error.message});}
+  observations.sort((a,b)=>b.score-a.score); return {bot:"DISLOCATION_BOT",status:"COMPLETE",observations,candidates:observations.filter(x=>x.rawPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
-app.get("/api/bots/status", (req,res) => {
-  res.json({ success:true, engine:"ArbiFlow Opportunity Engine", version:VERSION, mode:"MULTI_BOT_OPPORTUNITY_DISCOVERY", network:"Base", botNetwork:BOT_NETWORK, liveExecutionEnabled:false, time:now() });
-});
+async function runWatcherBot(spreadBot,triangleBot,dislocationBot){
+  const near=[];
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score});}
+  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score});}
+  near.sort((a,b)=>b.score-a.score); const rechecks=[];
+  for(const item of near.slice(0,12)) try{
+    if(item.pair){const [a,b]=item.pair.split("/");const result=await compareBaseDirectVenues({baseToken:a,quoteToken:b,amount:MARKET42.probeUsd});const best=bestDirectDirection({result});rechecks.push({...item,freshGrossPnl:Number(best?.grossPnl??NaN),freshGrossRoiPercent:Number(best?.grossRoiPercent??NaN),becameRawPositive:Boolean(best&&Number(best.grossPnl)>0),recheckedAt:now()});}
+    else {const q=await quoteMarket42Triangle(MARKET42.probeUsd,item.route,item.venues);rechecks.push({...item,freshGrossPnl:Number(q.grossPnl),freshGrossRoiPercent:Number(q.grossRoiPercent),becameRawPositive:Boolean(q.rawPositive),recheckedAt:now()});}
+  }catch(error){rechecks.push({...item,recheckError:error.message,recheckedAt:now()});}
+  return {bot:"WATCHER_BOT",status:"COMPLETE",rule:"Keep raw near-misses within $2 hot and fresh-requote the strongest 12 items.",watchlist:near,rechecks,promoted:rechecks.filter(x=>x.becameRawPositive)};
+}
 
-app.get("/api/bots/base/scan", async (req,res) => {
-  try {
-    const result = await scanBaseBotNetwork();
-    return res.json({ success:true, engine:"ArbiFlow Opportunity Engine", version:VERSION, ...result, time:now() });
-  } catch (error) {
-    return res.status(400).json({ success:false, engine:"ArbiFlow Opportunity Engine", version:VERSION, mode:"MULTI_BOT_OPPORTUNITY_DISCOVERY", liveExecutionEnabled:false, error:error.message, time:now() });
+const LIFI_PROBE_ADDRESS="0x0000000000000000000000000000000000000001";
+async function lifi42Quote(sellToken,buyToken,sellAmount){
+  const network=NETWORKS.base, s=network.tokens[sellToken], b=network.tokens[buyToken]; if(!s||!b) throw new Error("Unsupported LI.FI token");
+  const raw=ethers.parseUnits(String(sellAmount),s.decimals).toString();
+  const u=new URL("https://li.quest/v1/quote");
+  u.searchParams.set("fromChain","8453");u.searchParams.set("toChain","8453");u.searchParams.set("fromToken",s.address);u.searchParams.set("toToken",b.address);u.searchParams.set("fromAmount",raw);u.searchParams.set("fromAddress",LIFI_PROBE_ADDRESS);u.searchParams.set("toAddress",LIFI_PROBE_ADDRESS);u.searchParams.set("slippage","0.003");u.searchParams.set("allowBridges","none");
+  const headers={accept:"application/json"}; if(process.env.LIFI_API_KEY) headers["x-lifi-api-key"]=process.env.LIFI_API_KEY;
+  const r=await fetch(u,{headers}); const text=await r.text(); let data; try{data=JSON.parse(text)}catch{throw new Error(`LI.FI non-JSON response (${r.status})`)} if(!r.ok) throw new Error(data?.message||data?.error||`LI.FI HTTP ${r.status}`);
+  const toAmount=data?.estimate?.toAmount; if(!toAmount) throw new Error("LI.FI quote missing estimate.toAmount");
+  return {provider:"LI.FI",role:"AGGREGATOR_INTELLIGENCE_ONLY",tool:data.tool||null,pair:`${sellToken}/${buyToken}`,sellAmount:Number(sellAmount),buyAmount:Number(ethers.formatUnits(toAmount,b.decimals)),toAmountMin:data?.estimate?.toAmountMin?Number(ethers.formatUnits(data.estimate.toAmountMin,b.decimals)):null,readOnly:true};
+}
+
+async function runAggregatorIntelligenceBot(){
+  const startedAt=Date.now(),network=NETWORKS.base,observations=[],errors=[]; const pairs=market42DirectPairs();
+  for(const [sellToken,buyToken] of pairs){
+    try{const q=await zeroXPrice({network,sellToken,buyToken,sellAmount:MARKET42.probeUsd});observations.push({provider:"0x",role:"AGGREGATOR_INTELLIGENCE_ONLY",pair:`${sellToken}/${buyToken}`,sellAmount:MARKET42.probeUsd,buyAmount:Number(q.buyAmount),readOnly:true});}catch(error){errors.push({provider:"0x",pair:`${sellToken}/${buyToken}`,error:error.message});}
+    try{observations.push(await lifi42Quote(sellToken,buyToken,MARKET42.probeUsd));}catch(error){errors.push({provider:"LI.FI",pair:`${sellToken}/${buyToken}`,error:error.message});}
   }
-});
+  const providerStatus=[
+    {provider:"0x",configured:Boolean(process.env.ZEROX_API_KEY),active:true},
+    {provider:"LI.FI",configured:Boolean(process.env.LIFI_API_KEY),active:true,note:process.env.LIFI_API_KEY?"API key supplied":"attempting public/read-only quote access; add LIFI_API_KEY if provider requires registration"},
+    {provider:"1inch",configured:Boolean(process.env.ONEINCH_API_KEY),active:false,note:"credential-aware placeholder; no requests are made until an approved API integration is configured"},
+    {provider:"Velora/ParaSwap",configured:Boolean(process.env.VELORA_API_KEY),active:false,note:"credential-aware placeholder; no requests are made until provider interface is configured"}
+  ];
+  return {bot:"AGGREGATOR_INTELLIGENCE_BOT",status:observations.length?"COMPLETE":"NO_PROVIDER_QUOTES",rule:"Aggregators are routing intelligence only; overlapping underlying liquidity is never counted as an independent arbitrage venue.",providers:providerStatus,observations,errors,elapsedMs:Date.now()-startedAt};
+}
+
+async function runLargeOpportunityBot(triangleBot){
+  const startedAt=Date.now(); const positive=(triangleBot.candidates||[]).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl)); if(!positive.length)return{bot:"LARGE_OPPORTUNITY_BOT",status:"NO_POSITIVE_SEED",flashOptimization:null,elapsedMs:Date.now()-startedAt};
+  const seed=positive[0];
+  try{const [aave,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);const sizes=buildAdaptiveFlashSizes(aave.availableLiquidity),results=[];for(const amount of sizes)try{const t=await quoteMarket42Triangle(amount,seed.route,seed.venues);const premiumUsd=Number(amount)*Number(aave.flashLoanPremiumBps)/10000,net=t.grossPnl-premiumUsd-gasModel.modeledGasUsd,required=flashRequiredNetProfitUsd(Number(amount));results.push({...t,flashLoanAmount:Number(amount),flashPremiumUsd:round(premiumUsd,6),modeledGasUsd:gasModel.modeledGasUsd,estimatedNetProfitUsd:round(net,6),requiredNetProfitUsd:round(required,6),qualifies:net>=required});}catch(error){results.push({flashLoanAmount:Number(amount),qualifies:false,error:error.message});}const flashOptimization={seedRoute:seed.route,sizesTested:sizes.length,results,candidates:results.filter(x=>x.qualifies).sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd)};return{bot:"LARGE_OPPORTUNITY_BOT",status:"COMPLETE",seed,flashLiquidityUsd:aave.availableLiquidity,flashOptimization,elapsedMs:Date.now()-startedAt};}catch(error){return{bot:"LARGE_OPPORTUNITY_BOT",status:"ERROR",flashOptimization:null,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
+}
+
+async function scanBaseBotNetwork(){
+  const startedAt=Date.now(); const marketBot=await runMarketDiscoveryBot();
+  const [spreadBot,triangleBot,liquidationBot,dislocationBot,aggregatorBot]=await Promise.all([runSpreadBot(),runTriangleBot(),runLiquidationBot(),runDislocationBot(),runAggregatorIntelligenceBot()]);
+  const watcherBot=await runWatcherBot(spreadBot,triangleBot,dislocationBot), largeOpportunityBot=await runLargeOpportunityBot(triangleBot); const bots=[marketBot,spreadBot,triangleBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  for(const x of spreadBot.candidates||[])ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
+  for(const x of triangleBot.candidates||[])ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
+  for(const x of liquidationBot.opportunities||[])ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false}); ranked.sort((a,b)=>b.score-a.score);
+  const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
+  return {mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:marketBot.counts.totalTriangleProbes,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist.length,watcherRechecks:watcherBot.rechecks.length,watcherPromoted:watcherBot.promoted.length,aggregatorObservations:aggregatorBot.observations.length},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},nextValidationRequired:["validate cbBTC direct-liquidity coverage on Aerodrome/Uniswap V3","add a third independently quoted Base DEX after its official quote interface is verified","activate approved 1inch and Velora API adapters when credentials/interfaces are configured","calculate collateral/debt-specific liquidation economics","transaction-level gas estimation","atomic receiver contract","full transaction simulation","on-chain minimum-profit protection"],warning:"Engine 4.2 is read-only market expansion. Raw-positive quotes are not executable trades until costs, freshness, atomic simulation and minimum-profit protections pass."};
+}
+
+app.get("/api/bots/status",(req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,market:MARKET42,liveExecutionEnabled:false,time:now()}));
+app.get("/api/bots/base/scan",async(req,res)=>{try{const result=await scanBaseBotNetwork();return res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,...result,time:now()});}catch(error){return res.status(400).json({success:false,engine:"ArbiFlow Opportunity Engine",version:VERSION,mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",liveExecutionEnabled:false,error:error.message,time:now()});}});
 
 /*
 =========================================================
