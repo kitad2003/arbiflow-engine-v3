@@ -1,14 +1,15 @@
 {
   "name": "arbiflow-engine-v3",
-  "version": "4.37.2",
+  "version": "4.38.0",
   "private": true,
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node Startup4300.js",
     "test:fork": "hardhat run --no-compile BaseForkTest4300.js",
-    "check": "node --check server.js && node --check Startup4300.js && node --check BaseForkTest4300.js && node --check MorphoCandidateForkGate4300.js && node --check ControlledAtomicForkTest4300.js",
-    "controlled-atomic-test": "hardhat run --no-compile ControlledAtomicForkTest4300.js"
+    "check": "node --check server.js && node --check Startup4300.js && node --check BaseForkTest4300.js && node --check MorphoCandidateForkGate4300.js && node --check ControlledAtomicForkTest4300.js && node --check ControlledKyberAtomicForkTest4350.js && node --check ProductionBoundForkTest4380.js",
+    "controlled-atomic-test": "hardhat run --no-compile ControlledAtomicForkTest4300.js",
+    "production-bound-fork-test": "hardhat run --no-compile ProductionBoundForkTest4380.js"
   },
   "engines": {
     "node": ">=20"

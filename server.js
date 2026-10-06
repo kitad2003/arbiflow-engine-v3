@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.37.2";
+const VERSION = "4.38.0";
 
 /*
 =========================================================
@@ -6933,7 +6933,26 @@ const productionDeploymentPlan4370 = async ()=>{
 };
 
 app.get("/api/production/base/deployment-plan", async (req,res)=>{const r=await productionDeploymentPlan4370();return res.status(r.success?200:409).json(r);});
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.37.0_UNSIGNED_PRODUCTION_DEPLOYMENT_PLAN",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+
+const runProductionBoundForkValidation4380 = async (req,res)=>{
+  const startedAt=Date.now();
+  try{
+    const readiness=await productionDeploymentReadiness4360();
+    if(!readiness.success) return res.status(409).json({success:false,version:VERSION,classification:"PRODUCTION_BOUND_FORK_BLOCKED",blocker:"PRODUCTION_EXECUTOR_CONFIGURATION_NOT_VALIDATED",readiness,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+    const morpho=await runMorphoLiquidationBot450();
+    const pool=[...(morpho?.opportunities||[]),...(morpho?.watchlist||[])].filter(x=>x?.marketId&&x?.user).sort((a,b)=>Number(a.healthFactor??99)-Number(b.healthFactor??99));
+    if(!pool.length) return res.status(409).json({success:false,version:VERSION,classification:"PRODUCTION_BOUND_FORK_WAIT",blocker:"NO_MORPHO_CANDIDATE_AVAILABLE",productionExecutorAddress:process.env.ARBIFLOW_PRODUCTION_EXECUTOR_ADDRESS,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+    const candidate=pool[0],hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),reportPath=path.join(__dirname,"production-bound-fork-report-4380.json");
+    try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+    const child=spawnSync(hardhatBin,["run","--no-compile","ProductionBoundForkTest4380.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_CONTROLLED_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_PRODUCTION_BOUND_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+    let report=null;try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+    if(child.status!==0||!report?.success) return res.status(409).json({success:false,version:VERSION,classification:"PRODUCTION_BOUND_FORK_FAILED_CLOSED",candidate:{marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor},error:(child.stderr||child.stdout||"PRODUCTION_BOUND_FORK_FAILED").slice(-4000),report,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    return res.json({...report,classification:"PRODUCTION_BOUND_FORK_VALIDATED",candidateDiscoveryHealthFactor:candidate.healthFactor,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+  }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"PRODUCTION_BOUND_FORK_ERROR",error:e?.message||String(e),liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
+};
+app.get("/api/test/base/production-bound-fork",runProductionBoundForkValidation4380);
+app.post("/api/test/base/production-bound-fork",runProductionBoundForkValidation4380);
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.38.0_PRODUCTION_BOUND_FORK_VALIDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
