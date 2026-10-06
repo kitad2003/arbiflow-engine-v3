@@ -1,0 +1,19 @@
+{
+  "name": "arbiflow-engine-v3",
+  "version": "3.0.0",
+  "description": "ArbiFlow Engine 3.0 - multi-network arbitrage discovery, optimization and paper trading engine",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
