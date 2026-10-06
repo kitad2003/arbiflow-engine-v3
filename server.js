@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.37.1";
+const VERSION = "4.37.2";
 
 /*
 =========================================================
@@ -6916,14 +6916,14 @@ app.get("/api/production/base/deployment-readiness", async (req,res)=>{const r=a
 const productionDeploymentPlan4370 = async ()=>{
  const owner=(process.env.ARBIFLOW_PRODUCTION_OWNER_ADDRESS||"0x1d997b6f18bb70da65bab5469eac8c7c2a047394").trim(),addr=/^0x[a-fA-F0-9]{40}$/;
  const artifactPath=path.join(__dirname,"artifacts",".arbiflow-contracts","ArbiFlowAtomicExecutor430.sol","ArbiFlowAtomicExecutor430.json");
- const out={version:VERSION,success:false,classification:"PRODUCTION_DEPLOYMENT_PLAN_BLOCKED",readOnly:true,unsignedOnly:true,privateKeyRequired:false,signatureRequested:false,transactionSubmitted:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,chain:"base",chainId:8453,ownerAddress:addr.test(owner)?owner:null,aavePool:AAVE_V3_BASE.pool,morpho:MORPHO_BLUE_4210,constructorArguments:[AAVE_V3_BASE.pool,MORPHO_BLUE_4210,addr.test(owner)?owner:null],generatedAt:new Date().toISOString()};
+ const out={version:VERSION,success:false,classification:"PRODUCTION_DEPLOYMENT_PLAN_BLOCKED",readOnly:true,unsignedOnly:true,privateKeyRequired:false,signatureRequested:false,transactionSubmitted:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,chain:"base",chainId:8453,ownerAddress:addr.test(owner)?owner:null,aavePool:AAVE_V3_BASE.pool,morpho:MORPHO_BLUE_4210,constructorArguments:[AAVE_V3_BASE.pool,MORPHO_BLUE_4210],ownerSetBy:"DEPLOYMENT_MSG_SENDER",generatedAt:new Date().toISOString()};
  try{
   if(!addr.test(owner))throw new Error("INVALID_PRODUCTION_OWNER_ADDRESS");
   if(!fs.existsSync(artifactPath))throw new Error("ATOMIC_ARTIFACT_NOT_FOUND");
   const artifact=JSON.parse(fs.readFileSync(artifactPath,"utf8"));if(!artifact.bytecode||artifact.bytecode==="0x")throw new Error("ATOMIC_BYTECODE_MISSING");
   const provider=new JsonRpcProvider(RPC_URLS.base),net=await provider.getNetwork();if(Number(net.chainId)!==8453)throw new Error("BASE_CHAIN_ID_MISMATCH");
   const factory=new ContractFactory(artifact.abi,artifact.bytecode);
-  const tx=await factory.getDeployTransaction(AAVE_V3_BASE.pool,MORPHO_BLUE_4210,owner);
+  const tx=await factory.getDeployTransaction(AAVE_V3_BASE.pool,MORPHO_BLUE_4210);
   const data=tx.data; if(!data||!/^0x[0-9a-fA-F]+$/.test(data))throw new Error("DEPLOYMENT_DATA_BUILD_FAILED");
   let estimatedGas=null,gasEstimateError=null;
   try{estimatedGas=(await provider.estimateGas({from:owner,data})).toString()}catch(e){gasEstimateError=e?.shortMessage||e?.message||String(e)}
