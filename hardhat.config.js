@@ -4,7 +4,7 @@ const url = process.env.BASE_RPC_URL || "";
 
 // Hardhat is used only for ArbiFlow's local executor safety harness.
 // Base protocol reads are deliberately performed against BASE_RPC_URL directly
-// in BaseForkTest4160.js, avoiding Hardhat EDR's Base historical-hardfork issue.
+// in BaseForkTest4170.js, avoiding Hardhat EDR's Base historical-hardfork issue.
 const hardhat = {
   chainId: 8453,
   hardfork: "cancun"
