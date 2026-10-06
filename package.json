@@ -1,13 +1,13 @@
 {
   "name": "arbiflow-engine-v3",
-  "version": "4.14.2",
+  "version": "4.14.3",
   "private": true,
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node Startup4142.js",
-    "test:fork": "hardhat run BaseForkTest4142.js",
-    "check": "node --check server.js && node --check Startup4142.js && node --check BaseForkTest4142.js"
+    "start": "node Startup4143.js",
+    "test:fork": "hardhat run --no-compile BaseForkTest4143.js",
+    "check": "node --check server.js && node --check Startup4143.js && node --check BaseForkTest4143.js"
   },
   "engines": {
     "node": ">=20"
