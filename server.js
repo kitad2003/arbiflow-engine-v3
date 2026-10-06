@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.8.0";
+const VERSION = "4.9.0";
 
 /*
 =========================================================
@@ -5522,49 +5522,76 @@ function runMorphoPreLiquidationDiscovery470(morphoBot){
 }
 
 
-function registerMorphoRouteTokens480(row){
+function registerMorphoRouteTokens490(row){
   const n=NETWORKS.base.tokens;
   if(row?.loanAsset&&row?.loanAssetAddress&&!n[row.loanAsset]) n[row.loanAsset]={symbol:row.loanAsset,address:row.loanAssetAddress,decimals:row.loanAsset==="USDC"?6:18,stable:true};
   if(row?.collateralAsset&&row?.collateralAssetAddress&&!n[row.collateralAsset]) n[row.collateralAsset]={symbol:row.collateralAsset,address:row.collateralAssetAddress,decimals:18,stable:true};
 }
-async function runLiquidationRouteOptimizer480(morphoBot,projectedBot,liquidationEconomicsBot){
+function uniqueSorted490(values,maxRepay){
+  return [...new Set(values.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<=maxRepay).map(x=>Math.round(x)))].sort((a,b)=>a-b);
+}
+async function runLiquidationRouteOptimizer490(morphoBot,projectedBot,liquidationEconomicsBot){
   const startedAt=Date.now(),tests=[],errors=[];
   const flashLiquidity=Number(liquidationEconomicsBot?.financing?.availableFlashLiquidityUsd||0);
   const premiumBps=Number(liquidationEconomicsBot?.financing?.flashLoanPremiumBps||5);
   let gasUsd=0; try{gasUsd=Number((await getBaseFlashModeledGasCostUsd())?.modeledGasUsd||0)}catch(e){errors.push({stage:"GAS",error:e.message})}
   const sourceByKey=new Map([...(morphoBot.opportunities||[]),...(morphoBot.watchlist||[])].map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
   const targets=[...(projectedBot.critical||[]),...(projectedBot.high||[])].slice(0,3);
-  const jobs=[];
-  for(const target of targets){
-    const src=sourceByKey.get(`${target.marketId}:${String(target.user).toLowerCase()}`); if(!src)continue;
-    registerMorphoRouteTokens480(src);
-    const maxRepay=Math.min(Number(target.borrowAssetsUsd||0),flashLiquidity>0?flashLiquidity:Number(target.borrowAssetsUsd||0));
-    const sizes=[10000,50000,100000,250000,500000,1000000].filter(x=>x<=maxRepay);
-    if(maxRepay>0&&!sizes.length)sizes.push(maxRepay);
-    for(const repayUsd of sizes) jobs.push({target,src,repayUsd});
-  }
-  const rows=await mapLimit421(jobs,3,async job=>{
-    const {target,src,repayUsd}=job;
+  const quoteCache=new Map();
+
+  async function quoteExit(src,target,repayUsd,phase){
     const incentiveRate=Number(target.estimatedLiquidationIncentivePercent||0)/100;
     const collateralToSell=repayUsd*(1+incentiveRate);
+    const cacheKey=`${src.collateralAsset}:${src.loanAsset}:${round(collateralToSell,6)}`;
     try{
-      const q=await withTimeout421(zeroXPrice({network:NETWORKS.base,sellToken:src.collateralAsset,buyToken:src.loanAsset,sellAmount:collateralToSell}),5500,`4.8 collateral exit ${src.collateralAsset}->${src.loanAsset} ${repayUsd}`);
+      let q=quoteCache.get(cacheKey);
+      if(!q){
+        q=await withTimeout421(zeroXPrice({network:NETWORKS.base,sellToken:src.collateralAsset,buyToken:src.loanAsset,sellAmount:collateralToSell}),5500,`4.9 collateral exit ${src.collateralAsset}->${src.loanAsset} ${repayUsd}`);
+        quoteCache.set(cacheKey,q);
+      }
       const flashPremiumUsd=repayUsd*premiumBps/10000;
       const finalNet=Number(q.buyAmount)-repayUsd-flashPremiumUsd-gasUsd;
-      return{protocol:"MORPHO_BLUE",marketId:target.marketId,user:target.user,healthFactor:target.healthFactor,status:target.status,normalLiquidationEligible:Boolean(target.normalLiquidationEligible),loanAsset:src.loanAsset,collateralAsset:src.collateralAsset,repayUsd:round(repayUsd,2),collateralToSell:round(collateralToSell,6),exitProvider:"0x",exitBuyAmount:round(Number(q.buyAmount),6),flashPremiumUsd:round(flashPremiumUsd,2),modeledGasUsd:round(gasUsd,2),projectedFinalNetUsd:round(finalNet,2),meetsMinimumNet:finalNet>=BASE_DIRECT_MIN_NET_PROFIT_USD,profitabilityValidated:false,executable:false,quoteTimestamp:q.quoteTimestamp,readOnly:true};
-    }catch(error){return{protocol:"MORPHO_BLUE",marketId:target.marketId,user:target.user,healthFactor:target.healthFactor,repayUsd:round(repayUsd,2),collateralAsset:src.collateralAsset,loanAsset:src.loanAsset,error:error.message,profitabilityValidated:false,executable:false};}
-  });
-  tests.push(...rows);
+      return{protocol:"MORPHO_BLUE",marketId:target.marketId,user:target.user,healthFactor:target.healthFactor,status:target.status,normalLiquidationEligible:Boolean(target.normalLiquidationEligible),loanAsset:src.loanAsset,collateralAsset:src.collateralAsset,phase,repayUsd:round(repayUsd,2),collateralToSell:round(collateralToSell,6),exitProvider:"0x",exitBuyAmount:round(Number(q.buyAmount),6),flashPremiumUsd:round(flashPremiumUsd,2),modeledGasUsd:round(gasUsd,2),projectedFinalNetUsd:round(finalNet,2),meetsMinimumNet:finalNet>=BASE_DIRECT_MIN_NET_PROFIT_USD,profitabilityValidated:false,executable:false,quoteTimestamp:q.quoteTimestamp,readOnly:true};
+    }catch(error){return{protocol:"MORPHO_BLUE",marketId:target.marketId,user:target.user,healthFactor:target.healthFactor,phase,repayUsd:round(repayUsd,2),collateralAsset:src.collateralAsset,loanAsset:src.loanAsset,error:error.message,profitabilityValidated:false,executable:false};}
+  }
+
+  for(const target of targets){
+    const src=sourceByKey.get(`${target.marketId}:${String(target.user).toLowerCase()}`); if(!src)continue;
+    registerMorphoRouteTokens490(src);
+    const maxRepay=Math.min(Number(target.projectedRepayCapacityUsd||target.borrowAssetsUsd||0),flashLiquidity>0?flashLiquidity:Number(target.borrowAssetsUsd||0));
+    const coarse=uniqueSorted490([10000,50000,100000,250000,500000,1000000],maxRepay);
+    if(maxRepay>0&&!coarse.length)coarse.push(Math.round(maxRepay));
+    const coarseRows=await mapLimit421(coarse,3,x=>quoteExit(src,target,x,"COARSE"));
+    tests.push(...coarseRows);
+    let successful=coarseRows.filter(x=>Number.isFinite(Number(x.projectedFinalNetUsd))).sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);
+    if(!successful.length)continue;
+
+    let winner=successful[0];
+    const broadStep=Math.max(25000,Math.round(winner.repayUsd*0.10));
+    const broad=uniqueSorted490([-4,-3,-2,-1,1,2,3,4].map(k=>winner.repayUsd+k*broadStep),maxRepay).filter(x=>!coarse.includes(x));
+    const broadRows=await mapLimit421(broad,3,x=>quoteExit(src,target,x,"REFINE_BROAD"));
+    tests.push(...broadRows);
+    successful=[...successful,...broadRows.filter(x=>Number.isFinite(Number(x.projectedFinalNetUsd)))].sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);
+    winner=successful[0];
+
+    const fineStep=Math.max(5000,Math.round(broadStep/5));
+    const already=new Set([...coarse,...broad]);
+    const fine=uniqueSorted490([-3,-2,-1,1,2,3].map(k=>winner.repayUsd+k*fineStep),maxRepay).filter(x=>!already.has(x));
+    const fineRows=await mapLimit421(fine,3,x=>quoteExit(src,target,x,"REFINE_FINE"));
+    tests.push(...fineRows);
+  }
+
   const successful=tests.filter(x=>Number.isFinite(Number(x.projectedFinalNetUsd)));
   const bestByPosition=[];
   for(const target of targets){const r=successful.filter(x=>String(x.user).toLowerCase()===String(target.user).toLowerCase()).sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);if(r[0])bestByPosition.push(r[0]);}
   bestByPosition.sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);
-  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"BOUNDED_PARTIAL_LIQUIDATION_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_MODEL",availableFlashLiquidityUsd:flashLiquidity,flashLoanPremiumBps:premiumBps,sizesTestedUsd:[10000,50000,100000,250000,500000,1000000],positionsTargeted:targets.length,tests,bestByPosition,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"Uses live 0x price quotes to test collateral exit at bounded partial-liquidation sizes. projectedFinalNetUsd is still a pre-eligibility projection, not executable profit. Exact Morpho liquidation eligibility/repay limits and atomic simulation remain mandatory.",elapsedMs:Date.now()-startedAt};
+  const bestOverall=bestByPosition[0]||null;
+  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"ADAPTIVE_COARSE_TO_FINE_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_MODEL",availableFlashLiquidityUsd:flashLiquidity,flashLoanPremiumBps:premiumBps,coarseSizesUsd:[10000,50000,100000,250000,500000,1000000],adaptiveRefinement:true,positionsTargeted:targets.length,uniqueExitQuotes:quoteCache.size,tests,bestByPosition,bestOverall,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"4.9 performs a bounded coarse-to-fine search around the best live 0x collateral-exit quote instead of assuming a preset size is optimal. projectedFinalNetUsd remains pre-eligibility projection only. Exact Morpho liquidation eligibility/repay limits, fresh execution quotes, minimum-output protection and atomic simulation remain mandatory before execution.",elapsedMs:Date.now()-startedAt};
 }
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.8.0 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.9.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5591,7 +5618,7 @@ async function scanBaseBotNetwork422(){
   // Stage 3C: liquidation-first economics and projected readiness.
   const liquidationEconomicsBot=await withTimeout421(runLiquidationEconomicsBot460(liquidationBot,morphoBot),8000,"LIQUIDATION_ECONOMICS_BOT").catch(error=>({bot:"LIQUIDATION_ECONOMICS_BOT",status:"TIME_BUDGET_REACHED",candidates:[],watchlist:[],errors:[{error:error.message}],profitabilityValidated:false}));
   const projectedLiquidationBot=runProjectedLiquidationBot470(morphoBot,liquidationEconomicsBot);
-  const liquidationRouteOptimizerBot=await withTimeout421(runLiquidationRouteOptimizer480(morphoBot,projectedLiquidationBot,liquidationEconomicsBot),30000,"LIQUIDATION_ROUTE_OPTIMIZER_BOT").catch(error=>({bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",tests:[],bestByPosition:[],qualifiedProjected:[],errors:[{error:error.message}],profitabilityValidated:false,executable:false}));
+  const liquidationRouteOptimizerBot=await withTimeout421(runLiquidationRouteOptimizer490(morphoBot,projectedLiquidationBot,liquidationEconomicsBot),30000,"LIQUIDATION_ROUTE_OPTIMIZER_BOT").catch(error=>({bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",tests:[],bestByPosition:[],qualifiedProjected:[],errors:[{error:error.message}],profitabilityValidated:false,executable:false}));
   const morphoPreLiquidationBot=runMorphoPreLiquidationDiscovery470(morphoBot);
 
   // Stage 4: watcher reuses fresh quotes rather than immediately duplicating RPC calls.
@@ -5616,8 +5643,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationEconomicsBot.candidates||[]) ranked.push({source:"LIQUIDATION_ECONOMICS_BOT",type:"LIQUIDATION_ECONOMICS_CANDIDATE",label:x.user,marketId:x.marketId,healthFactor:x.healthFactor,estimatedNetBeforeRouteUsd:x.estimatedNetBeforeRouteUsd,score:botScore({grossPnlUsd:x.estimatedNetBeforeRouteUsd,confidence:.8,depthUsd:x.repayUsd}),profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.8.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"LIQUIDATION_ROUTE_OPTIMIZER_480",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.8.0 Liquidation Route Optimizer adds bounded real 0x collateral-exit quotes and partial liquidation sizing for the closest Morpho watch positions. Projected route NET is not executable profit. Nothing is executable until onchain liquidation eligibility, exact repay limits, route freshness, financing, gas and atomic simulation pass the $15 minimum NET-profit protection."};
+  scan421Log("BOT NETWORK 4.9.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"ADAPTIVE_LIQUIDATION_OPTIMIZER_490",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.9.0 Adaptive Liquidation Optimizer adds bounded coarse-to-fine real 0x collateral-exit sizing around the best projected liquidation route. Projected route NET is not executable profit. Nothing is executable until onchain liquidation eligibility, exact repay limits, fresh execution quotes, minimum-output protection, financing, gas and atomic simulation pass the $15 minimum NET-profit protection."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
