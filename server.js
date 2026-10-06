@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.42.0";
+const VERSION = "4.43.0";
 
 /*
 =========================================================
@@ -5542,6 +5542,50 @@ async function runMorphoLiquidationBot450(){
   }catch(error){return{bot:"MORPHO_LIQUIDATION_BOT",status:"ERROR",stage:"BASE_EXHAUSTIVE_PAGINATED_HEALTH_FIRST_DISCOVERY",pageSize,totalPositionCap:null,healthFactorLte,pagesFetched:pageDiagnostics.length,rawRowsFetched:pageDiagnostics.reduce((n,x)=>n+x.returned,0),uniquePositionsScanned:positions.length,pageDiagnostics,opportunities:[],watchlist:[],hotWatch:[],profitabilityValidated:false,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
 }
 
+
+// 4.43.0: Exhaustive hot-watch discovery. This is a latency lane, not a replacement
+// for runMorphoLiquidationBot450(). It uses the same uncapped pagination contract,
+// but asks Morpho only for positions at or below HF 1.01 so current risk candidates
+// can be refreshed without waiting for the broader <=1.10 universe scan.
+async function runMorphoHotWatchDiscovery4430(){
+  const startedAt=Date.now(),pageSize=1000,healthFactorLte=1.01;
+  const positions=[],seen=new Set(),pageDiagnostics=[],pageFingerprints=new Set();
+  let page=0,exhausted=false;
+  try{
+    while(!exhausted){
+      const skip=page*pageSize;
+      const q=`query MorphoHotWatch($first:Int!,$skip:Int!,$hf:Float!){ marketPositions(first:$first, skip:$skip, orderBy:HealthFactor, orderDirection:Asc, where:{chainId_in:[8453], marketListed:true, healthFactor_lte:$hf}) { items { market { marketId lltv loanAsset { address symbol decimals } collateralAsset { address symbol decimals } } user { address } state { borrowAssets borrowAssetsUsd collateral collateralUsd } } } }`;
+      const pd=await morphoGraphql450(q,{first:pageSize,skip,hf:healthFactorLte});
+      const items=pd?.marketPositions?.items||[];
+      const fingerprint=items.length?`${items.length}:${String(items[0]?.market?.marketId||'')}:${String(items[0]?.user?.address||'')}:${String(items[items.length-1]?.market?.marketId||'')}:${String(items[items.length-1]?.user?.address||'')}`:`EMPTY:${skip}`;
+      if(pageFingerprints.has(fingerprint)) throw new Error(`MORPHO_HOT_WATCH_PAGINATION_STALLED_AT_PAGE:${page+1}`);
+      pageFingerprints.add(fingerprint);
+      let added=0,duplicates=0;
+      for(const p of items){
+        const key=`${String(p?.market?.marketId||'').toLowerCase()}:${String(p?.user?.address||'').toLowerCase()}`;
+        if(!p?.market?.marketId||!p?.user?.address) continue;
+        if(seen.has(key)){duplicates++;continue;} seen.add(key);positions.push(p);added++;
+      }
+      pageDiagnostics.push({page:page+1,skip,returned:items.length,added,duplicates});
+      exhausted=items.length<pageSize;
+      if(!exhausted&&added===0) throw new Error(`MORPHO_HOT_WATCH_NO_FORWARD_PROGRESS_AT_PAGE:${page+1}`);
+      page++;
+    }
+    const candidates=[]; const marketSet=new Set();
+    for(const p of positions){
+      marketSet.add(String(p.market.marketId).toLowerCase());
+      const debt=Number(p?.state?.borrowAssetsUsd||0),coll=Number(p?.state?.collateralUsd||0),raw=Number(p?.market?.lltv||0),lltv=raw>1?raw/1e18:raw;
+      if(!(debt>0&&coll>0&&lltv>0)) continue;
+      const hf=coll*lltv/debt;
+      const borrowAssetsRaw=String(p?.state?.borrowAssets||"0"),collateralAssetsRaw=String(p?.state?.collateral||"0");
+      const row={marketId:p.market.marketId,user:p.user.address,healthFactor:round(hf,6),borrowAssetsRaw,collateralAssetsRaw,borrowAssetsUsd:round(debt,2),collateralUsd:round(coll,2),lltv:round(lltv,6),readOnly:true};
+      candidates.push(row);
+    }
+    candidates.sort((a,b)=>a.healthFactor-b.healthFactor);
+    return{success:true,version:VERSION,classification:"MORPHO_HOT_WATCH_REFRESH_COMPLETE",pageSize,totalPositionCap:null,paginationExhausted:exhausted,healthFactorLte,pagesFetched:pageDiagnostics.length,positionsScanned:positions.length,marketsRepresented:marketSet.size,liquidatableSignals:candidates.filter(x=>x.healthFactor<1).length,candidates,pageDiagnostics,readOnly:true,elapsedMs:Date.now()-startedAt};
+  }catch(error){return{success:false,version:VERSION,classification:"MORPHO_HOT_WATCH_REFRESH_ERROR",pageSize,totalPositionCap:null,paginationExhausted:false,healthFactorLte,pagesFetched:pageDiagnostics.length,positionsScanned:positions.length,pageDiagnostics,candidates:[],error:error.message,readOnly:true,elapsedMs:Date.now()-startedAt};}
+}
+
 function estimateMorphoLiquidationIncentive460(lltv){
   // Conservative discovery estimate only. Actual incentive must be read/revalidated
   // from protocol state before execution. Cap avoids presenting an estimate as a promise.
@@ -7005,6 +7049,38 @@ const runFinalMainnetSafetyGate4390 = async (req,res)=>{
 app.get("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
 app.post("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
 
+
+// 4.43.0 fast lane: exhaustive <=1.01 refresh plus the same exact fork-accrual
+// safety gate for any API signal below 1.0. No signing or mainnet broadcast.
+let hotWatchSafety4430Active=false;
+const runHotWatchSafety4430=async(req,res)=>{
+  const startedAt=Date.now();
+  if(hotWatchSafety4430Active) return res.status(409).json({success:false,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_ALREADY_RUNNING",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+  hotWatchSafety4430Active=true;
+  try{
+    const readiness=await productionDeploymentReadiness4360();
+    if(!readiness.success) return res.status(409).json({success:false,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_BLOCKED",reason:"PRODUCTION_EXECUTOR_CONFIGURATION_NOT_VALIDATED",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const hot=await runMorphoHotWatchDiscovery4430();
+    if(!hot.success) return res.status(502).json({...hot,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+    const discovered=hot.candidates.filter(x=>x?.marketId&&x?.user&&Number(x.healthFactor)<1);
+    if(!discovered.length) return res.json({success:true,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:false,reason:"NO_HOT_WATCH_LIQUIDATABLE_SIGNAL",hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:0,closest:hot.candidates[0]||null},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),maxCandidates=Math.max(1,Math.min(3,Number(process.env.ARBIFLOW_SAFETY_PIPELINE_MAX_CANDIDATES||3))),evaluated=[];
+    for(const candidate of discovered.slice(0,maxCandidates)){
+      const reportPath=path.join(__dirname,`hot-watch-safety-4430-${String(candidate.user).slice(2,10)}.json`); try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+      const child=spawnSync(hardhatBin,["run","--no-compile","MainnetSafetyGate4390.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_MAINNET_SAFETY_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_MAINNET_SAFETY_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+      let report=null; try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+      if(child.status!==0||!report?.success){evaluated.push({marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor,classification:"SAFETY_GATE_FAILED_CLOSED",readyForExplicitExecutionApproval:false,error:(child.stderr||child.stdout||"SAFETY_GATE_FAILED").slice(-2000)});continue;}
+      evaluated.push({...report,candidateDiscoveryHealthFactor:candidate.healthFactor,readyForExplicitExecutionApproval:report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED"});
+      if(report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED") break;
+    }
+    const passed=evaluated.find(x=>x.readyForExplicitExecutionApproval===true);
+    return res.json({success:true,version:VERSION,classification:passed?"HOT_WATCH_SAFETY_PIPELINE_PASSED":"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:Boolean(passed),candidate:passed||null,evaluated,hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:discovered.length},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,nextGate:passed?"SEPARATE_EXPLICIT_USER_APPROVAL_REQUIRED_BEFORE_ANY_MAINNET_TRANSACTION":"CONTINUE_MONITORING",elapsedMs:Date.now()-startedAt});
+  }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_ERROR",error:e?.message||String(e),readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
+  finally{hotWatchSafety4430Active=false;}
+};
+app.get("/api/production/base/hot-watch-safety-pipeline",runHotWatchSafety4430);
+app.post("/api/production/base/hot-watch-safety-pipeline",runHotWatchSafety4430);
+
 // 4.40.0: Live candidate -> exact safety gate pipeline. Discovery is read-only.
 // Only candidates already below HF 1.0 at fresh discovery are promoted into the
 // expensive exact-accrual production safety gate. No mainnet transaction can be
@@ -7038,7 +7114,7 @@ const runCandidateSafetyPipeline4400 = async (req,res)=>{
 };
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.42.0_EXHAUSTIVE_1000_PER_PAGE_DISCOVERY",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.43.0_EXHAUSTIVE_DISCOVERY_PLUS_HOT_WATCH_FAST_LANE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
