@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.30.1";
+const VERSION = "4.30.2";
 
 /*
 =========================================================
@@ -6765,10 +6765,27 @@ app.get(
 4.30 CONTROLLED DISPOSABLE-FORK ATOMIC TEST
 =========================================================
 */
-const runControlledAtomicForkTest4301 = async (req,res)=>{
+const zeroXAccessPreflight4302 = async ()=>{
+  if(!ZEROX_API_KEY) return {ok:false,status:null,classification:"ZEROX_API_KEY_NOT_CONFIGURED",requestId:null};
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),12000);
+  try{
+    const response=await fetch("https://api.0x.org/sources?chainId=8453",{method:"GET",headers:{"0x-api-key":ZEROX_API_KEY,"0x-version":"v2","Content-Type":"application/json"},signal:controller.signal});
+    const body=await response.text();
+    let parsed=null; try{parsed=JSON.parse(body);}catch{}
+    const requestId=parsed?.request_id??parsed?.requestId??null;
+    if(response.ok) return {ok:true,status:response.status,classification:"ZEROX_API_ACCESS_CONFIRMED",requestId};
+    if(response.status===401||response.status===403) return {ok:false,status:response.status,classification:"ZEROX_API_ACCESS_DENIED",requestId,message:parsed?.message??body.slice(0,300)};
+    return {ok:false,status:response.status,classification:"ZEROX_API_PREFLIGHT_FAILED",requestId,message:parsed?.message??body.slice(0,300)};
+  }catch(e){return {ok:false,status:null,classification:"ZEROX_API_PREFLIGHT_NETWORK_ERROR",requestId:null,message:e?.message||String(e)};}
+  finally{clearTimeout(timer);}
+};
+
+const runControlledAtomicForkTest4302 = async (req,res)=>{
   const startedAt=Date.now();
   try{
-    if(!ZEROX_API_KEY) return res.status(409).json({success:false,version:VERSION,status:"BLOCKED",blocker:"ZEROX_API_KEY_NOT_CONFIGURED",readOnly:true,mainnetBroadcast:false});
+    const zeroXAccess=await zeroXAccessPreflight4302();
+    if(!zeroXAccess.ok) return res.status(zeroXAccess.status===401||zeroXAccess.status===403?403:409).json({success:false,version:VERSION,status:"CONTROLLED_FORK_ATOMIC_TEST_BLOCKED_BEFORE_FORK",blocker:zeroXAccess.classification,zeroXAccess,remediation:zeroXAccess.classification==="ZEROX_API_ACCESS_DENIED"?"Replace or authorize the ZEROX_API_KEY configured in Render, then rerun this endpoint.":null,apiKeyExposed:false,syntheticForkOnly:true,currentMainnetEligibilityClaimed:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
     const morpho=await runMorphoLiquidationBot450();
     const pool=[...(morpho?.opportunities||[]),...(morpho?.watchlist||[])].filter(x=>x?.marketId&&x?.user).sort((a,b)=>Number(a.healthFactor??99)-Number(b.healthFactor??99));
     if(!pool.length) return res.status(409).json({success:false,version:VERSION,status:"BLOCKED",blocker:"NO_MORPHO_CANDIDATE_AVAILABLE",readOnly:true,mainnetBroadcast:false});
@@ -6784,8 +6801,9 @@ const runControlledAtomicForkTest4301 = async (req,res)=>{
 };
 
 // Browser-accessible trigger plus POST compatibility. Both execute the same disposable-fork-only test.
-app.get("/api/test/base/controlled-atomic", runControlledAtomicForkTest4301);
-app.post("/api/test/base/controlled-atomic", runControlledAtomicForkTest4301);
+app.get("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
+app.post("/api/test/base/controlled-atomic", runControlledAtomicForkTest4302);
+app.get("/api/zero-x/base/access", async (req,res)=>{ const zeroXAccess=await zeroXAccessPreflight4302(); return res.status(zeroXAccess.ok?200:(zeroXAccess.status===401||zeroXAccess.status===403?403:409)).json({success:zeroXAccess.ok,version:VERSION,...zeroXAccess,apiKeyConfigured:Boolean(ZEROX_API_KEY),apiKeyExposed:false,readOnly:true,mainnetBroadcast:false}); });
 
 /*
 =========================================================
