@@ -1,6 +1,6 @@
 {
   "name": "arbiflow-engine-v3",
-  "version": "4.18.0",
+  "version": "4.18.1",
   "private": true,
   "main": "server.js",
   "type": "commonjs",
@@ -9,7 +9,9 @@
     "test:fork": "hardhat run --no-compile BaseForkTest4180.js",
     "check": "node --check server.js && node --check Startup4180.js && node --check BaseForkTest4180.js"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.1.0",
     "cors": "^2.8.5",
