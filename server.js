@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.4.0";
+const VERSION = "4.5.0";
 
 /*
 =========================================================
@@ -4914,7 +4914,7 @@ function market42Triangles() {
 
 const BOT_NETWORK = {
   enabled:true, network:"Base",
-  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","LIQUIDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
+  bots:["MARKET_DISCOVERY_BOT","SPREAD_BOT","TRIANGLE_BOT","SIZE_DISCOVERY_BOT","AAVE_LIQUIDATION_BOT","MORPHO_LIQUIDATION_BOT","OPTIMIZER_BOT","DISLOCATION_BOT","WATCHER_BOT","AGGREGATOR_INTELLIGENCE_BOT"]
 };
 
 function botScore({ estimatedNetUsd=0,grossPnlUsd=0,grossRoiPercent=0,confidence=0.5,depthUsd=0 }) {
@@ -4940,7 +4940,7 @@ async function quoteMarket42Triangle(amount,route,venues){
 async function runMarketDiscoveryBot(){
   const pairs=[]; for(let i=0;i<MARKET42.routeTokens.length;i++) for(let j=i+1;j<MARKET42.routeTokens.length;j++) pairs.push([MARKET42.routeTokens[i],MARKET42.routeTokens[j]]);
   const triangles=market42Triangles();
-  return {bot:"MARKET_DISCOVERY_BOT",status:"COMPLETE",tokenUniverse:MARKET42.routeTokens,directPairUniverse:pairs.map(x=>x.join("/")),triangleUniverse:triangles.map(x=>x.join("->")),directVenues:MARKET42.directVenues,intelligenceProviders:MARKET42.intelligenceProviders,counts:{tokens:MARKET42.routeTokens.length,directPairs:pairs.length,triangleRoutes:triangles.length,venueCombinationsPerTriangle:triangleCombos430().length,totalTriangleProbes:2*triangleCombos430().length}};
+  return {bot:"MARKET_DISCOVERY_BOT",status:"COMPLETE",tokenUniverse:MARKET42.routeTokens,directPairUniverse:pairs.map(x=>x.join("/")),triangleUniverse:triangles.map(x=>x.join("->")),directVenues:MARKET42.directVenues,intelligenceProviders:MARKET42.intelligenceProviders,verifiedAdditionalLiquidity:[{venue:"UNISWAP_V4",chainId:8453,poolManager:"0x498581ff718922c3f8e6a244956af099b2652b2b",quoter:"0x0d5e0f971ed27fbff6c2837bf31316121532048d",stateView:"0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",status:"DEPLOYMENT_VERIFIED_POOLKEY_DISCOVERY_PENDING",readOnly:true}],counts:{tokens:MARKET42.routeTokens.length,directPairs:pairs.length,triangleRoutes:triangles.length,venueCombinationsPerTriangle:triangleCombos430().length,totalTriangleProbes:2*triangleCombos430().length}};
 }
 
 async function runSpreadBot(){
@@ -5094,13 +5094,13 @@ async function scanBaseBotNetwork(){
   const spreadBot=byName.SPREAD_BOT||{observations:[],candidates:[]}, triangleBot=byName.TRIANGLE_BOT||{observations:[],candidates:[]}, liquidationBot=byName.LIQUIDATION_BOT||{opportunities:[]}, dislocationBot=byName.DISLOCATION_BOT||{observations:[],candidates:[]}, aggregatorBot=byName.AGGREGATOR_INTELLIGENCE_BOT||{observations:[]};
   let watcherBot; try{watcherBot=await withTimeout421(runWatcherBot(spreadBot,triangleBot,dislocationBot),30000,"WATCHER_BOT");}catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIMEOUT_OR_ERROR",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
   let largeOpportunityBot; try{largeOpportunityBot=await withTimeout421(runLargeOpportunityBot(triangleBot),45000,"LARGE_OPPORTUNITY_BOT");}catch(error){largeOpportunityBot={bot:"LARGE_OPPORTUNITY_BOT",status:"TIMEOUT_OR_ERROR",flashOptimization:null,errors:[{error:error.message}]};}
-  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[])ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[])ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
   for(const x of liquidationBot.opportunities||[])ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false}); ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
   scan421Log("BOT NETWORK COMPLETE",`${Date.now()-startedAt}ms`);
-  return {mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:marketBot.counts.totalTriangleProbes,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},scanReliability:{providerTimeoutMs:SCAN421.providerTimeoutMs,botTimeoutMs:SCAN421.botTimeoutMs,routeConcurrency:SCAN421.routeConcurrency,aggregatorConcurrency:SCAN421.aggregatorConcurrency,isolatedFailures:bots.filter(x=>x.status==="TIMEOUT_OR_ERROR").map(x=>x.bot)},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.1 is read-only market expansion with timeout isolation. Slow providers may fail independently without blocking the entire bot-network response."};
+  return {mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:marketBot.counts.totalTriangleProbes,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0},scanReliability:{providerTimeoutMs:SCAN421.providerTimeoutMs,botTimeoutMs:SCAN421.botTimeoutMs,routeConcurrency:SCAN421.routeConcurrency,aggregatorConcurrency:SCAN421.aggregatorConcurrency,isolatedFailures:bots.filter(x=>x.status==="TIMEOUT_OR_ERROR").map(x=>x.bot)},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.1 is read-only market expansion with timeout isolation. Slow providers may fail independently without blocking the entire bot-network response."};
 }
 
 app.get("/api/bots/status",(req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,mode:"MARKET_EXPANSION_OPPORTUNITY_DISCOVERY",network:"Base",botNetwork:BOT_NETWORK,market:MARKET42,liveExecutionEnabled:false,time:now()}));
@@ -5380,30 +5380,39 @@ function triangleCombos430(){
 
 async function runFastTriangleBot430(spreadBot){
   const startedAt=Date.now(),observations=[],errors=[],combos=triangleCombos430();
-  // Deep-check both major volatile paths. This doubles route coverage while
-  // retaining only six true three-venue permutations per route.
-  const routes=[["USDC","WETH","DAI","USDC"],["USDC","cbBTC","DAI","USDC"]];
+  // 4.5 liquidity-gates triangle routes from the completed direct-pair scan.
+  // A triangle is deep-quoted only when every edge has at least one usable venue.
+  const usable=new Set((spreadBot.observations||[]).filter(x=>x.bestDirection).map(x=>x.pair.split("/").sort().join("/")));
+  const candidates=market42Triangles().filter(route=>{
+    const edges=[[route[0],route[1]],[route[1],route[2]],[route[2],route[3]]];
+    return edges.every(([a,b])=>usable.has([a,b].sort().join("/")));
+  });
+  const routes=candidates.slice(0,2);
   const jobs=[]; for(const route of routes) for(const venues of combos) jobs.push({route,venues});
-  const rows=await mapLimit421(jobs,4,async({route,venues})=>{try{const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),6500,`4.4 triangle ${route.join("->")} ${venues.join("/")}`);return{ok:true,value:{...q,nearPositive:Number(q.grossPnl)<=0&&Number(q.grossPnl)>=-0.25,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}}}catch(error){return{ok:false,error:{route,venues,error:error.message}}}});
-  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);}observations.sort((a,b)=>b.score-a.score);
-  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"TWO_ROUTE_THREE_VENUE_DEEP_CHECK",routesGenerated:market42Triangles().length,routesDeepChecked:routes.length,routes,probesPlanned:jobs.length,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
+  const rows=await mapLimit421(jobs,6,async({route,venues})=>{try{
+    const q=await withTimeout421(quoteMarket43Triangle(MARKET42.probeUsd,route,venues),5000,`4.5 triangle ${route.join("->")} ${venues.join("/")}`);
+    return{ok:true,value:{...q,nearPositive:Number(q.grossPnl)<=0&&Number(q.grossPnl)>=-0.25,score:botScore({grossPnlUsd:q.grossPnl,grossRoiPercent:q.grossRoiPercent,depthUsd:MARKET42.probeUsd})}};
+  }catch(error){return{ok:false,error:{route,venues,error:error.message}};}});
+  for(const row of rows){if(row?.ok)observations.push(row.value);else if(row?.error)errors.push(row.error);} observations.sort((a,b)=>b.score-a.score);
+  return{bot:"TRIANGLE_BOT",status:"COMPLETE",stage:"LIQUIDITY_GATED_PARALLEL_TRIANGLE_DISCOVERY",routesGenerated:market42Triangles().length,routesViable:candidates.length,routesDeepChecked:routes.length,routes,probesPlanned:jobs.length,observations,candidates:observations.filter(x=>x.rawPositive),nearCandidates:observations.filter(x=>x.nearPositive),errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function runSizeDiscoveryBot440(spreadBot,triangleBot){
   const startedAt=Date.now(),tests=[],errors=[];
-  // Expensive sizing is reserved for the two strongest routes within a tight
-  // near-profit window. It is discovery only: no flash loan is requested.
   const seeds=[];
-  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p>0||p>=-0.10)seeds.push({kind:"DIRECT",grossPnl:p,score:x.score,data:x});}
-  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p>0||p>=-0.25)seeds.push({kind:"TRIANGLE",grossPnl:p,score:x.score,data:x});}
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p>0||p>=-0.15)seeds.push({kind:"DIRECT",grossPnl:p,score:x.score,data:x});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p>0||p>=-0.30)seeds.push({kind:"TRIANGLE",grossPnl:p,score:x.score,data:x});}
   seeds.sort((a,b)=>b.score-a.score);
-  const shortlist=seeds.slice(0,2), sizes=[250,1000,5000];
-  for(const seed of shortlist){
-    const rows=await mapLimit421(sizes,2,async amount=>{try{const q=seed.kind==="DIRECT"?await withTimeout421(quoteDirectSeed430(amount,seed.data),5000,`4.4 size direct ${amount}`):await withTimeout421(quoteMarket43Triangle(amount,seed.data.route,seed.data.venues),6500,`4.4 size triangle ${amount}`);return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->"),amount,...q,rawPositive:Number(q.grossPnl)>0};}catch(error){return{kind:seed.kind,amount,error:error.message,rawPositive:false}}});
-    tests.push(...rows);
-  }
+  const shortlist=seeds.slice(0,3),sizes=[100,250,500,1000,2500,5000];
+  const jobs=[]; for(const seed of shortlist) for(const amount of sizes) jobs.push({seed,amount});
+  const rows=await mapLimit421(jobs,6,async({seed,amount})=>{try{
+    const q=seed.kind==="DIRECT"?await withTimeout421(quoteDirectSeed430(amount,seed.data),4500,`4.5 size direct ${amount}`):await withTimeout421(quoteMarket43Triangle(amount,seed.data.route,seed.data.venues),5000,`4.5 size triangle ${amount}`);
+    return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->"),amount,...q,rawPositive:Number(q.grossPnl)>0};
+  }catch(error){return{kind:seed.kind,label:seed.kind==="DIRECT"?seed.data.pair:seed.data.route?.join("->"),amount,error:error.message,rawPositive:false};}});
+  tests.push(...rows);
   const positiveSeeds=tests.filter(x=>x.rawPositive).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl));
-  return{bot:"SIZE_DISCOVERY_BOT",status:"COMPLETE",strategy:"BOUNDED_MULTI_SIZE_NEAR_PROFIT_PROBE",nearSeedCount:seeds.length,shortlisted:shortlist.length,sizes,tests,positiveSeeds,errors,elapsedMs:Date.now()-startedAt};
+  const curves=shortlist.map(seed=>{const label=seed.kind==="DIRECT"?seed.data.pair:seed.data.route.join("->");const pts=tests.filter(x=>x.label===label&&!x.error).sort((a,b)=>a.amount-b.amount);return{kind:seed.kind,label,points:pts.map(x=>({amount:x.amount,grossPnl:x.grossPnl,grossRoiPercent:x.grossRoiPercent,rawPositive:x.rawPositive})),best:pts.slice().sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl))[0]||null};});
+  return{bot:"SIZE_DISCOVERY_BOT",status:"COMPLETE",strategy:"PARALLEL_MULTI_SIZE_PROFIT_CURVE",nearSeedCount:seeds.length,shortlisted:shortlist.length,sizes,tests,curves,positiveSeeds,errors,elapsedMs:Date.now()-startedAt};
 }
 
 async function fastWatcherDirectPath430(item){
@@ -5445,9 +5454,31 @@ async function runLargeOpportunityBot430(spreadBot,triangleBot,sizeBot){
   }catch(error){return{bot:"LARGE_OPPORTUNITY_BOT",status:"ERROR",flashOptimization:null,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
 }
 
+
+const MORPHO_GRAPHQL_URL="https://api.morpho.org/graphql";
+async function morphoGraphql450(query,variables={}){
+  const r=await fetch421(MORPHO_GRAPHQL_URL,{method:"POST",headers:{accept:"application/json","content-type":"application/json"},body:JSON.stringify({query,variables})},5500);
+  const data=await r.json(); if(!r.ok||data?.errors?.length) throw new Error(data?.errors?.[0]?.message||`Morpho API HTTP ${r.status}`); return data.data;
+}
+async function runMorphoLiquidationBot450(){
+  const startedAt=Date.now();
+  try{
+    const marketQuery=`query { markets(first: 12, orderBy: BorrowAssetsUsd, orderDirection: Desc, where: { chainId_in: [8453] }) { items { marketId lltv loanAsset { address symbol } collateralAsset { address symbol } state { borrowAssetsUsd collateralAssetsUsd liquidityAssetsUsd } } } }`;
+    const md=await morphoGraphql450(marketQuery); const markets=md?.markets?.items||[]; const ids=markets.map(x=>x.marketId).filter(Boolean);
+    if(!ids.length)return{bot:"MORPHO_LIQUIDATION_BOT",status:"COMPLETE",marketsScanned:0,positionsScanned:0,opportunities:[],watchlist:[],errors:[],elapsedMs:Date.now()-startedAt};
+    const safeIds=ids.filter(x=>/^0x[0-9a-fA-F]{64}$/.test(x));
+    const idLiteral=safeIds.map(x=>`"${x}"`).join(",");
+    const posQuery=`query { marketPositions(first: 100, orderBy: BorrowShares, orderDirection: Desc, where:{ marketUniqueKey_in:[${idLiteral}] }) { items { market { marketId lltv loanAsset { address symbol } collateralAsset { address symbol } } user { address } state { borrowAssets borrowAssetsUsd collateral collateralUsd } } } }`;
+    const pd=await morphoGraphql450(posQuery); const positions=pd?.marketPositions?.items||[]; const opportunities=[],watchlist=[];
+    for(const p of positions){const debt=Number(p?.state?.borrowAssetsUsd||0),coll=Number(p?.state?.collateralUsd||0),raw=Number(p?.market?.lltv||0);const lltv=raw>1?raw/1e18:raw;if(!(debt>0&&coll>0&&lltv>0))continue;const hf=coll*lltv/debt;const row={protocol:"MORPHO_BLUE",marketId:p.market.marketId,user:p.user?.address,loanAsset:p.market.loanAsset?.symbol,collateralAsset:p.market.collateralAsset?.symbol,borrowAssetsUsd:round(debt,2),collateralUsd:round(coll,2),lltv:round(lltv,6),healthFactor:round(hf,6),profitabilityValidated:false,readOnly:true};if(hf<=1)opportunities.push({...row,status:"LIQUIDATABLE_API_SIGNAL"});else if(hf<=1.03)watchlist.push({...row,status:"NEAR_LIQUIDATION"});}
+    opportunities.sort((a,b)=>a.healthFactor-b.healthFactor);watchlist.sort((a,b)=>a.healthFactor-b.healthFactor);
+    return{bot:"MORPHO_LIQUIDATION_BOT",status:"COMPLETE",stage:"BASE_TOP_BORROW_MARKETS_POSITION_HEALTH",marketsScanned:markets.length,positionsScanned:positions.length,opportunities,watchlist,profitabilityValidated:false,note:"API health is discovery only. Any candidate must be revalidated onchain and priced for repayment, collateral sale, gas, slippage and flash premium before qualification.",errors:[],elapsedMs:Date.now()-startedAt};
+  }catch(error){return{bot:"MORPHO_LIQUIDATION_BOT",status:"ERROR",opportunities:[],watchlist:[],profitabilityValidated:false,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
+}
+
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.4.0 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.5.0 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5465,8 +5496,11 @@ async function scanBaseBotNetwork422(){
 
   // Stage 3: bounded multi-size discovery for only the strongest near-profit routes.
   let sizeBot;
-  try{sizeBot=await withTimeout421(runSizeDiscoveryBot440(spreadBot,triangleBot),10000,"SIZE_DISCOVERY_BOT");}
+  try{sizeBot=await withTimeout421(runSizeDiscoveryBot440(spreadBot,triangleBot),9000,"SIZE_DISCOVERY_BOT");}
   catch(error){sizeBot={bot:"SIZE_DISCOVERY_BOT",status:"TIME_BUDGET_REACHED",tests:[],positiveSeeds:[],errors:[{error:error.message}]};}
+
+  // Stage 3B: independent Morpho Base liquidation discovery.
+  const morphoBot=await withTimeout421(runMorphoLiquidationBot450(),8000,"MORPHO_LIQUIDATION_BOT").catch(error=>({bot:"MORPHO_LIQUIDATION_BOT",status:"TIME_BUDGET_REACHED",opportunities:[],watchlist:[],errors:[{error:error.message}]}));
 
   // Stage 4: watcher reuses fresh quotes rather than immediately duplicating RPC calls.
   let watcherBot;
@@ -5482,14 +5516,15 @@ async function scanBaseBotNetwork422(){
     catch(error){largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"TIME_BUDGET_REACHED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}]};}
   }else largeOpportunityBot={bot:"OPTIMIZER_BOT",status:"NO_POSITIVE_SEED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,flashOptimization:null,elapsedMs:0};
 
-  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
+  const bots=[marketBot,spreadBot,triangleBot,sizeBot,liquidationBot,morphoBot,largeOpportunityBot,dislocationBot,watcherBot,aggregatorBot],ranked=[];
   for(const x of spreadBot.candidates||[]) ranked.push({source:"SPREAD_BOT",type:"ARBITRAGE",label:x.pair,score:x.score,rawPositive:true});
   for(const x of triangleBot.candidates||[]) ranked.push({source:"TRIANGLE_BOT",type:"TRIANGULAR_ARBITRAGE",label:x.route.join("->"),venues:x.venues,score:x.score,rawPositive:true});
-  for(const x of liquidationBot.opportunities||[]) ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
+  for(const x of liquidationBot.opportunities||[]) ranked.push({source:"AAVE_LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
+  for(const x of morphoBot.opportunities||[]) ranked.push({source:"MORPHO_LIQUIDATION_BOT",type:"MORPHO_LIQUIDATION",label:x.user,marketId:x.marketId,healthFactor:x.healthFactor,score:botScore({confidence:.75,depthUsd:x.borrowAssetsUsd}),profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.4.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"DEEP_OPPORTUNITY_EXPANSION",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,twoRouteTriangleDeepCheck:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.4.0 expands read-only opportunity discovery across every pair in the verified Base token universe, two deep triangle routes, and bounded multi-size testing for near-profit routes. The watcher reuses fresh quotes to avoid duplicate RPC timeouts. Only raw-positive seeds can enter flash economics; nothing is executable until costs, freshness, atomic simulation, and the $15 minimum NET-profit protection pass."};
+  scan421Log("BOT NETWORK 4.5.0 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"PROFIT_HUNTER_450",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.5.0 Profit Hunter adds liquidity-gated parallel triangle discovery, parallel multi-size profit curves, Morpho Base liquidation discovery, and verified Uniswap V4 Base deployment intelligence. V4 pool-key quote discovery is reported but is not treated as a direct executable venue yet. Only validated raw-positive seeds can enter flash economics; nothing is executable until onchain freshness, costs, atomic simulation, and the $15 minimum NET-profit protection pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
