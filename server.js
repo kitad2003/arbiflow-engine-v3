@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "3.6.0";
+const VERSION = "3.8.0";
 
 /*
 =========================================================
@@ -4061,8 +4061,11 @@ async function scanBaseDirectVenues({
     scanMode: "MULTI_SIZE_DIRECT_VENUE_READ_ONLY",
     baseToken,
     quoteToken,
-    requestedSizes: sizes,
-    minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+    requestedSizes: effectiveSizes,
+    sizingMode: Array.isArray(sizes) && sizes.length ? "CUSTOM" : "ADAPTIVE_LIQUIDITY_AWARE",
+    liquidityUtilizationCapPercent: FLASH_LIQUIDITY_UTILIZATION_CAP * 100,
+    absoluteMinimumNetProfitUsd: FLASH_ABSOLUTE_MIN_NET_PROFIT_USD,
+    minimumNetRoiPercent: FLASH_MIN_NET_ROI_PERCENT,
     profitTiersUsd: {
       qualifying: BASE_DIRECT_MIN_NET_PROFIT_USD,
       good: BASE_DIRECT_GOOD_NET_PROFIT_USD,
@@ -4161,8 +4164,25 @@ No loan is requested. No transaction is signed or sent.
 =========================================================
 */
 
-const FLASH_SCAN_DEFAULT_SIZES = [500, 1000, 2500, 5000, 10000];
-const FLASH_SCAN_MAX_SIZES = 10;
+const FLASH_SCAN_DEFAULT_SIZES = [10000, 25000, 50000, 100000, 250000, 500000, 1000000];
+const FLASH_SCAN_MAX_SIZES = 14;
+const FLASH_LIQUIDITY_UTILIZATION_CAP = 0.80;
+const FLASH_MIN_NET_ROI_PERCENT = 0.05;
+const FLASH_ABSOLUTE_MIN_NET_PROFIT_USD = 15;
+
+function flashRequiredNetProfitUsd(amount) {
+  const roiFloor = Number(amount) * (FLASH_MIN_NET_ROI_PERCENT / 100);
+  return Math.max(FLASH_ABSOLUTE_MIN_NET_PROFIT_USD, roiFloor);
+}
+
+function buildAdaptiveFlashSizes(availableLiquidity) {
+  const maxUsable = Math.max(0, Number(availableLiquidity) * FLASH_LIQUIDITY_UTILIZATION_CAP);
+  const ladder = [10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000];
+  const sizes = ladder.filter(v => v <= maxUsable);
+  if (maxUsable >= 10000 && sizes.length === 0) sizes.push(round(maxUsable, 2));
+  if (sizes.length && maxUsable > sizes[sizes.length - 1] * 1.25) sizes.push(round(maxUsable, 2));
+  return [...new Set(sizes)].slice(0, FLASH_SCAN_MAX_SIZES);
+}
 const FLASH_MODELED_GAS_UNITS = 800000;
 
 async function getAaveBaseFlashState(assetSymbol = "USDC") {
@@ -4248,15 +4268,16 @@ function parseFlashScanSizes(rawSizes) {
   return unique.sort((a, b) => a - b);
 }
 
-async function scanBaseAaveFlashArbitrage({ sizes = FLASH_SCAN_DEFAULT_SIZES }) {
+async function scanBaseAaveFlashArbitrage({ sizes = null }) {
   const startedAt = Date.now();
   const [aave, gasModel] = await Promise.all([
     getAaveBaseFlashState("USDC"),
     getBaseFlashModeledGasCostUsd()
   ]);
+  const effectiveSizes = Array.isArray(sizes) && sizes.length ? sizes : buildAdaptiveFlashSizes(aave.availableLiquidity);
   const results = [];
 
-  for (const amount of sizes) {
+  for (const amount of effectiveSizes) {
     if (amount > aave.availableLiquidity) {
       results.push({
         success: false,
@@ -4276,7 +4297,8 @@ async function scanBaseAaveFlashArbitrage({ sizes = FLASH_SCAN_DEFAULT_SIZES }) 
       const premiumUsd = amount * (aave.flashLoanPremiumBps / 10000);
       const grossPnl = Number(comparison.bestDirection.grossPnl);
       const estimatedNetPnl = grossPnl - premiumUsd - gasModel.modeledGasUsd;
-      const meetsMinimum = estimatedNetPnl >= BASE_DIRECT_MIN_NET_PROFIT_USD;
+      const requiredNetProfitUsd = flashRequiredNetProfitUsd(amount);
+      const meetsMinimum = estimatedNetPnl >= requiredNetProfitUsd;
 
       results.push({
         success: true,
@@ -4287,7 +4309,9 @@ async function scanBaseAaveFlashArbitrage({ sizes = FLASH_SCAN_DEFAULT_SIZES }) 
         modeledGasUsd: gasModel.modeledGasUsd,
         estimatedNetPnl: round(estimatedNetPnl, 6),
         estimatedNetRoiOnBorrowedAmountPercent: round((estimatedNetPnl / amount) * 100, 6),
-        minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+        absoluteMinimumNetProfitUsd: FLASH_ABSOLUTE_MIN_NET_PROFIT_USD,
+        minimumNetRoiPercent: FLASH_MIN_NET_ROI_PERCENT,
+        requiredNetProfitUsd: round(requiredNetProfitUsd, 6),
         meetsMinimumNetProfit: meetsMinimum,
         profitTier: baseDirectProfitTier(estimatedNetPnl),
         classification: meetsMinimum ? "FLASH_CANDIDATE" : "REJECTED",
@@ -4355,7 +4379,7 @@ async function scanBaseAaveFlashArbitrage({ sizes = FLASH_SCAN_DEFAULT_SIZES }) 
       "full transaction simulation",
       "on-chain minimum-profit protection"
     ],
-    warning: "Paper discovery only. No flash loan is requested and no funds move. A FLASH_CANDIDATE is only an estimated opportunity and is not executable until atomic contract simulation and minimum-profit protections are implemented."
+    warning: "Paper discovery only. No flash loan is requested and no funds move. Adaptive sizing can evaluate large notionals, but it never treats loan size as profit. A FLASH_CANDIDATE must clear both the absolute NET floor and the size-scaled NET ROI floor, and is not executable until atomic contract simulation and minimum-profit protections are implemented."
   };
 }
 
@@ -4386,7 +4410,9 @@ app.get("/api/flash/base/aave/status", async (req, res) => {
 
 app.get("/api/flash/base/aave/scan", async (req, res) => {
   try {
-    const sizes = parseFlashScanSizes(req.query.sizes);
+    const sizes = (req.query.sizes === undefined || String(req.query.sizes).trim() === "")
+      ? null
+      : parseFlashScanSizes(req.query.sizes);
     const result = await scanBaseAaveFlashArbitrage({ sizes });
     return res.json({
       success: true,
@@ -4401,6 +4427,202 @@ app.get("/api/flash/base/aave/scan", async (req, res) => {
       engine: "ArbiFlow Opportunity Engine",
       version: VERSION,
       mode: "AAVE_FLASH_LOAN_PAPER_DISCOVERY",
+      liveExecutionEnabled: false,
+      error: error.message,
+      time: now()
+    });
+  }
+});
+
+
+app.get("/api/flash/base/aave/adaptive-scan", async (req, res) => {
+  try {
+    const result = await scanBaseAaveFlashArbitrage({ sizes: null });
+    return res.json({
+      success: true,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      ...result,
+      time: now()
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      mode: "AAVE_FLASH_LOAN_ADAPTIVE_PAPER_DISCOVERY",
+      liveExecutionEnabled: false,
+      error: error.message,
+      time: now()
+    });
+  }
+});
+
+/*
+=========================================================
+AAVE V3 BASE LIQUIDATION DISCOVERY - ENGINE 3.8
+
+Read-only discovery. Scans recent Aave Borrow events to build
+an active-borrower sample, then reads getUserAccountData for
+each borrower. Positions below HF 1.0 are liquidation-eligible;
+positions above 1.0 but near it are watchlist entries.
+No liquidation is submitted and no funds move.
+=========================================================
+*/
+
+const AAVE_ACCOUNT_DATA_ABI = [
+  "function getUserAccountData(address user) view returns (uint256 totalCollateralBase,uint256 totalDebtBase,uint256 availableBorrowsBase,uint256 currentLiquidationThreshold,uint256 ltv,uint256 healthFactor)"
+];
+
+const AAVE_BORROW_EVENT_ABI = [
+  "event Borrow(address indexed reserve,address user,address indexed onBehalfOf,uint256 amount,uint8 interestRateMode,uint256 borrowRate,uint16 indexed referralCode)"
+];
+
+const AAVE_LIQUIDATION_DEFAULT_BLOCKS = 20000;
+const AAVE_LIQUIDATION_MAX_BLOCKS = 100000;
+const AAVE_LIQUIDATION_DEFAULT_USERS = 75;
+const AAVE_LIQUIDATION_MAX_USERS = 250;
+const AAVE_HF_WATCH_LIMIT = 1.10;
+
+function clampInt(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function formatAaveBaseUsd(value) {
+  // Aave V3 getUserAccountData base-currency values use 8 decimals
+  // when the market base currency is USD.
+  return Number(formatUnits(value, 8));
+}
+
+async function scanAaveBaseLiquidations({ blocks, maxUsers } = {}) {
+  const provider = getBaseProvider();
+  const pool = new Contract(AAVE_V3_BASE.pool, AAVE_ACCOUNT_DATA_ABI, provider);
+  const iface = new (require("ethers").Interface)(AAVE_BORROW_EVENT_ABI);
+  const borrowTopic = iface.getEvent("Borrow").topicHash;
+  const latestBlock = await provider.getBlockNumber();
+  const blockCount = clampInt(blocks, AAVE_LIQUIDATION_DEFAULT_BLOCKS, 1000, AAVE_LIQUIDATION_MAX_BLOCKS);
+  const userLimit = clampInt(maxUsers, AAVE_LIQUIDATION_DEFAULT_USERS, 10, AAVE_LIQUIDATION_MAX_USERS);
+  const fromBlock = Math.max(0, latestBlock - blockCount + 1);
+
+  const logs = [];
+  const chunkSize = 2000;
+  for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
+    const end = Math.min(latestBlock, start + chunkSize - 1);
+    const chunk = await provider.getLogs({
+      address: AAVE_V3_BASE.pool,
+      topics: [borrowTopic],
+      fromBlock: start,
+      toBlock: end
+    });
+    logs.push(...chunk);
+  }
+
+  const seen = new Set();
+  const borrowers = [];
+  for (let i = logs.length - 1; i >= 0 && borrowers.length < userLimit; i--) {
+    try {
+      const decoded = iface.parseLog(logs[i]);
+      const user = String(decoded.args.onBehalfOf || decoded.args.user);
+      const key = user.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        borrowers.push({ address: user, lastBorrowBlock: logs[i].blockNumber });
+      }
+    } catch (_) {}
+  }
+
+  const eligible = [];
+  const watchlist = [];
+  const healthy = [];
+  const errors = [];
+
+  for (const borrower of borrowers) {
+    try {
+      const d = await pool.getUserAccountData(borrower.address);
+      const collateralUsd = formatAaveBaseUsd(d.totalCollateralBase);
+      const debtUsd = formatAaveBaseUsd(d.totalDebtBase);
+      const healthFactor = d.healthFactor === 0n ? null : Number(formatUnits(d.healthFactor, 18));
+      if (debtUsd <= 0 || healthFactor === null) continue;
+      const row = {
+        user: borrower.address,
+        lastBorrowBlock: borrower.lastBorrowBlock,
+        totalCollateralUsd: round(collateralUsd, 2),
+        totalDebtUsd: round(debtUsd, 2),
+        healthFactor: round(healthFactor, 6),
+        liquidationThresholdPercent: round(Number(d.currentLiquidationThreshold) / 100, 4),
+        status: healthFactor < 1 ? "LIQUIDATION_ELIGIBLE" : healthFactor <= AAVE_HF_WATCH_LIMIT ? "NEAR_LIQUIDATION" : "HEALTHY",
+        executable: false,
+        paperPass: false
+      };
+      if (healthFactor < 1) eligible.push(row);
+      else if (healthFactor <= AAVE_HF_WATCH_LIMIT) watchlist.push(row);
+      else healthy.push(row);
+    } catch (error) {
+      errors.push({ user: borrower.address, error: error.message });
+    }
+  }
+
+  eligible.sort((a,b) => a.healthFactor - b.healthFactor || b.totalDebtUsd - a.totalDebtUsd);
+  watchlist.sort((a,b) => a.healthFactor - b.healthFactor || b.totalDebtUsd - a.totalDebtUsd);
+
+  return {
+    mode: "AAVE_LIQUIDATION_READ_ONLY_DISCOVERY",
+    network: "Base",
+    provider: "Aave V3",
+    pool: AAVE_V3_BASE.pool,
+    scannedBlockRange: { fromBlock, toBlock: latestBlock, blocks: latestBlock - fromBlock + 1 },
+    borrowEventsFound: logs.length,
+    uniqueBorrowersChecked: borrowers.length,
+    healthFactorRule: { liquidationEligibleBelow: 1, watchlistAtOrBelow: AAVE_HF_WATCH_LIMIT },
+    liquidationEligible: eligible,
+    watchlist,
+    counts: {
+      liquidationEligible: eligible.length,
+      watchlist: watchlist.length,
+      healthy: healthy.length,
+      errors: errors.length
+    },
+    errors,
+    executableOpportunities: 0,
+    executable: false,
+    paperPass: false,
+    liveExecutionEnabled: false,
+    minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+    nextValidationRequired: [
+      "read each eligible user's collateral and debt reserves",
+      "calculate Aave liquidation bonus and close factor",
+      "quote collateral conversion back to flash-loan asset",
+      "subtract flash-loan premium and transaction-level gas",
+      "fresh health-factor confirmation",
+      "atomic flash-loan liquidation receiver contract",
+      "full transaction simulation",
+      "on-chain minimum-profit protection"
+    ],
+    warning: "Read-only liquidation discovery only. Eligibility is based on live Aave account health factor. No liquidation is executed, and profitability is not yet claimed until collateral/debt-specific liquidation economics and full transaction simulation are added."
+  };
+}
+
+app.get("/api/liquidations/base/aave/scan", async (req, res) => {
+  try {
+    const result = await scanAaveBaseLiquidations({
+      blocks: req.query.blocks,
+      maxUsers: req.query.maxUsers
+    });
+    return res.json({
+      success: true,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      ...result,
+      time: now()
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      mode: "AAVE_LIQUIDATION_READ_ONLY_DISCOVERY",
       liveExecutionEnabled: false,
       error: error.message,
       time: now()
