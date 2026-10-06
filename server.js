@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.2.3";
+const VERSION = "4.2.4";
 
 /*
 =========================================================
@@ -4995,6 +4995,28 @@ async function runWatcherBot(spreadBot,triangleBot,dislocationBot){
   return {bot:"WATCHER_BOT",status:"COMPLETE",rule:"Keep raw near-misses within $2 hot and fresh-requote the strongest 12 items.",watchlist:near,rechecks,promoted:rechecks.filter(x=>x.becameRawPositive)};
 }
 
+async function runFastWatcher424(spreadBot,triangleBot,dislocationBot){
+  const startedAt=Date.now(), near=[];
+  for(const x of spreadBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"SPREAD_BOT",pair:x.pair,grossPnl:p,score:x.score});}
+  for(const x of triangleBot.observations||[]){const p=Number(x.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"TRIANGLE_BOT",route:x.route,venues:x.venues,grossPnl:p,score:x.score});}
+  for(const x of dislocationBot.observations||[]){const p=Number(x.bestDirection?.grossPnl??-Infinity);if(p<=0&&p>=-MARKET42.watcherNearMissUsd)near.push({source:"DISLOCATION_BOT",pair:x.pair,grossPnl:p,score:x.score});}
+  near.sort((a,b)=>b.score-a.score);
+  const shortlist=near.slice(0,SCAN422.watcherLimit);
+  const rows=await mapLimit421(shortlist,3,async item=>{
+    try{
+      if(item.pair){
+        const [a,b]=item.pair.split("/");
+        const result=await withTimeout421(compareBaseDirectVenues({baseToken:a,quoteToken:b,amount:MARKET42.probeUsd}),4500,`watcher ${item.pair}`);
+        const best=bestDirectDirection({result});
+        return {...item,freshGrossPnl:Number(best?.grossPnl??NaN),freshGrossRoiPercent:Number(best?.grossRoiPercent??NaN),becameRawPositive:Boolean(best&&Number(best.grossPnl)>0),recheckedAt:now()};
+      }
+      const q=await withTimeout421(quoteMarket42Triangle(MARKET42.probeUsd,item.route,item.venues),4500,`watcher triangle ${item.venues?.join("/")||"route"}`);
+      return {...item,freshGrossPnl:Number(q.grossPnl),freshGrossRoiPercent:Number(q.grossRoiPercent),becameRawPositive:Boolean(q.rawPositive),recheckedAt:now()};
+    }catch(error){return {...item,recheckError:error.message,becameRawPositive:false,recheckedAt:now()};}
+  });
+  return {bot:"WATCHER_BOT",status:"COMPLETE",stage:"PRE_SHORTLISTED_FAST_RECHECK",rule:`Select the strongest ${SCAN422.watcherLimit} near-misses before requoting; recheck with bounded concurrency and per-item timeouts.`,watchlist:shortlist,rechecks:rows,promoted:rows.filter(x=>x.becameRawPositive),elapsedMs:Date.now()-startedAt};
+}
+
 const LIFI_PROBE_ADDRESS="0x0000000000000000000000000000000000000001";
 async function lifi42Quote(sellToken,buyToken,sellAmount){
   const network=NETWORKS.base, s=network.tokens[sellToken], b=network.tokens[buyToken]; if(!s||!b) throw new Error("Unsupported LI.FI token");
@@ -5183,7 +5205,7 @@ async function runLiquidationBatch422(){
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.2.3 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.2.4 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5199,13 +5221,11 @@ async function scanBaseBotNetwork422(){
   try{triangleBot=await withTimeout421(runFastTriangleBot422(spreadBot),SCAN422.fastBotBudgetMs,"TRIANGLE_BOT");}
   catch{triangleBot=timeoutResult422("TRIANGLE_BOT",SCAN422.fastBotBudgetMs,startedAt);}
 
-  // Stage 3: watcher is capped to the strongest near misses.
+  // Stage 3: shortlist first, then requote only the strongest bounded set.
   let watcherBot;
   try{
-    watcherBot=await withTimeout421(runWatcherBot(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
-    if(Array.isArray(watcherBot.watchlist)) watcherBot.watchlist=watcherBot.watchlist.slice(0,SCAN422.watcherLimit);
-    if(Array.isArray(watcherBot.rechecks)) watcherBot.rechecks=watcherBot.rechecks.slice(0,SCAN422.watcherLimit);
-  }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
+    watcherBot=await withTimeout421(runFastWatcher424(spreadBot,triangleBot,dislocationBot),10000,"WATCHER_BOT");
+  }catch(error){watcherBot={bot:"WATCHER_BOT",status:"TIME_BUDGET_REACHED",stage:"PRE_SHORTLISTED_FAST_RECHECK",watchlist:[],rechecks:[],promoted:[],errors:[{error:error.message}]};}
 
   // Stage 4: expensive flash sizing remains gated behind a raw-positive seed.
   let largeOpportunityBot;
@@ -5220,8 +5240,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationBot.opportunities||[]) ranked.push({source:"LIQUIDATION_BOT",type:x.opportunityType,label:x.user,score:x.score,profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.2.3 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"FAST_STAGED_MARKET_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,persistentLiquidationWatcher:true},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.3 uses staged, bounded discovery with LI.FI quote repair and persistent in-memory liquidation rechecks. A raw-positive quote is not executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
+  scan421Log("BOT NETWORK 4.2.4 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"FAST_STAGED_MARKET_DISCOVERY",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,persistentLiquidationWatcher:true,preShortlistedFastWatcher:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:3,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.2.4 uses staged, bounded discovery with LI.FI quote repair, persistent liquidation rechecks, and a pre-shortlisted fast Watcher. A raw-positive quote is not executable until costs, freshness, atomic simulation, and minimum-profit protections pass."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
