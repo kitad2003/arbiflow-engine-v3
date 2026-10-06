@@ -33,7 +33,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.27.0";
+const VERSION = "4.28.0";
 
 /*
 =========================================================
@@ -1875,12 +1875,12 @@ async function zeroXPrice({
 
 /*
 =========================================================
-0x FIRM EXECUTION QUOTE BINDER — 4.27.0
+0x FIRM EXECUTION QUOTE BINDER — 4.28.0
 Read-only. Never signs or broadcasts. Only called after exact fork eligibility
 and exact Morpho repay/seize sizing have both passed.
 =========================================================
 */
-async function zeroXFirmExecutionQuote4270({sellTokenAddress,buyTokenAddress,sellAmountBaseUnits,taker,slippageBps=100}){
+async function zeroXFirmExecutionQuote4280({sellTokenAddress,buyTokenAddress,sellAmountBaseUnits,taker,slippageBps=100}){
   if(!ZEROX_API_KEY) throw new Error("ZEROX_API_KEY is not configured.");
   if(!/^0x[a-fA-F0-9]{40}$/.test(String(taker||""))) throw new Error("A valid ARBIFLOW_QUOTE_TAKER is required for a firm 0x quote.");
   if(!/^0x[a-fA-F0-9]{40}$/.test(String(sellTokenAddress||""))||!/^0x[a-fA-F0-9]{40}$/.test(String(buyTokenAddress||""))) throw new Error("Invalid firm-quote token address.");
@@ -5544,7 +5544,7 @@ async function runLiquidationEconomicsBot460(aaveBot,morphoBot){
   // Aave remains watch-first until eligible. Do not invent liquidation bonus economics.
   for(const row of aaveBot.opportunities||[]) watchlist.push({protocol:"AAVE_V3",user:row.user,healthFactor:Number(row.healthFactor),totalDebtUsd:Number(row.totalDebtUsd||0),totalCollateralUsd:Number(row.totalCollateralUsd||0),status:"ECONOMIC_WATCH_REQUIRES_ELIGIBILITY_AND_RESERVE_BONUS",profitabilityValidated:false,executable:false,readOnly:true});
   candidates.sort((a,b)=>b.estimatedNetBeforeRouteUsd-a.estimatedNetBeforeRouteUsd);watchlist.sort((a,b)=>(a.healthFactor??99)-(b.healthFactor??99));
-  return{bot:"LIQUIDATION_ECONOMICS_BOT",status:"COMPLETE",strategy:"LIQUIDATION_FIRST_CAPITAL_OPTIMIZER",financing:{primary:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",comparisonReady:["OWN_CAPITAL","AAVE_FLASH_LOAN","PROFIT_SHARE_CAPITAL_LATER"],flashAsset:flashState?.asset??null,flashAssetAddress:flashState?.assetAddress??null,flashLoanPremiumBps:premiumBps,availableFlashLiquidityTokenUnits:flashState?.availableLiquidity??null,byAsset:Object.fromEntries(Object.entries(flashByAsset).map(([asset,x])=>[asset,{assetAddress:x.assetAddress,availableLiquidityTokenUnits:x.availableLiquidity,flashLoanPremiumBps:x.flashLoanPremiumBps}]))},candidates,watchlist,errors,profitabilityValidated:false,note:"4.27.0 matches Aave flash financing to the Morpho debt asset. Economics are conservative discovery estimates only. A candidate is never executable until liquidation eligibility, incentive, collateral route, slippage, gas, flash premium and atomic simulation are revalidated onchain.",elapsedMs:Date.now()-startedAt};
+  return{bot:"LIQUIDATION_ECONOMICS_BOT",status:"COMPLETE",strategy:"LIQUIDATION_FIRST_CAPITAL_OPTIMIZER",financing:{primary:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",comparisonReady:["OWN_CAPITAL","AAVE_FLASH_LOAN","PROFIT_SHARE_CAPITAL_LATER"],flashAsset:flashState?.asset??null,flashAssetAddress:flashState?.assetAddress??null,flashLoanPremiumBps:premiumBps,availableFlashLiquidityTokenUnits:flashState?.availableLiquidity??null,byAsset:Object.fromEntries(Object.entries(flashByAsset).map(([asset,x])=>[asset,{assetAddress:x.assetAddress,availableLiquidityTokenUnits:x.availableLiquidity,flashLoanPremiumBps:x.flashLoanPremiumBps}]))},candidates,watchlist,errors,profitabilityValidated:false,note:"4.28.0 matches Aave flash financing to the Morpho debt asset. Economics are conservative discovery estimates only. A candidate is never executable until liquidation eligibility, incentive, collateral route, slippage, gas, flash premium and atomic simulation are revalidated onchain.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5656,7 +5656,7 @@ async function runLiquidationRouteOptimizer490(morphoBot,projectedBot,liquidatio
   for(const target of targets){const r=successful.filter(x=>String(x.user).toLowerCase()===String(target.user).toLowerCase()).sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);if(r[0])bestByPosition.push(r[0]);}
   bestByPosition.sort((a,b)=>b.projectedFinalNetUsd-a.projectedFinalNetUsd);
   const bestOverall=bestByPosition[0]||null;
-  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"ADAPTIVE_COARSE_TO_FINE_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",flashAsset:primaryFlashAsset,availableFlashLiquidityTokenUnits:primaryFlashLiquidityTokenUnits,availableFlashLiquidityUsd:round(flashLiquidity,2),flashLoanPremiumBps:premiumBps,coarseSizesUsd:[10000,50000,100000,250000,500000,1000000],adaptiveRefinement:true,positionsTargeted:targets.length,uniqueExitQuotes:quoteCache.size,tests,bestByPosition,bestOverall,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"4.27.0 retains normalized Morpho token pricing and live 0x route diagnostics while aligning execution financing with the actual Morpho debt asset. projectedFinalNetUsd remains pre-eligibility projection only. Exact Morpho liquidation eligibility/repay limits, fresh execution quotes, minimum-output protection and atomic simulation remain mandatory before execution.",elapsedMs:Date.now()-startedAt};
+  return{bot:"LIQUIDATION_ROUTE_OPTIMIZER_BOT",status:"COMPLETE",strategy:"ADAPTIVE_COARSE_TO_FINE_REAL_EXIT_QUOTES",route:`${targets[0]?.collateralAsset||"COLLATERAL"}->${targets[0]?.loanAsset||"DEBT"}`,financing:"AAVE_FLASH_LOAN_DEBT_ASSET_MATCHED",flashAsset:primaryFlashAsset,availableFlashLiquidityTokenUnits:primaryFlashLiquidityTokenUnits,availableFlashLiquidityUsd:round(flashLiquidity,2),flashLoanPremiumBps:premiumBps,coarseSizesUsd:[10000,50000,100000,250000,500000,1000000],adaptiveRefinement:true,positionsTargeted:targets.length,uniqueExitQuotes:quoteCache.size,tests,bestByPosition,bestOverall,qualifiedProjected:bestByPosition.filter(x=>x.meetsMinimumNet),errors,profitabilityValidated:false,executable:false,note:"4.28.0 retains normalized Morpho token pricing and live 0x route diagnostics while aligning execution financing with the actual Morpho debt asset. projectedFinalNetUsd remains pre-eligibility projection only. Exact Morpho liquidation eligibility/repay limits, fresh execution quotes, minimum-output protection and atomic simulation remain mandatory before execution.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5706,21 +5706,21 @@ async function readFreshMorphoStoredState4210(row){
   return {source:"DIRECT_BASE_RPC_CURRENT_BLOCK_STORED_STATE",blockNumber,marketId:row.marketId,user:row.user,borrowShares:borrowShares.toString(),collateralRaw:collateralRaw.toString(),storedTotalBorrowAssets:totalBorrowAssets.toString(),storedTotalBorrowShares:totalBorrowShares.toString(),storedBorrowAssetsRaw:storedBorrowAssets.toString(),storedBorrowTokenUnits:round(storedBorrowTokenUnits,10),storedBorrowUsd:round(storedBorrowUsd,2),storedCollateralTokenUnits:round(collateralTokenUnits,10),storedCollateralUsd:round(collateralUsd,2),lltv:round(lltv,8),storedHealthFactor:Number.isFinite(storedHealthFactor)?round(storedHealthFactor,9):null,storedStateLiquidatable:Number.isFinite(storedHealthFactor)&&storedHealthFactor<=1,marketLastUpdate:Number(market.lastUpdate),loanToken:params.loanToken,collateralToken:params.collateralToken,oracle:params.oracle,irm:params.irm,onchainLltv:params.lltv.toString(),exactAccruedStateConfirmed:false,note:"Current-block direct RPC stored-state gate. Morpho interest accrual is not persisted by this read-only call, so this must not be treated as exact accrued execution eligibility."};
 }
 
-function runMorphoCandidateForkGate4270(candidates){
-  if(!Array.isArray(candidates)||candidates.length===0) return {success:true,version:"4.27.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",candidatesChecked:0,results:[],note:"No optimized Morpho candidates required fork accrual."};
-  const reportPath=path.join(__dirname,`morpho-candidate-gate-4270-${process.pid}-${Date.now()}.json`);
+function runMorphoCandidateForkGate4280(candidates){
+  if(!Array.isArray(candidates)||candidates.length===0) return {success:true,version:"4.28.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",candidatesChecked:0,results:[],note:"No optimized Morpho candidates required fork accrual."};
+  const reportPath=path.join(__dirname,`morpho-candidate-gate-4280-${process.pid}-${Date.now()}.json`);
   const env={...process.env,ARBIFLOW_MORPHO_CANDIDATES_JSON:JSON.stringify(candidates.map(x=>({marketId:x.marketId,user:x.user}))),ARBIFLOW_MORPHO_GATE_REPORT:reportPath};
   const hardhatBin=process.platform==="win32"?path.join(__dirname,"node_modules",".bin","hardhat.cmd"):path.join(__dirname,"node_modules",".bin","hardhat");
-  const child=spawnSync(hardhatBin,["run","--no-compile","MorphoCandidateForkGate4270.js"],{cwd:__dirname,env,encoding:"utf8",timeout:120000,maxBuffer:4*1024*1024});
+  const child=spawnSync(hardhatBin,["run","--no-compile","MorphoCandidateForkGate4280.js"],{cwd:__dirname,env,encoding:"utf8",timeout:120000,maxBuffer:4*1024*1024});
   let report=null;
   try{if(fs.existsSync(reportPath)) report=JSON.parse(fs.readFileSync(reportPath,"utf8"));}catch{}
   try{if(fs.existsSync(reportPath)) fs.unlinkSync(reportPath);}catch{}
-  if(child.error) return {success:false,version:"4.27.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",error:child.error.message,stderr:child.stderr?.slice(-2000)||null,results:[]};
-  if(child.status!==0||!report?.success) return {success:false,version:"4.27.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",exitCode:child.status,error:report?.error||child.stderr?.slice(-2000)||"FORK_GATE_FAILED",results:[]};
+  if(child.error) return {success:false,version:"4.28.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",error:child.error.message,stderr:child.stderr?.slice(-2000)||null,results:[]};
+  if(child.status!==0||!report?.success) return {success:false,version:"4.28.0",source:"EPHEMERAL_BASE_FORK_BATCH_MORPHO_ACCRUAL_PLUS_EXACT_LIQUIDATION_BOUND",exitCode:child.status,error:report?.error||child.stderr?.slice(-2000)||"FORK_GATE_FAILED",results:[]};
   return report;
 }
 
-function buildAtomicPayloadBlueprint4270(pos, exactBound, executionQuote){
+function buildAtomicPayloadBlueprint4280(pos, exactBound, executionQuote){
   if(!exactBound||executionQuote?.firmQuoteBound!==true) return {status:"NOT_BUILT_UNTIL_EXACT_BOUND_AND_FIRM_QUOTE",payloadBound:false,transactionSpecificGasAvailable:false,readOnly:true};
   const tx=executionQuote.transaction||{};
   const gas=BigInt(tx.gas||0), gasPrice=BigInt(tx.gasPrice||0);
@@ -5767,7 +5767,7 @@ async function runLiquidationReadiness410(morphoBot, routeBot){
   const routeByKey=new Map((routeBot.bestByPosition||[]).map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
   const sourceByKey=new Map(allMorpho.map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
   const quoteTaker=process.env.ARBIFLOW_QUOTE_TAKER||"";
-  const forkGate=runMorphoCandidateForkGate4270(candidates);
+  const forkGate=runMorphoCandidateForkGate4280(candidates);
   const forkByKey=new Map((forkGate.results||[]).map(x=>[`${x.marketId}:${String(x.user).toLowerCase()}`,x]));
   const rows=[];
   for(const pos of candidates){
@@ -5786,11 +5786,11 @@ async function runLiquidationReadiness410(morphoBot, routeBot){
       const src=sourceByKey.get(key)||pos;
       try{
         if(!quoteTaker) throw new Error("ARBIFLOW_QUOTE_TAKER is not configured; firm quote remains fail-closed.");
-        executionQuote={status:"RECEIVED",...(await zeroXFirmExecutionQuote4270({sellTokenAddress:src.collateralAssetAddress,buyTokenAddress:src.loanAssetAddress,sellAmountBaseUnits:String(exactBound.seizedAssetsInputRaw),taker:quoteTaker,slippageBps:Number(SETTINGS.slippageBps||100)}))};
+        executionQuote={status:"RECEIVED",...(await zeroXFirmExecutionQuote4280({sellTokenAddress:src.collateralAssetAddress,buyTokenAddress:src.loanAssetAddress,sellAmountBaseUnits:String(exactBound.seizedAssetsInputRaw),taker:quoteTaker,slippageBps:Number(SETTINGS.slippageBps||100)}))};
       }catch(error){executionQuote={status:"FAILED",error:error?.message||String(error),firmQuoteBound:false,readOnly:true};}
     }
     const firmQuoteBound=Boolean(exactBoundConfirmed&&executionQuote?.firmQuoteBound===true);
-    const atomicPayloadBlueprint=buildAtomicPayloadBlueprint4270(sourceByKey.get(key)||pos,exactBound,executionQuote);
+    const atomicPayloadBlueprint=buildAtomicPayloadBlueprint4280(sourceByKey.get(key)||pos,exactBound,executionQuote);
     const apiLiquidatable=Boolean(eligiblePos&&Number(eligiblePos.healthFactor)<=1);
     const freshSignal=Boolean(freshOnchainStoredState?.storedStateLiquidatable===true);
     const routeNet=route?Number(route.projectedFinalNetUsd):null;
@@ -5814,12 +5814,13 @@ async function runLiquidationReadiness410(morphoBot, routeBot){
     if(exactBoundConfirmed&&!firmQuoteBound) blockers.push("FIRM_EXECUTION_QUOTE_NOT_BOUND");
     if(!exactBoundConfirmed) blockers.push("FIRM_EXECUTION_QUOTE_DEFERRED_UNTIL_EXACT_ELIGIBILITY");
     if(!atomicPayloadBlueprint.payloadBound) blockers.push("ATOMIC_TX_BLUEPRINT_DEFERRED_UNTIL_FIRM_QUOTE");
-    blockers.push("ATOMIC_TRANSACTION_GAS_ESTIMATE_NOT_AVAILABLE_UNTIL_CALLABLE_EXECUTOR");
+    blockers.push("FULL_ATOMIC_EXECUTOR_IMPLEMENTATION_NOT_AVAILABLE");
+    blockers.push("FULL_ATOMIC_TRANSACTION_GAS_NOT_YET_ESTIMATED");
     if(!firmQuoteBound) blockers.push("MIN_OUTPUT_GUARD_NOT_BOUND_TO_FIRM_QUOTE");
     blockers.push("ATOMIC_EXECUTION_SIMULATION_NOT_AVAILABLE_UNTIL_EXECUTION_CONTRACT_EXISTS");
     rows.push({protocol:"MORPHO_BLUE",marketId:pos.marketId,user:pos.user,healthFactor:pos.healthFactor,selectionSource:"DIRECT_MORPHO_DISCOVERY_HEALTH_RANK",apiLiquidatableSignal:apiLiquidatable,normalLiquidationEligible:freshSignal,freshOnchainStoredState,exactForkAccruedState:exactFork,exactProtocolLiquidationBound:exactBound,executionQuote,atomicPayloadBlueprint,discoveredDebtUsd:pos.borrowAssetsUsd??null,protocolRule:"PARTIAL_OR_FULL_LIQUIDATION_WHEN_UNHEALTHY",protocolMaxRepayUsdDiscoveryOnly:protocolMaxRepayUsd,routeAvailable:Boolean(route),selectedRepayUsd:route?round(selectedRepayUsd,2):null,selectedRouteNetUsd:route&&Number.isFinite(routeNet)?round(routeNet,2):null,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,quoteAgeMs,quoteFresh,withinDiscoveredDebt:withinProtocolDebt,checks:{freshCurrentBlockStoredEligibility:freshSignal,forkAccruedStateConfirmed:exactConfirmed,exactAccruedEligibility:exactEligible,routeAvailable:Boolean(route),routeNetMinimum:routeQualified,freshExitQuote:quoteFresh,selectedRepayWithinDiscoveredDebt:withinProtocolDebt,exactProtocolValidRepaySeizeBound:exactBoundConfirmed,firmExecutionQuoteBound:firmQuoteBound,minOutputBoundToFirmQuote:firmQuoteBound,atomicPayloadBlueprintBound:Boolean(atomicPayloadBlueprint.payloadBound),swapLegProviderGasBound:Boolean(atomicPayloadBlueprint?.gas?.swapLegGas),transactionSpecificGas:false,minOutputBoundToAtomicTransaction:false,atomicSimulation:false},blockers,readinessStatus:blockers.length?"REJECT_NOT_EXECUTION_READY":"PASS",paperPass:false,profitabilityValidated:false,executable:false,readOnly:true});
   }
-  return {bot:"LIQUIDATION_READINESS_BOT",status:forkGate.success?"COMPLETE":"FORK_ACCRUAL_GATE_FAILED",strategy:"DIRECT_MORPHO_TO_EXACT_BOUND_TO_FIRM_QUOTE_TO_ATOMIC_PAYLOAD_BLUEPRINT_FAIL_CLOSED",positionsChecked:rows.length,candidateSelection:{source:"MORPHO_LIQUIDATION_BOT_DIRECT",limit:3,selected:candidates.map(x=>({marketId:x.marketId,user:x.user,healthFactor:x.healthFactor}))},forkAccrualGate:{success:forkGate.success,source:forkGate.source,sourceForkBlockNumber:forkGate.sourceForkBlockNumber??null,protocolExecutionBlockNumber:forkGate.protocolExecutionBlockNumber??null,uniqueMarketsAccrued:forkGate.uniqueMarketsAccrued??0,candidatesChecked:forkGate.candidatesChecked??0,error:forkGate.error??null},ready:rows.filter(x=>x.readinessStatus==="PASS"),rejected:rows,executable:false,paperPass:false,readOnly:true,note:"4.27.0 selects the closest Morpho positions directly from discovery before route optimization, batches them into one disposable Base fork, accrues each unique market once, and rereads every borrower after accrual. Quote-provider or gas-pricing failures cannot suppress eligibility checks. For a borrower that is unhealthy at the fork block, 4.26 computes the exact Morpho liquidation bound and only then requests a firm 0x AllowanceHolder quote for the exact seized collateral amount. The returned allowance spender, transaction target/calldata and minimum output are validated and bound into a read-only Aave+Morpho+0x atomic payload blueprint. 0x swap-leg gas is retained separately and is never mislabeled as full atomic transaction gas. No signing or broadcast occurs.",elapsedMs:Date.now()-startedAt};
+  return {bot:"LIQUIDATION_READINESS_BOT",status:forkGate.success?"COMPLETE":"FORK_ACCRUAL_GATE_FAILED",strategy:"DIRECT_MORPHO_TO_EXACT_BOUND_TO_FIRM_QUOTE_TO_ATOMIC_PAYLOAD_BLUEPRINT_WITH_EXECUTOR_STATE_SYNC_FAIL_CLOSED",positionsChecked:rows.length,candidateSelection:{source:"MORPHO_LIQUIDATION_BOT_DIRECT",limit:3,selected:candidates.map(x=>({marketId:x.marketId,user:x.user,healthFactor:x.healthFactor}))},forkAccrualGate:{success:forkGate.success,source:forkGate.source,sourceForkBlockNumber:forkGate.sourceForkBlockNumber??null,protocolExecutionBlockNumber:forkGate.protocolExecutionBlockNumber??null,uniqueMarketsAccrued:forkGate.uniqueMarketsAccrued??0,candidatesChecked:forkGate.candidatesChecked??0,error:forkGate.error??null},ready:rows.filter(x=>x.readinessStatus==="PASS"),rejected:rows,executable:false,paperPass:false,readOnly:true,note:"4.28.0 selects the closest Morpho positions directly from discovery before route optimization, batches them into one disposable Base fork, accrues each unique market once, and rereads every borrower after accrual. Quote-provider or gas-pricing failures cannot suppress eligibility checks. For a borrower that is unhealthy at the fork block, 4.26 computes the exact Morpho liquidation bound and only then requests a firm 0x AllowanceHolder quote for the exact seized collateral amount. The returned allowance spender, transaction target/calldata and minimum output are validated and bound into a read-only Aave+Morpho+0x atomic payload blueprint. 0x swap-leg gas is retained separately and is never mislabeled as full atomic transaction gas. The verified fork-only callable harness is tracked separately from the not-yet-implemented full atomic executor. No signing or broadcast occurs.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5910,7 +5911,7 @@ function runExecutionFoundation411(morphoBot, routeBot, readinessBot){
       readOnly:true
     });
   }
-  return {bot:"EXECUTION_FOUNDATION_BOT",status:"COMPLETE",strategy:"ATOMIC_FLASH_LIQUIDATION_BLUEPRINT_FAIL_CLOSED",plansBuilt:plans.length,plans,executorContractRequired:true,transactionPayloadBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.27.0 aligns the flash asset with the Morpho debt asset and preserves the execution sequence and hard guards without pretending a transaction exists. Live execution remains disabled until an executor contract, exact onchain repay state, transaction calldata, transaction-specific gas, minimum-output binding and atomic simulation are implemented and validated.",elapsedMs:Date.now()-startedAt};
+  return {bot:"EXECUTION_FOUNDATION_BOT",status:"COMPLETE",strategy:"ATOMIC_FLASH_LIQUIDATION_BLUEPRINT_FAIL_CLOSED",plansBuilt:plans.length,plans,executorContractRequired:true,transactionPayloadBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.28.0 aligns the flash asset with the Morpho debt asset and preserves the execution sequence and hard guards without pretending a transaction exists. Live execution remains disabled until an executor contract, exact onchain repay state, transaction calldata, transaction-specific gas, minimum-output binding and atomic simulation are implemented and validated.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5944,11 +5945,11 @@ function runExecutorSimulationFoundation412(executionFoundationBot){
     };
     const blockers=[...(p.blockers||[])];
     for(const b of [
-      "EXECUTOR_ADDRESS_REQUIRED_FOR_REAL_CALLDATA",
+      "FULL_ATOMIC_EXECUTOR_IMPLEMENTATION_NOT_AVAILABLE",
       "FIRM_0X_EXECUTION_QUOTE_NOT_YET_BOUND",
       "TOKEN_UNIT_REPAY_AMOUNT_NOT_YET_BOUND",
-      "REAL_GAS_ESTIMATE_REQUIRES_CALLABLE_EXECUTOR",
-      "ETH_CALL_ATOMIC_SIMULATION_REQUIRES_CALLABLE_EXECUTOR"
+      "FULL_ATOMIC_TRANSACTION_GAS_NOT_YET_ESTIMATED",
+      "FULL_ATOMIC_SIMULATION_NOT_YET_AVAILABLE"
     ]) if(!blockers.includes(b)) blockers.push(b);
     plans.push({
       protocol:p.protocol,network:p.network,marketId:p.marketId,borrower:p.borrower,
@@ -5971,11 +5972,23 @@ function runExecutorSimulationFoundation412(executionFoundationBot){
         "ONLY_FUTURE_USER_APPROVED_LIVE_LAYER_MAY_REQUEST_SIGNATURE"
       ],
       approvalsPolicy:{neverApproveSettler:true,useQuoteReturnedAllowanceSpender:true,executorMustApproveOnlyRequiredSwapAmount:true,clearOrBoundAllowanceAfterUse:true},
-      implementationState:{executorSourceArtifact:"INCLUDED_NOT_DEPLOYED",executorAddress:"NOT_DEPLOYED",firmSwapQuote:"NOT_BOUND",realCalldata:"NOT_BUILT",transactionGasEstimate:"NOT_AVAILABLE",atomicEthCall:"NOT_PERFORMED"},
+      implementationState:{executorSourceArtifact:"INCLUDED",forkCallableHarness:"VERIFIED_BY_STARTUP_REPORT",fullAtomicExecutor:"NOT_IMPLEMENTED",firmSwapQuote:"NOT_BOUND",realCalldata:"NOT_BUILT",transactionGasEstimate:"FULL_ATOMIC_NOT_AVAILABLE",atomicEthCall:"NOT_PERFORMED"},
       blockers,planStatus:"SIMULATION_FOUNDATION_ONLY_NOT_EXECUTABLE",executable:false,paperPass:false,readOnly:true
     });
   }
-  return {bot:"EXECUTOR_SIMULATION_FOUNDATION_BOT",status:"COMPLETE",strategy:"CALLDATA_SCHEMA_PLUS_FAIL_CLOSED_SIMULATION_PIPELINE",plansBuilt:plans.length,plans,executorSourceArtifactIncluded:true,executorDeployed:false,realCalldataBuilt:false,transactionGasEstimated:false,atomicSimulationPerformed:false,executable:false,paperPass:false,readOnly:true,note:"4.27.0 reports the current ArbiFlowExecutor414 artifact and retains the non-live executor transaction schema, transaction shape, calldata schema, and exact simulation pipeline. No executor address is fabricated and no transaction is signed, sent, or simulated until a callable executor and fresh protocol/quote data exist.",elapsedMs:Date.now()-startedAt};
+  let forkReport=null, forkReportError=null;
+  try{
+    const reportPath=path.join(__dirname,"fork-report-4280.json");
+    if(fs.existsSync(reportPath)) forkReport=JSON.parse(fs.readFileSync(reportPath,"utf8"));
+    else forkReportError="FORK_REPORT_4280_NOT_FOUND";
+  }catch(e){forkReportError=String(e?.message||e);}
+  const forkExecutorVerified=!!(
+    forkReport?.success===true && forkReport?.chainId===8453 && forkReport?.forkContractDeployed===true &&
+    typeof forkReport?.executor==="string" && forkReport.executor.startsWith("0x") &&
+    forkReport?.validatePlanEthCallPerformed===true && BigInt(forkReport?.validatePlanGas||0)>0n &&
+    forkReport?.liveEntryReverted===true && forkReport?.mainnetBroadcast===false && forkReport?.fundsMoved===false
+  );
+  return {bot:"EXECUTOR_SIMULATION_FOUNDATION_BOT",status:"COMPLETE",strategy:"VERIFIED_FORK_EXECUTOR_STATE_PLUS_FAIL_CLOSED_FULL_ATOMIC_PIPELINE",plansBuilt:plans.length,plans,executorSourceArtifactIncluded:true,executorDeployed:forkExecutorVerified,forkOnlyDeployment:forkExecutorVerified,executorAddress:forkExecutorVerified?forkReport.executor:null,validatePlanEthCallPerformed:forkExecutorVerified,validatePlanHash:forkExecutorVerified?forkReport.validatePlanHash:null,callableHarnessGasEstimated:forkExecutorVerified,validatePlanGas:forkExecutorVerified?forkReport.validatePlanGas:null,deploymentGas:forkExecutorVerified?forkReport.deploymentGas:null,realCalldataBuilt:false,transactionGasEstimated:false,fullAtomicLiquidationGasEstimated:false,atomicSimulationPerformed:false,fullAtomicExecutorImplemented:false,liveExecutionFunctionEnabled:false,mainnetDeployment:false,mainnetBroadcast:false,fundsMoved:false,executable:false,paperPass:false,readOnly:true,reportError:forkReportError,note:"4.28.0 synchronizes the simulation foundation with the verified startup disposable-fork executor. The callable validatePlan harness deployment, eth_call and gas estimate are recognized here, while full Aave+Morpho+0x atomic executor implementation, full transaction calldata, full atomic transaction gas and atomic liquidation simulation remain unavailable. No mainnet deployment, signature or broadcast occurs.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -5989,9 +6002,9 @@ function runCallableExecutorTestFoundation413(executorSimulationBot){
   const iface=new Interface(abi), placeholderTarget="0x0000000000000000000000000000000000000001", tests=[];
   let report=null, reportError=null;
   try{
-    const reportPath=path.join(__dirname,"fork-report-4270.json");
+    const reportPath=path.join(__dirname,"fork-report-4280.json");
     if(fs.existsSync(reportPath)) report=JSON.parse(fs.readFileSync(reportPath,"utf8"));
-    else reportError="FORK_REPORT_4270_NOT_FOUND";
+    else reportError="FORK_REPORT_4280_NOT_FOUND";
   }catch(e){reportError=String(e?.message||e);}
   const forkCallablePass=!!(
     report?.success===true && report?.chainId===8453 && report?.forkContractDeployed===true &&
@@ -6017,7 +6030,7 @@ function runCallableExecutorTestFoundation413(executorSimulationBot){
     blockers.push("VERIFIED_FORK_CALLABLE_EXECUTOR_REPORT_NOT_AVAILABLE","BASE_ETH_CALL_NOT_CONFIRMED","REAL_VALIDATE_PLAN_GAS_NOT_CONFIRMED");
   }
   blockers.push("LIVE_EXECUTION_FUNCTION_HARD_DISABLED");
-  return {bot:"CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT",status:allLocalTestsPass?"FORK_CALLABLE_TEST_PASSED":"FORK_CALLABLE_TEST_NOT_CONFIRMED",strategy:"VERIFIED_STARTUP_FORK_EXECUTOR_PLUS_SIDE_EFFECT_FREE_ETH_CALL_AND_GAS",testsBuilt:tests.length,tests,allLocalTestsPass,localAbiPass,executorArtifact:"ArbiFlowExecutor414.sol",executorDeploymentRequiredForBaseEthCall:true,executorDeployed:forkCallablePass,forkOnlyDeployment:forkCallablePass,executorAddress:forkCallablePass?report.executor:null,baseEthCallPerformed:forkCallablePass,validatePlanHash:forkCallablePass?report.validatePlanHash:null,realTransactionGasEstimated:forkCallablePass,validatePlanGas:forkCallablePass?report.validatePlanGas:null,deploymentGas:forkCallablePass?report.deploymentGas:null,liveEntryRevertConfirmed:forkCallablePass,liveExecutionFunctionEnabled:false,mainnetBroadcast:false,fundsMoved:false,executable:false,paperPass:false,readOnly:true,blockers,reportError,note:"4.27.0 consumes the verified startup disposable-fork deployment instead of incorrectly reporting it as absent. The fork-only ArbiFlowExecutor414 address is used to confirm side-effect-free validatePlan eth_call and eth_estimateGas results. This is harness-call gas only, not full Aave+Morpho+0x atomic liquidation gas. executeLiquidationPlan remains hard-disabled and confirmed to revert; no Base-mainnet deployment, signature or broadcast occurs.",elapsedMs:Date.now()-startedAt};
+  return {bot:"CALLABLE_EXECUTOR_TEST_FOUNDATION_BOT",status:allLocalTestsPass?"FORK_CALLABLE_TEST_PASSED":"FORK_CALLABLE_TEST_NOT_CONFIRMED",strategy:"VERIFIED_STARTUP_FORK_EXECUTOR_PLUS_SIDE_EFFECT_FREE_ETH_CALL_AND_GAS",testsBuilt:tests.length,tests,allLocalTestsPass,localAbiPass,executorArtifact:"ArbiFlowExecutor414.sol",executorDeploymentRequiredForBaseEthCall:true,executorDeployed:forkCallablePass,forkOnlyDeployment:forkCallablePass,executorAddress:forkCallablePass?report.executor:null,baseEthCallPerformed:forkCallablePass,validatePlanHash:forkCallablePass?report.validatePlanHash:null,realTransactionGasEstimated:forkCallablePass,validatePlanGas:forkCallablePass?report.validatePlanGas:null,deploymentGas:forkCallablePass?report.deploymentGas:null,liveEntryRevertConfirmed:forkCallablePass,liveExecutionFunctionEnabled:false,mainnetBroadcast:false,fundsMoved:false,executable:false,paperPass:false,readOnly:true,blockers,reportError,note:"4.28.0 consumes the verified startup disposable-fork deployment instead of incorrectly reporting it as absent. The fork-only ArbiFlowExecutor414 address is used to confirm side-effect-free validatePlan eth_call and eth_estimateGas results. This is harness-call gas only, not full Aave+Morpho+0x atomic liquidation gas. executeLiquidationPlan remains hard-disabled and confirmed to revert; no Base-mainnet deployment, signature or broadcast occurs.",elapsedMs:Date.now()-startedAt};
 }
 
 
@@ -6027,7 +6040,7 @@ function runBaseForkSimulationFoundation414(callableBot){
   const localIntegrityPass=!!callableBot?.allLocalTestsPass;
   let report=null, reportError=null;
   try {
-    const reportPath=path.join(__dirname,"fork-report-4270.json");
+    const reportPath=path.join(__dirname,"fork-report-4280.json");
     if(fs.existsSync(reportPath)) report=JSON.parse(fs.readFileSync(reportPath,"utf8"));
   } catch(e){ reportError=String(e?.message||e); }
   const forkPass=!!(report?.success && report?.chainId===8453 && report?.forkContractDeployed===true && report?.validatePlanEthCallPerformed===true && report?.liveEntryReverted===true && report?.morphoForkAccrual?.accrueInterestTransactionSucceeded===true && report?.morphoForkAccrual?.exactAccruedStateConfirmed===true && report?.morphoForkAccrual?.mainnetStateChanged===false && report?.mainnetBroadcast===false && report?.fundsMoved===false);
@@ -6037,7 +6050,7 @@ function runBaseForkSimulationFoundation414(callableBot){
     strategy:"STARTUP_COMPILE_DEPLOY_AND_ETH_CALL_ON_EPHEMERAL_BASE_MAINNET_FORK",
     chainId:8453,
     executorArtifact:"ArbiFlowExecutor414.sol",
-    forkHarnessArtifact:"BaseForkTest4270.js",
+    forkHarnessArtifact:"BaseForkTest4280.js",
     deploymentTarget:"EPHEMERAL_BASE_MAINNET_FORK",
     realBaseMainnetDeploymentAllowed:false,
     compilePerformedByRender:!!report?.compilePerformed,
@@ -6064,7 +6077,7 @@ function runBaseForkSimulationFoundation414(callableBot){
     prerequisites:{baseRpcRequiredForFork:true,solidityCompilerRequired:true,localIntegrityPass},
     reportError:reportError||report?.error||null,
     blockers:forkPass?["LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:(localIntegrityPass?["FORK_STARTUP_TEST_DID_NOT_PRODUCE_A_VALID_PASS_REPORT","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:["LOCAL_ABI_INTEGRITY_FAILED"]),
-    note:forkPass?"4.27.0 startup protocol-fork test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, executed Morpho accrueInterest on the disposable fork, reread post-accrual debt/health, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.27.0 requires a valid startup protocol-fork report before claiming fork verification. It remains fail-closed and non-live.",
+    note:forkPass?"4.28.0 startup protocol-fork test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, executed Morpho accrueInterest on the disposable fork, reread post-accrual debt/health, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.28.0 requires a valid startup protocol-fork report before claiming fork verification. It remains fail-closed and non-live.",
     elapsedMs:Date.now()-startedAt
   };
 }
@@ -6130,7 +6143,7 @@ async function scanBaseBotNetwork422(){
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
   scan421Log("BOT NETWORK 4.18.1 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"LIVE_LIQUIDATION_FORK_CALLABLE_GAS_GATE_4270",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,callableExecutorTests:callableExecutorTestFoundationBot.tests?.length||0,baseForkHarnessReady:["FORK_TEST_PASSED","FORK_TEST_REPORT_MISSING_OR_FAILED"].includes(baseForkSimulationFoundationBot.status),baseForkTestPassed:baseForkSimulationFoundationBot.status==="FORK_TEST_PASSED",morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,callableExecutorTestFoundation:true,baseForkSimulationFoundation:true,ephemeralForkOnly:true,localExecutorAbiIntegrity:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.27.0 preserves broad opportunity discovery and repairs Morpho base-unit price normalization plus liquidation quote diagnostics while retaining token-unit integrity for liquidation exit quotes plus corrected fork-report ingestion. Morpho discovery expands to the top 50 Base borrow markets and keeps positions up to HF 1.10 visible in the unified ranked queue as WATCH candidates, while direct spread, triangular, dislocation, Aave liquidation and aggregator intelligence bots continue independently. WATCH candidates are never labeled executable. No Base-mainnet transaction, signature, funds movement or broadcast occurs; live execution remains hard-disabled."};
+  return {mode:"LIVE_LIQUIDATION_EXECUTOR_STATE_SYNC_GATE_4280",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,callableExecutorTests:callableExecutorTestFoundationBot.tests?.length||0,baseForkHarnessReady:["FORK_TEST_PASSED","FORK_TEST_REPORT_MISSING_OR_FAILED"].includes(baseForkSimulationFoundationBot.status),baseForkTestPassed:baseForkSimulationFoundationBot.status==="FORK_TEST_PASSED",morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,callableExecutorTestFoundation:true,baseForkSimulationFoundation:true,ephemeralForkOnly:true,localExecutorAbiIntegrity:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.28.0 preserves broad opportunity discovery and repairs Morpho base-unit price normalization plus liquidation quote diagnostics while retaining token-unit integrity for liquidation exit quotes plus corrected fork-report ingestion. Morpho discovery expands to the top 50 Base borrow markets and keeps positions up to HF 1.10 visible in the unified ranked queue as WATCH candidates, while direct spread, triangular, dislocation, Aave liquidation and aggregator intelligence bots continue independently. WATCH candidates are never labeled executable. No Base-mainnet transaction, signature, funds movement or broadcast occurs; live execution remains hard-disabled."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
