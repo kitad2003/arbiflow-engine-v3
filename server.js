@@ -28,7 +28,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "3.5.0";
+const VERSION = "3.6.0";
 
 /*
 =========================================================
@@ -78,6 +78,36 @@ const UNISWAP_V3_BASE = {
   factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
   feeTiers: [100, 500, 3000, 10000]
 };
+
+
+/*
+=========================================================
+AAVE V3 BASE FLASH-LOAN DISCOVERY - READ ONLY
+
+Official Aave V3 Base addresses are read from the Aave
+address book. This layer only reads protocol state and
+models flash-loan economics. It never requests a loan,
+signs a transaction, or moves funds.
+=========================================================
+*/
+
+const AAVE_V3_BASE = {
+  addressesProvider: "0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",
+  pool: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+  protocolDataProvider: "0x0F43731EB8d45A581f4a36DD74F5f358bc90C73A"
+};
+
+const AAVE_POOL_ABI = [
+  "function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)"
+];
+
+const AAVE_DATA_PROVIDER_ABI = [
+  "function getReserveTokensAddresses(address asset) view returns (address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress)"
+];
+
+const ERC20_READ_ABI = [
+  "function balanceOf(address account) view returns (uint256)"
+];
 
 const UNISWAP_V3_QUOTER_ABI = [
   {
@@ -3865,7 +3895,7 @@ app.get(
 
 /*
 =========================================================
-BASE MULTI-SIZE DIRECT VENUE SCANNER - ENGINE 3.4
+BASE MULTI-SIZE DIRECT VENUE SCANNER - ENGINE 3.6
 
 Read only. Probes several trade sizes across Aerodrome and
 Uniswap V3, tests both cross-venue directions, ranks the
@@ -4118,6 +4148,265 @@ app.get(
     }
   }
 );
+
+
+/*
+=========================================================
+AAVE V3 BASE FLASH-LOAN PAPER DISCOVERY - ENGINE 3.6
+
+Reads the live Aave V3 flash-loan premium and available
+USDC reserve liquidity, then tests the existing independent
+Aerodrome/Uniswap V3 round trip at larger notional sizes.
+No loan is requested. No transaction is signed or sent.
+=========================================================
+*/
+
+const FLASH_SCAN_DEFAULT_SIZES = [500, 1000, 2500, 5000, 10000];
+const FLASH_SCAN_MAX_SIZES = 10;
+const FLASH_MODELED_GAS_UNITS = 800000;
+
+async function getAaveBaseFlashState(assetSymbol = "USDC") {
+  const token = NETWORKS.base.tokens[assetSymbol];
+  if (!token) throw new Error(`Unsupported Base flash asset: ${assetSymbol}`);
+
+  const provider = getBaseProvider();
+  const pool = new Contract(AAVE_V3_BASE.pool, AAVE_POOL_ABI, provider);
+  const dataProvider = new Contract(
+    AAVE_V3_BASE.protocolDataProvider,
+    AAVE_DATA_PROVIDER_ABI,
+    provider
+  );
+
+  const [network, premiumBpsRaw, reserveTokens] = await Promise.all([
+    provider.getNetwork(),
+    pool.FLASHLOAN_PREMIUM_TOTAL(),
+    dataProvider.getReserveTokensAddresses(token.address)
+  ]);
+
+  const aTokenAddress = reserveTokens.aTokenAddress || reserveTokens[0];
+  const underlying = new Contract(token.address, ERC20_READ_ABI, provider);
+  const availableRaw = await underlying.balanceOf(aTokenAddress);
+  const availableLiquidity = Number(formatUnits(availableRaw, token.decimals));
+  const premiumBps = Number(premiumBpsRaw);
+
+  return {
+    provider: "Aave V3",
+    network: "Base",
+    chainId: Number(network.chainId),
+    pool: AAVE_V3_BASE.pool,
+    addressesProvider: AAVE_V3_BASE.addressesProvider,
+    protocolDataProvider: AAVE_V3_BASE.protocolDataProvider,
+    asset: assetSymbol,
+    assetAddress: token.address,
+    aTokenAddress,
+    availableLiquidity: round(availableLiquidity, 6),
+    flashLoanPremiumBps: premiumBps,
+    flashLoanPremiumPercent: round(premiumBps / 100, 6),
+    readOnly: true
+  };
+}
+
+async function getBaseFlashModeledGasCostUsd() {
+  const provider = getBaseProvider();
+  const feeData = await provider.getFeeData();
+  const gasPriceWei = feeData.maxFeePerGas || feeData.gasPrice;
+  if (!gasPriceWei) throw new Error("Unable to read current Base gas price.");
+
+  const nativeUsd = await getNativeUsd(NETWORKS.base);
+  if (!nativeUsd) throw new Error("Unable to price Base ETH gas in USD.");
+
+  const gasNative = Number(
+    formatUnits(gasPriceWei * BigInt(FLASH_MODELED_GAS_UNITS), 18)
+  );
+  const modeledGasUsd = gasNative * nativeUsd * SETTINGS.gasSafetyMultiplier;
+
+  return {
+    method: "LIVE_GAS_PRICE_MODELED_FLASH_TRANSACTION",
+    gasPriceGwei: round(Number(formatUnits(gasPriceWei, "gwei")), 6),
+    modeledGasUnits: FLASH_MODELED_GAS_UNITS,
+    gasSafetyMultiplier: SETTINGS.gasSafetyMultiplier,
+    nativeSymbol: "ETH",
+    nativeUsd: round(nativeUsd, 6),
+    modeledGasNative: round(gasNative * SETTINGS.gasSafetyMultiplier, 10),
+    modeledGasUsd: round(modeledGasUsd, 6),
+    transactionLevelEstimate: false
+  };
+}
+
+function parseFlashScanSizes(rawSizes) {
+  if (rawSizes === undefined || rawSizes === null || String(rawSizes).trim() === "") {
+    return [...FLASH_SCAN_DEFAULT_SIZES];
+  }
+  const values = String(rawSizes).split(",")
+    .map(v => Number(v.trim()))
+    .filter(v => Number.isFinite(v) && v > 0);
+  const unique = [...new Set(values.map(v => round(v, 8)))];
+  if (!unique.length) throw new Error("sizes must contain at least one positive number.");
+  if (unique.length > FLASH_SCAN_MAX_SIZES) {
+    throw new Error(`A maximum of ${FLASH_SCAN_MAX_SIZES} flash scan sizes is allowed.`);
+  }
+  return unique.sort((a, b) => a - b);
+}
+
+async function scanBaseAaveFlashArbitrage({ sizes = FLASH_SCAN_DEFAULT_SIZES }) {
+  const startedAt = Date.now();
+  const [aave, gasModel] = await Promise.all([
+    getAaveBaseFlashState("USDC"),
+    getBaseFlashModeledGasCostUsd()
+  ]);
+  const results = [];
+
+  for (const amount of sizes) {
+    if (amount > aave.availableLiquidity) {
+      results.push({
+        success: false,
+        amount,
+        classification: "INSUFFICIENT_AAVE_LIQUIDITY",
+        error: "Requested flash amount exceeds the currently observed Aave USDC reserve liquidity."
+      });
+      continue;
+    }
+
+    try {
+      const comparison = await compareBaseDirectVenues({
+        baseToken: "USDC",
+        quoteToken: "WETH",
+        amount
+      });
+      const premiumUsd = amount * (aave.flashLoanPremiumBps / 10000);
+      const grossPnl = Number(comparison.bestDirection.grossPnl);
+      const estimatedNetPnl = grossPnl - premiumUsd - gasModel.modeledGasUsd;
+      const meetsMinimum = estimatedNetPnl >= BASE_DIRECT_MIN_NET_PROFIT_USD;
+
+      results.push({
+        success: true,
+        amount,
+        flashAsset: "USDC",
+        flashLoanPremiumUsd: round(premiumUsd, 6),
+        grossPnl: round(grossPnl, 6),
+        modeledGasUsd: gasModel.modeledGasUsd,
+        estimatedNetPnl: round(estimatedNetPnl, 6),
+        estimatedNetRoiOnBorrowedAmountPercent: round((estimatedNetPnl / amount) * 100, 6),
+        minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+        meetsMinimumNetProfit: meetsMinimum,
+        profitTier: baseDirectProfitTier(estimatedNetPnl),
+        classification: meetsMinimum ? "FLASH_CANDIDATE" : "REJECTED",
+        bestDirection: comparison.bestDirection,
+        quoteWindowMs: comparison.quoteWindowMs,
+        executable: false,
+        paperPass: false
+      });
+    } catch (error) {
+      results.push({
+        success: false,
+        amount,
+        classification: "ERROR",
+        error: error.message,
+        executable: false,
+        paperPass: false
+      });
+    }
+  }
+
+  const successful = results.filter(r => r.success);
+  const ranked = [...successful].sort((a, b) => b.estimatedNetPnl - a.estimatedNetPnl);
+  const candidates = ranked.filter(r => r.classification === "FLASH_CANDIDATE");
+  const rejected = ranked.filter(r => r.classification === "REJECTED");
+  const errors = results.filter(r => !r.success);
+
+  return {
+    mode: "AAVE_FLASH_LOAN_PAPER_DISCOVERY",
+    network: "Base",
+    provider: "Aave V3",
+    routeVenues: ["Aerodrome", "Uniswap V3"],
+    flashState: aave,
+    gasModel,
+    requestedSizes: sizes,
+    minimumNetProfitUsd: BASE_DIRECT_MIN_NET_PROFIT_USD,
+    bestResult: ranked[0] || null,
+    candidates,
+    rejected,
+    errors,
+    counts: {
+      tested: results.length,
+      successful: successful.length,
+      candidates: candidates.length,
+      rejected: rejected.length,
+      errors: errors.length
+    },
+    elapsedMs: Date.now() - startedAt,
+    executableOpportunities: 0,
+    executable: false,
+    paperPass: false,
+    liveExecutionEnabled: false,
+    costsIncluded: {
+      dexQuoteEconomics: true,
+      liveAaveFlashPremium: true,
+      modeledGas: true,
+      transactionLevelGas: false,
+      transactionSimulation: false,
+      atomicReceiverContract: false
+    },
+    nextValidationRequired: [
+      "expand token pairs and venues",
+      "fresh quote confirmation",
+      "atomic flash-loan receiver contract",
+      "transaction-level gas estimation",
+      "full transaction simulation",
+      "on-chain minimum-profit protection"
+    ],
+    warning: "Paper discovery only. No flash loan is requested and no funds move. A FLASH_CANDIDATE is only an estimated opportunity and is not executable until atomic contract simulation and minimum-profit protections are implemented."
+  };
+}
+
+app.get("/api/flash/base/aave/status", async (req, res) => {
+  try {
+    const state = await getAaveBaseFlashState("USDC");
+    return res.json({
+      success: true,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      mode: "AAVE_FLASH_LOAN_READ_ONLY",
+      liveExecutionEnabled: false,
+      ...state,
+      time: now()
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      mode: "AAVE_FLASH_LOAN_READ_ONLY",
+      liveExecutionEnabled: false,
+      error: error.message,
+      time: now()
+    });
+  }
+});
+
+app.get("/api/flash/base/aave/scan", async (req, res) => {
+  try {
+    const sizes = parseFlashScanSizes(req.query.sizes);
+    const result = await scanBaseAaveFlashArbitrage({ sizes });
+    return res.json({
+      success: true,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      ...result,
+      time: now()
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      engine: "ArbiFlow Opportunity Engine",
+      version: VERSION,
+      mode: "AAVE_FLASH_LOAN_PAPER_DISCOVERY",
+      liveExecutionEnabled: false,
+      error: error.message,
+      time: now()
+    });
+  }
+});
 
 /*
 =========================================================
