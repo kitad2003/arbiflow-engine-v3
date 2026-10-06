@@ -13,11 +13,20 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const ZEROX_API_KEY = process.env.ZEROX_API_KEY || "";
 
-const VERSION = "3.0.1";
+const RPC_URLS = {
+  base: process.env.BASE_RPC_URL || "",
+  arbitrum: process.env.ARBITRUM_RPC_URL || "",
+  optimism: process.env.OPTIMISM_RPC_URL || "",
+  polygon: process.env.POLYGON_RPC_URL || "",
+  ethereum: process.env.ETHEREUM_RPC_URL || "",
+  bnb: process.env.BNB_RPC_URL || ""
+};
+
+const VERSION = "3.0.2";
 
 /*
 =========================================================
-ARBIFLOW ENGINE 3.0.1
+ARBIFLOW ENGINE 3.0.2
 
 PHASE:
 Live market discovery + paper simulation.
@@ -36,6 +45,10 @@ THIS BUILD DOES:
 - Fresh confirmation
 - Paper simulation
 - Paper history
+- Six private RPC connections
+- RPC reachability testing
+- RPC chain-ID validation
+- Latest-block verification
 
 THIS BUILD DOES NOT:
 - Hold private keys
@@ -611,6 +624,221 @@ function resetScan() {
 
 /*
 =========================================================
+RPC HEALTH
+=========================================================
+*/
+
+function rpcConfigured(networkKey) {
+  return Boolean(
+    RPC_URLS[networkKey]
+  );
+}
+
+async function rpcRequest(
+  networkKey,
+  method,
+  params = []
+) {
+  const url =
+    RPC_URLS[networkKey];
+
+  if (!url) {
+    throw new Error(
+      `${networkKey} RPC URL is not configured.`
+    );
+  }
+
+  const response =
+    await fetch(
+      url,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body:
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params
+          })
+      }
+    );
+
+  const body =
+    await response.text();
+
+  let data = {};
+
+  try {
+    data =
+      body
+        ? JSON.parse(body)
+        : {};
+  } catch {
+    throw new Error(
+      `RPC returned invalid JSON (HTTP ${response.status}).`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ||
+      `RPC HTTP ${response.status}`
+    );
+  }
+
+  if (data.error) {
+    throw new Error(
+      data.error.message ||
+      "RPC request failed."
+    );
+  }
+
+  return data.result;
+}
+
+async function testRpcNetwork(
+  network
+) {
+  const configured =
+    rpcConfigured(
+      network.key
+    );
+
+  if (!configured) {
+    return {
+      key: network.key,
+      name: network.name,
+      chainId: network.chainId,
+      configured: false,
+      reachable: false,
+      chainIdMatches: false,
+      latestBlock: null,
+      latencyMs: null,
+      error:
+        "RPC URL is not configured."
+    };
+  }
+
+  const started =
+    Date.now();
+
+  try {
+    const [
+      chainIdHex,
+      blockHex
+    ] =
+      await Promise.all([
+        rpcRequest(
+          network.key,
+          "eth_chainId"
+        ),
+        rpcRequest(
+          network.key,
+          "eth_blockNumber"
+        )
+      ]);
+
+    const reportedChainId =
+      Number.parseInt(
+        chainIdHex,
+        16
+      );
+
+    const latestBlock =
+      Number.parseInt(
+        blockHex,
+        16
+      );
+
+    return {
+      key: network.key,
+      name: network.name,
+      chainId: network.chainId,
+      configured: true,
+      reachable: true,
+      reportedChainId,
+      chainIdMatches:
+        reportedChainId ===
+        network.chainId,
+      latestBlock:
+        Number.isFinite(
+          latestBlock
+        )
+          ? latestBlock
+          : null,
+      latencyMs:
+        Date.now() -
+        started,
+      error: null
+    };
+  } catch (error) {
+    return {
+      key: network.key,
+      name: network.name,
+      chainId: network.chainId,
+      configured: true,
+      reachable: false,
+      chainIdMatches: false,
+      latestBlock: null,
+      latencyMs:
+        Date.now() -
+        started,
+      error:
+        error.message
+    };
+  }
+}
+
+async function rpcHealthSummary() {
+  const results =
+    await Promise.all(
+      Object
+        .values(
+          NETWORKS
+        )
+        .map(
+          testRpcNetwork
+        )
+    );
+
+  const configuredCount =
+    results.filter(
+      item =>
+        item.configured
+    ).length;
+
+  const reachableCount =
+    results.filter(
+      item =>
+        item.reachable &&
+        item.chainIdMatches
+    ).length;
+
+  return {
+    configuredCount,
+    reachableCount,
+
+    allConfigured:
+      configuredCount ===
+      results.length,
+
+    allReachable:
+      reachableCount ===
+      results.length,
+
+    networks:
+      results
+  };
+}
+
+/*
+=========================================================
 NETWORK SUMMARY
 =========================================================
 */
@@ -633,6 +861,11 @@ function networkSummary(
 
     wrappedNative:
       network.wrappedNative,
+
+    rpcConfigured:
+      rpcConfigured(
+        network.key
+      ),
 
     selected:
       selectedNetworks.includes(
@@ -806,11 +1039,6 @@ async function zeroXPrice({
       let networkFeeNative =
         0;
 
-      /*
-      Current 0x responses can expose
-      totalNetworkFee directly.
-      */
-
       if (
         data.totalNetworkFee
       ) {
@@ -930,7 +1158,6 @@ async function zeroXPrice({
     )
   );
 }
-
 /*
 =========================================================
 NATIVE GAS TOKEN USD VALUE
@@ -1988,7 +2215,6 @@ async function simulatePaperTrade(
     }
   };
 }
-
 /*
 =========================================================
 MAIN SCAN
@@ -2437,7 +2663,7 @@ app.get(
         false,
 
       message:
-        "ArbiFlow Engine 3.0.1 is online."
+        "ArbiFlow Engine 3.0.2 is online."
     });
   }
 );
@@ -2450,9 +2676,20 @@ HEALTH
 
 app.get(
   "/api/health",
-  (req, res) => {
+  async (req, res) => {
+    const rpc =
+      await rpcHealthSummary();
+
+    const providerConfigured =
+      Boolean(
+        ZEROX_API_KEY
+      );
+
     res.json({
-      ok: true,
+      ok:
+        providerConfigured &&
+        rpc.allConfigured &&
+        rpc.allReachable,
 
       engine:
         "ArbiFlow Opportunity Engine",
@@ -2460,10 +2697,62 @@ app.get(
       version:
         VERSION,
 
-      providerConfigured:
-        Boolean(
-          ZEROX_API_KEY
-        ),
+      providerConfigured,
+
+      rpcConfigured:
+        rpc.allConfigured,
+
+      rpcReachable:
+        rpc.allReachable,
+
+      rpcConfiguredCount:
+        rpc.configuredCount,
+
+      rpcReachableCount:
+        rpc.reachableCount,
+
+      rpcNetworks:
+        rpc.networks,
+
+      time:
+        now()
+    });
+  }
+);
+
+/*
+=========================================================
+RPC STATUS
+=========================================================
+*/
+
+app.get(
+  "/api/rpc/status",
+  async (req, res) => {
+    const rpc =
+      await rpcHealthSummary();
+
+    res.json({
+      engine:
+        "ArbiFlow Opportunity Engine",
+
+      version:
+        VERSION,
+
+      allConfigured:
+        rpc.allConfigured,
+
+      allReachable:
+        rpc.allReachable,
+
+      configuredCount:
+        rpc.configuredCount,
+
+      reachableCount:
+        rpc.reachableCount,
+
+      networks:
+        rpc.networks,
 
       time:
         now()
@@ -2760,7 +3049,7 @@ app.post(
       success: true,
 
       message:
-        "ArbiFlow Engine 3.0.1 scan started.",
+        "ArbiFlow Engine 3.0.2 scan started.",
 
       selectedNetworks
     });
@@ -2937,7 +3226,6 @@ app.get(
     });
   }
 );
-
 /*
 =========================================================
 PAPER SIMULATE
