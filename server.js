@@ -32,7 +32,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.14.1";
+const VERSION = "4.14.2";
 
 /*
 =========================================================
@@ -5831,7 +5831,7 @@ function runBaseForkSimulationFoundation414(callableBot){
   const localIntegrityPass=!!callableBot?.allLocalTestsPass;
   let report=null, reportError=null;
   try {
-    const reportPath=path.join(__dirname,"fork-report-4141.json");
+    const reportPath=path.join(__dirname,"fork-report-4142.json");
     if(fs.existsSync(reportPath)) report=JSON.parse(fs.readFileSync(reportPath,"utf8"));
   } catch(e){ reportError=String(e?.message||e); }
   const forkPass=!!(report?.success && report?.chainId===8453 && report?.forkContractDeployed===true && report?.validatePlanEthCallPerformed===true && report?.liveEntryReverted===true && report?.mainnetBroadcast===false && report?.fundsMoved===false);
@@ -5841,7 +5841,7 @@ function runBaseForkSimulationFoundation414(callableBot){
     strategy:"STARTUP_COMPILE_DEPLOY_AND_ETH_CALL_ON_EPHEMERAL_BASE_MAINNET_FORK",
     chainId:8453,
     executorArtifact:"ArbiFlowExecutor414.sol",
-    forkHarnessArtifact:"BaseForkTest4141.js",
+    forkHarnessArtifact:"BaseForkTest4142.js",
     deploymentTarget:"EPHEMERAL_BASE_MAINNET_FORK",
     realBaseMainnetDeploymentAllowed:false,
     compilePerformedByRender:!!report?.compilePerformed,
@@ -5864,14 +5864,14 @@ function runBaseForkSimulationFoundation414(callableBot){
     prerequisites:{baseRpcRequiredForFork:true,solidityCompilerRequired:true,localIntegrityPass},
     reportError:reportError||report?.error||null,
     blockers:forkPass?["LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:(localIntegrityPass?["FORK_STARTUP_TEST_DID_NOT_PRODUCE_A_VALID_PASS_REPORT","LIVE_EXECUTION_FUNCTION_HARD_DISABLED"]:["LOCAL_ABI_INTEGRITY_FAILED"]),
-    note:forkPass?"4.14.1 startup test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.14.1 requires a valid startup fork-test report before claiming fork verification. It remains fail-closed and non-live.",
+    note:forkPass?"4.14.2 startup test compiled ArbiFlowExecutor414, started an ephemeral Base mainnet fork, deployed only inside that fork, performed validatePlan eth_call, measured gas, and proved the live execution entry point still reverts. No Base-mainnet transaction was broadcast and no funds moved.":"4.14.2 requires a valid startup fork-test report before claiming fork verification. It remains fail-closed and non-live.",
     elapsedMs:Date.now()-startedAt
   };
 }
 
 async function scanBaseBotNetwork422(){
   const startedAt=Date.now(), scanId=++scan422Sequence;
-  scan421Log("BOT NETWORK 4.14.1 START",`scan ${scanId}`);
+  scan421Log("BOT NETWORK 4.14.2 START",`scan ${scanId}`);
   const marketBot=await runMarketDiscoveryBot();
 
   // Stage 1: cheap/independent discovery. Each branch has a bounded request budget.
@@ -5928,8 +5928,8 @@ async function scanBaseBotNetwork422(){
   for(const x of liquidationEconomicsBot.candidates||[]) ranked.push({source:"LIQUIDATION_ECONOMICS_BOT",type:"LIQUIDATION_ECONOMICS_CANDIDATE",label:x.user,marketId:x.marketId,healthFactor:x.healthFactor,estimatedNetBeforeRouteUsd:x.estimatedNetBeforeRouteUsd,score:botScore({grossPnlUsd:x.estimatedNetBeforeRouteUsd,confidence:.8,depthUsd:x.repayUsd}),profitabilityValidated:false});
   ranked.sort((a,b)=>b.score-a.score);
   const flashCandidates=largeOpportunityBot.flashOptimization?.candidates||[];
-  scan421Log("BOT NETWORK 4.14.1 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
-  return {mode:"BASE_FORK_STARTUP_VERIFICATION_4141",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,callableExecutorTests:callableExecutorTestFoundationBot.tests?.length||0,baseForkHarnessReady:["FORK_TEST_PASSED","FORK_TEST_REPORT_MISSING_OR_FAILED"].includes(baseForkSimulationFoundationBot.status),baseForkTestPassed:baseForkSimulationFoundationBot.status==="FORK_TEST_PASSED",morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,callableExecutorTestFoundation:true,baseForkSimulationFoundation:true,ephemeralForkOnly:true,localExecutorAbiIntegrity:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.14.1 requires a startup EPHEMERAL Base-mainnet-fork test before the web service starts. The executor is deployed only inside the disposable fork. No Base-mainnet contract deployment, signature, flash loan, funds movement or transaction broadcast occurs. The live execution function remains hard-disabled."};
+  scan421Log("BOT NETWORK 4.14.2 COMPLETE",`scan ${scanId} :: ${Date.now()-startedAt}ms`);
+  return {mode:"BASE_FORK_STARTUP_VERIFICATION_4142",network:"Base",scanId,botNetwork:BOT_NETWORK,marketExpansion:marketBot,bots,rankedOpportunityQueue:ranked,counts:{botsRun:bots.length,tokens:marketBot.counts.tokens,directPairsGenerated:marketBot.counts.directPairs,triangleRoutesGenerated:marketBot.counts.triangleRoutes,triangleProbesPlanned:triangleBot.probesPlanned||0,rankedOpportunities:ranked.length,flashCandidates:flashCandidates.length,watcherItems:watcherBot.watchlist?.length||0,watcherRechecks:watcherBot.rechecks?.length||0,watcherPromoted:watcherBot.promoted?.length||0,aggregatorObservations:aggregatorBot.observations?.length||0,liquidationWatcherTracked:liquidationBot.liquidationWatcher?.tracked||0,liquidationWatcherRechecks:liquidationBot.liquidationWatcher?.rechecks?.length||0,morphoMarketsScanned:morphoBot.marketsScanned||0,morphoPositionsScanned:morphoBot.positionsScanned||0,morphoLiquidatable:morphoBot.opportunities?.length||0,morphoWatchlist:morphoBot.watchlist?.length||0,liquidationEconomicsCandidates:liquidationEconomicsBot.candidates?.length||0,liquidationEconomicWatch:liquidationEconomicsBot.watchlist?.length||0,projectedLiquidationWatch:projectedLiquidationBot.watchlist?.length||0,projectedCritical:projectedLiquidationBot.critical?.length||0,liquidationRouteTests:liquidationRouteOptimizerBot.tests?.length||0,liquidationRouteQualifiedProjected:liquidationRouteOptimizerBot.qualifiedProjected?.length||0,liquidationReadinessPass:liquidationReadinessBot.ready?.length||0,liquidationReadinessRejected:liquidationReadinessBot.rejected?.length||0,executionFoundationPlans:executionFoundationBot.plans?.length||0,executorSimulationPlans:executorSimulationFoundationBot.plans?.length||0,callableExecutorTests:callableExecutorTestFoundationBot.tests?.length||0,baseForkHarnessReady:["FORK_TEST_PASSED","FORK_TEST_REPORT_MISSING_OR_FAILED"].includes(baseForkSimulationFoundationBot.status),baseForkTestPassed:baseForkSimulationFoundationBot.status==="FORK_TEST_PASSED",morphoPreLiquidationEligible:morphoPreLiquidationBot.eligible?.length||0},performanceArchitecture:{staged:true,duplicateScanLock:true,fastBotBudgetMs:SCAN422.fastBotBudgetMs,liquidationBlocksPerRequest:SCAN422.liquidationBlocksPerRequest,liquidationMaxUsersPerRequest:SCAN422.liquidationMaxUsersPerRequest,deepTriangleRoutes:SCAN422.deepTriangleRoutes,deepTriangleVenueCombos:SCAN422.deepTriangleVenueCombos,lifiRepair:true,runtimeLiquidationWatcher:true,preShortlistedFastWatcher:true,selectedPathFastWatcher:true,opportunityExpansion430:true,pancakeSwapNativeRpc:true,pancakePoolTopologyCache:true,pancakeWinningFeeCache:true,trianglePermutationShortlist:true,adaptiveOptimizer:true,boundedMultiSizeDiscovery:true,parallelProfitCurves:true,selectedPathSizeDiscovery:true,eventDrivenDeepQuotes:true,projectedLiquidationEconomics:true,realCollateralExitQuotes:true,partialLiquidationSizing:true,adaptiveLiquidationSizing:true,coarseToFineRouteSearch:true,failClosedLiquidationReadiness:true,freshEligibilityGate:true,quoteFreshnessGate:true,protocolDebtCapacityGate:true,executionFoundationBlueprint:true,executorSimulationFoundation:true,callableExecutorTestFoundation:true,baseForkSimulationFoundation:true,ephemeralForkOnly:true,localExecutorAbiIntegrity:true,calldataSchemaDefined:true,atomicExecutionGuardsDefined:true,morphoPreLiquidationInterface:true,liquidationFirstEconomics:true,capitalOptimizerDiscovery:true,freshQuoteWatcher:true,allPairDiscovery:true,liquidityGatedTriangleDiscovery:true,morphoLiquidationDiscovery:true,uniswapV4DeploymentVerified:true,flashDirectOrTriangleSeed:true,watcherLimit:SCAN422.watcherLimit,watcherConcurrency:2,watcherPerItemTimeoutMs:4500},elapsedMs:Date.now()-startedAt,executableOpportunities:0,executable:false,paperPass:false,liveExecutionEnabled:false,minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,safety:{discoveryOnly:true,walletRequired:false,privateKeyRequired:false,flashLoanRequested:false,fundsMoved:false,transactionBroadcast:false},warning:"Engine 4.14.2 requires a startup EPHEMERAL Base-mainnet-fork test before the web service starts. The executor is deployed only inside the disposable fork. No Base-mainnet contract deployment, signature, flash loan, funds movement or transaction broadcast occurs. The live execution function remains hard-disabled."};
 }
 
 app.get("/api/bots/base/scan",async(req,res)=>{
@@ -6550,6 +6550,11 @@ app.get(
 SERVER
 =========================================================
 */
+
+if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
+  console.error("[ArbiFlow 4.14.2] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4142.js");
+  process.exit(1);
+}
 
 app.listen(
   PORT,
