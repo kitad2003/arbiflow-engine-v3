@@ -1,11 +1,11 @@
-ArbiFlow Engine 4.67.0 — Route-Locked Exact Validation
+ArbiFlow Engine 4.68.0 — Route-Locked Exact Validation
 
 FIX
 4.65.1 correctly froze same-run candidates but exact validation could still
 reselect the best venue route at each size. That allowed Aerodrome STABLE /
 VOLATILE switching and could select a different Uniswap V3 fee tier.
 
-4.67.0 locks every exact-validation leg to the discovered candidate route.
+4.68.0 locks every exact-validation leg to the discovered candidate route.
 
 ROUTE LOCKS
 - Aerodrome: exact detected poolType (STABLE or VOLATILE).

@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.67.0 — Incremental / Streaming Discovery
+ArbiFlow Engine 4.68.0 — Incremental / Streaming Discovery
 
 ARCHITECTURE CHANGE
 - A qualified venue curve enters an in-memory edge cache as soon as that curve finishes.

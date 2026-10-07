@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.67.0";
+const VERSION = "4.68.0";
 
 /*
 =========================================================
@@ -8687,21 +8687,24 @@ async function economicsContext4660(){
  const provider=getBaseProvider();
  const fee=await provider.getFeeData();
  const gasPriceWei=fee.maxFeePerGas??fee.gasPrice??0n;
- let ethUsd=null;
- try{
-  const q=await uniswapV3BestQuote({sellToken:"WETH",buyToken:"USDC",sellAmount:0.01});
-  ethUsd=Number(q.best.buyAmount)/0.01;
- }catch(_){}
+ const assetUsd={USDC:1,USDbC:1,WETH:null,cbETH:null,cbBTC:null};
+ async function directUsd(sym,amount){
+  try{const q=await uniswapV3BestQuote({sellToken:sym,buyToken:"USDC",sellAmount:amount});return Number(q.best.buyAmount)/amount;}catch(_){}
+  try{const q=await aerodromeBestQuote({sellToken:sym,buyToken:"USDC",sellAmount:amount});return Number(q.best.buyAmount)/amount;}catch(_){}
+  return null;
+ }
+ assetUsd.WETH=await directUsd("WETH",0.01);
+ assetUsd.cbETH=await directUsd("cbETH",0.01);
+ assetUsd.cbBTC=await directUsd("cbBTC",0.001);
+ const ethUsd=assetUsd.WETH;
  const gasCostEth=Number(gasPriceWei)*CONSERVATIVE_EXECUTOR_GAS_UNITS_4660/1e18;
  const gasCostUsd=Number.isFinite(ethUsd)?gasCostEth*ethUsd:null;
- return {gasPriceWei:gasPriceWei.toString(),ethUsd,gasUnitsAssumption:CONSERVATIVE_EXECUTOR_GAS_UNITS_4660,gasCostEth,gasCostUsd,minNetProfitUsd:MIN_NET_PROFIT_USD_4660,gasSource:"BASE_PROVIDER_FEE_DATA",gasUnitsSource:"CONSERVATIVE_SCREEN_ONLY_NOT_EXECUTOR_ESTIMATE"};
+ return {gasPriceWei:gasPriceWei.toString(),ethUsd,assetUsd,gasUnitsAssumption:CONSERVATIVE_EXECUTOR_GAS_UNITS_4660,gasCostEth,gasCostUsd,minNetProfitUsd:MIN_NET_PROFIT_USD_4660,gasSource:"BASE_PROVIDER_FEE_DATA",assetUsdSource:"DIRECT_BASE_DEX_REFERENCE_QUOTES",gasUnitsSource:"CONSERVATIVE_SCREEN_ONLY_NOT_EXECUTOR_ESTIMATE"};
 }
 function grossUsd4660(test,ctx){
- const sym=test.startSymbol,g=Number(test.grossPnl);
- if(!Number.isFinite(g))return null;
- if(sym==="USDC"||sym==="USDbC")return g;
- if(sym==="WETH"&&Number.isFinite(ctx.ethUsd))return g*ctx.ethUsd;
- return null;
+ const sym=test.startSymbol,g=Number(test.grossPnl),px=ctx?.assetUsd?.[sym];
+ if(!Number.isFinite(g)||!Number.isFinite(px))return null;
+ return g*px;
 }
 function applyEconomics4660(test,ctx){
  if(!test?.ok||!test.positive)return {...test,economics:null};
@@ -8727,16 +8730,47 @@ async function validateSnapshot4651(snapshot){
  exact4650.validationCompletedAt=new Date().toISOString();exact4650.validationLatencyMs=Date.now()-vs;
  return results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
 }
-async function validateOneStreaming4670(c,economicsContext){
- const tests=[];
- for(const size of candidateSizes4650(c)){
+
+const ADAPTIVE_MAX_NOTIONAL_USD_4680=5000;
+const ADAPTIVE_MAX_STEPS_4680=8;
+function startAssetUsd4680(sym,ctx){const p=ctx?.assetUsd?.[sym];return Number.isFinite(p)?p:null;}
+async function adaptiveSizeTests4680(c,economicsContext){
+ const initial=candidateSizes4650(c),tests=[],seen=new Set();
+ async function testSize(size){
+  const key=Number(size).toPrecision(12);if(seen.has(key))return null;seen.add(key);
   exact4650.sizeTests++;const t=await validateSize4650(c,size);tests.push(t);
   if(t.ok){exact4650.successfulRoundTrips++;if(t.positive)exact4650.positiveRoundTrips++;}else exact4650.quoteFailures++;
+  return t;
  }
+ for(const size of initial)await testSize(size);
+ const ok=tests.filter(t=>t.ok),positive=ok.filter(t=>t.positive);
+ if(!positive.length)return {tests,adaptive:{attempted:false,reason:"NO_POSITIVE_INITIAL_SIZE",steps:0}};
+ const px=startAssetUsd4680(c.path[0],economicsContext);
+ if(!Number.isFinite(px))return {tests,adaptive:{attempted:false,reason:"NO_START_ASSET_USD_PRICE",steps:0}};
+ let bestPositive=positive.sort((a,b)=>b.grossPnl*px-a.grossPnl*px)[0];
+ let size=Math.max(...positive.map(t=>t.size)),steps=0,negativeStreak=0,lastPositiveUsd=bestPositive.grossPnl*px;
+ while(steps<ADAPTIVE_MAX_STEPS_4680){
+  const next=Number((size*2).toPrecision(10)),notional=next*px;
+  if(notional>ADAPTIVE_MAX_NOTIONAL_USD_4680)break;
+  const t=await testSize(next);steps++;size=next;
+  if(!t||!t.ok){break;}
+  if(t.positive){
+   const usd=t.grossPnl*px;
+   if(usd>lastPositiveUsd)lastPositiveUsd=usd;
+   negativeStreak=0;
+  }else{
+   negativeStreak++;
+   if(negativeStreak>=2)break;
+  }
+ }
+ return {tests,adaptive:{attempted:true,steps,maxNotionalUsd:ADAPTIVE_MAX_NOTIONAL_USD_4680,lastSizeTested:size,stopPolicy:"ROUTE_FAILURE_OR_TWO_CONSECUTIVE_NON_POSITIVE_OR_MAX_STEPS_OR_5000_USD_NOTIONAL"}};
+}
+async function validateOneStreaming4670(c,economicsContext){
+ const adaptiveRun=await adaptiveSizeTests4680(c,economicsContext),tests=adaptiveRun.tests;
  const enriched=tests.map(t=>applyEconomics4660(t,economicsContext));
  const viable=enriched.filter(x=>x.ok).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),positive=viable.filter(x=>x.positive),economicSurvivors=positive.filter(x=>x.economics?.passesMinNetProfitScreen),best=viable[0]||null;
  exact4650.candidatesValidated++;
- return {candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:enriched.length,positiveSizes:positive.length,economicSurvivorSizes:economicSurvivors.length,best,tests:enriched,economicsContext,streamEmitted:true,classification:economicSurvivors.length?"CONSERVATIVE_ECONOMICS_SURVIVOR_REQUIRES_ATOMIC_EXECUTOR_GAS_AND_SIMULATION":positive.length?"GROSS_POSITIVE_REJECTED_BY_CONSERVATIVE_ECONOMICS_SCREEN":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false};
+ return {candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:enriched.length,positiveSizes:positive.length,economicSurvivorSizes:economicSurvivors.length,best,tests:enriched,economicsContext,adaptiveSizing:adaptiveRun.adaptive,streamEmitted:true,classification:economicSurvivors.length?"CONSERVATIVE_ECONOMICS_SURVIVOR_REQUIRES_ATOMIC_EXECUTOR_GAS_AND_SIMULATION":positive.length?"GROSS_POSITIVE_REJECTED_BY_CONSERVATIVE_ECONOMICS_SCREEN":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false};
 }
 async function runExact4650(limit=10){
  if(exact4650.status==="RUNNING")return;

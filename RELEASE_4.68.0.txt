@@ -1,0 +1,28 @@
+ArbiFlow Engine 4.68.0 — Asset USD Valuation + Adaptive Economic Sizing
+
+PRESERVED
+- 4.67 streaming edge cache, affected-cycle emission, immediate frozen candidate validation.
+- Route-locked Uniswap V3 fee/pool identity and Aerodrome pool type.
+- Sequential exact-output chaining.
+- Conservative Base gas pre-screen and locked $15 minimum net-profit requirement.
+- Read-only/no mainnet execution.
+
+NEW
+- USD reference valuation for WETH, cbETH, cbBTC using direct Base DEX reference quotes to USDC.
+- USDC and USDbC remain $1 reference assets for screening.
+- cbETH/cbBTC gross P&L can now be evaluated by the economics screen instead of returning null.
+- Adaptive sizing starts after the existing exact size grid finds a positive size.
+- Size doubles progressively while bounded by:
+  * maximum 8 adaptive steps
+  * maximum $5,000 start notional
+  * immediate stop on route quote failure
+  * stop after two consecutive non-positive sizes
+- Every adaptive test remains route-locked and exact sequential.
+- Adaptive telemetry is returned with each validated candidate.
+
+IMPORTANT
+This is still a search/economics pre-screen. 450,000 gas units is not an actual executor estimate.
+No candidate is executable until actual atomic executor gas estimation and final transaction/fork
+simulation pass. Flash funding costs are not included yet.
+
+Validation: npm run check PASS.
