@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.1";
+const VERSION = "4.78.2";
 
 /*
 =========================================================
@@ -9272,7 +9272,7 @@ app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary())
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
 
 
-// === 4.78.1 Independent DEX pool evidence (READ ONLY) ===
+// === 4.78.2 Independent DEX pool evidence (READ ONLY) ===
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
@@ -9287,13 +9287,33 @@ const dexPool4780=new (require("ethers").Interface)([
  "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)"
 ]);
 const dexAddress4780=a=>typeof a==="string"&&/^0x[0-9a-fA-F]{40}$/.test(a)&&!/^0x0{40}$/i.test(a);
+const dexRpcGate4782=new Map();
 async function dexCall4780(c,to,data){
+ const prev=dexRpcGate4782.get(c.chainId)||Promise.resolve();
+ let release;
+ const next=new Promise(resolve=>release=resolve);
+ dexRpcGate4782.set(c.chainId,prev.catch(()=>{}).then(()=>next));
+ await prev.catch(()=>{});
+ try{return await dexCallInner4782(c,to,data);}
+ finally{await new Promise(resolve=>setTimeout(resolve,180));release();}
+}
+async function dexCallInner4782(c,to,data){
+ for(let attempt=0;attempt<3;attempt++){
+  try{return await dexRpcRequest4782(c,to,data);}
+  catch(e){
+   if(!/RPC_HTTP_429|RPC_HTTP_503|RPC_TIMEOUT/.test(String(e.message))||attempt===2)throw e;
+   await new Promise(resolve=>setTimeout(resolve,600*(attempt+1)));
+  }
+ }
+}
+async function dexRpcRequest4782(c,to,data){
  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),5500);
  try{const r=await fetch(c.rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_call",params:[{to,data},"latest"]}),signal:ctl.signal});
  if(!r.ok)throw Error(`RPC_HTTP_${r.status}`);const j=await r.json();if(j.error)throw Error(`RPC_${j.error.code}:${String(j.error.message).slice(0,100)}`);
  if(typeof j.result!=="string"||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error("INVALID_RPC_RESULT");return j.result;
  }finally{clearTimeout(timer);}
 }
+const VERIFIED_PANCAKE_BASE_FACTORY_4782="0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865";
 const VERIFIED_UNISWAP_V3_FACTORIES_4781=Object.freeze({
  8453:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
  42161:"0x1F98431c8aD98523631AE4a59f267346ea31F984",
@@ -9304,12 +9324,13 @@ const VERIFIED_UNISWAP_V3_FACTORIES_4781=Object.freeze({
 function dexVenues4780(c){
  const prefix=`DEX_${c.key.toUpperCase()}_`;
  const uniswap=process.env[prefix+"UNISWAP_V3_FACTORY"]||VERIFIED_UNISWAP_V3_FACTORIES_4781[c.chainId];
+ const pancake=process.env[prefix+"PANCAKESWAP_V3_FACTORY"]||(c.chainId===8453?VERIFIED_PANCAKE_BASE_FACTORY_4782:null);
  return [
  {name:"UNISWAP_V3",kind:"V3",factory:uniswap,fee:500,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
  {name:"UNISWAP_V3_3000",kind:"V3",factory:uniswap,fee:3000,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
  {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"],source:"ENV_ONLY"},
- {name:"PANCAKESWAP_V3",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:500,source:"ENV_ONLY"},
- {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:3000,source:"ENV_ONLY"}
+ {name:"PANCAKESWAP_V3",kind:"V3",factory:pancake,fee:500,source:process.env[prefix+"PANCAKESWAP_V3_FACTORY"]?"ENV_OVERRIDE":"BASE_EXISTING_ADAPTER"},
+ {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:pancake,fee:2500,source:process.env[prefix+"PANCAKESWAP_V3_FACTORY"]?"ENV_OVERRIDE":"BASE_EXISTING_ADAPTER"}
  ];
 }
 async function dexDiscover4780(c){
@@ -9322,7 +9343,9 @@ async function dexDiscover4780(c){
   if(!dexAddress4780(venue.factory)){v.status="INVALID_FACTORY_ADDRESS";continue;}
   try{
    const method=venue.kind==="V3"?"getPool":"getPair";
-   const args=venue.kind==="V3"?[c.tokens.WETH,c.tokens.USDC,venue.fee]:[c.tokens.WETH,c.tokens.USDC];
+   // Lowercase normalizes mixed-case input before ethers checksum validation.
+   const weth=c.tokens.WETH.toLowerCase(),usdc=c.tokens.USDC.toLowerCase();
+   const args=venue.kind==="V3"?[weth,usdc,venue.fee]:[weth,usdc];
    const raw=await dexCall4780(c,venue.factory,dexFactory4780.encodeFunctionData(method,args));
    const pool=dexFactory4780.decodeFunctionResult(method,raw)[0];
    if(!dexAddress4780(pool)){v.status="NO_POOL";continue;}
