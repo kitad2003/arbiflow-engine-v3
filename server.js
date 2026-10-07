@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.49.0";
+const VERSION = "4.49.1";
 
 /*
 =========================================================
@@ -7376,8 +7376,11 @@ const UNISWAP_V3_QUOTER_V1_4490 = {
 const QUOTER_V1_ABI_4490=["function quoteExactInputSingle(address tokenIn,address tokenOut,uint24 fee,uint256 amountIn,uint160 sqrtPriceLimitX96) returns (uint256 amountOut)"];
 const ERC20_META_BALANCE_ABI_4490=["function decimals() view returns(uint8)","function balanceOf(address) view returns(uint256)"];
 const DEFAULT_SIZES_USD_4490=[100,250,500,1000,2500,5000,10000,25000,50000];
+const MIN_ROUND_TRIP_RETENTION_4491=0.90;
+const SATURATION_MIN_INPUT_MULTIPLE_4491=2;
+const SATURATION_MIN_OUTPUT_GROWTH_4491=0.05;
 const ROUND_TRIP_GAS_UNITS_4490=260000n;
-function tokenAddress4490(chainKey,symbol){return UNISWAP_V3_DISCOVERY_4470[chainKey]?.tokens?.[symbol]||null;}
+function tokenAddress4490(chainKey,symbol){const a=UNISWAP_V3_DISCOVERY_4470[chainKey]?.tokens?.[symbol]||null; return a?String(a).toLowerCase():null;}
 async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amountIn){
  const q=new Contract(quoterAddress,QUOTER_V1_ABI_4490,provider);
  const out=await q.quoteExactInputSingle.staticCall(String(tokenIn).toLowerCase(),String(tokenOut).toLowerCase(),Number(fee),amountIn,0);
@@ -7404,13 +7407,13 @@ async function exactTradeSizeDiagnostic4490(){
   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
   try{
    const code=await provider.getCode(quoter); if(!code||code==="0x"){results.push({...edge,classification:"QUOTER_NOT_DEPLOYED",quoter,exactQuoteConfirmed:false});continue;}
-   const dB=Number(await new Contract(tokenB,ERC20_META_BALANCE_ABI_4490,provider).decimals());
+   const dB=Number(await new Contract(String(tokenB).toLowerCase(),ERC20_META_BALANCE_ABI_4490,provider).decimals());
    const feeData=await provider.getFeeData(); const gasPrice=feeData.gasPrice||feeData.maxFeePerGas||0n;
    // Convert native gas to USD from the chain's WETH/stable spot when available.
    let nativeUsd=null;
    for(const c of spread.chains||[])if(c.key===edge.chainKey)for(const pr of c.pairs||[])if(pr.pair===`WETH/${assetB}`){const pp=(pr.pools||[]).find(x=>x.token1PerToken0&&x.token1PerToken0>10);if(pp){nativeUsd=Number(pp.token1PerToken0);break;}}
    const gasNative=Number(formatUnits(gasPrice*ROUND_TRIP_GAS_UNITS_4490,18)); const modeledGasUsd=nativeUsd?gasNative*nativeUsd:null;
-   const sizes=[];
+   const sizes=[]; let depthRejected=false, saturationStopped=false, previousSuccessful=null;
    for(const usd of DEFAULT_SIZES_USD_4490){
     if(!stableLike4490(assetB))continue;
     try{
@@ -7418,20 +7421,31 @@ async function exactTradeSizeDiagnostic4490(){
      const acquiredA=await quoteV3Single4490(provider,quoter,tokenB,tokenA,edge.buyFeeTier,amountIn);
      const finalB=await quoteV3Single4490(provider,quoter,tokenA,tokenB,edge.sellFeeTier,acquiredA);
      const finalUnits=Number(formatUnits(finalB,dB)),grossNet=finalUnits-usd,gasUsd=modeledGasUsd??0,netOwn=grossNet-gasUsd;
-     let funding={ownCapital:{requiredUsd:usd,estimatedNetProfitUsd:Number(netOwn.toFixed(6)),qualifies:netOwn>=15}};
+     const roundTripRetention=usd>0?finalUnits/usd:0;
+     const catastrophicDepthImpact=roundTripRetention<MIN_ROUND_TRIP_RETENTION_4491;
+     let saturationDetected=false;
+     if(previousSuccessful&&usd>=previousSuccessful.usd*SATURATION_MIN_INPUT_MULTIPLE_4491){
+       const outputGrowth=previousSuccessful.finalUnits>0?(finalUnits/previousSuccessful.finalUnits)-1:0;
+       saturationDetected=outputGrowth<SATURATION_MIN_OUTPUT_GROWTH_4491;
+     }
+     let funding={ownCapital:{requiredUsd:usd,estimatedNetProfitUsd:Number(netOwn.toFixed(6)),qualifies:netOwn>=15&&!catastrophicDepthImpact}};
      if(edge.chainKey==="base"){
       const f=await baseFunding4490(provider,tokenB,dB), morphoCap=Number(f.morpho?.availableTokenUnits||0),aaveCap=Number(f.aave?.availableTokenUnits||0),aaveBps=Number(f.aave?.premiumBps||5);
       const morphoNet=grossNet-gasUsd, aavePremium=usd*aaveBps/10000, aaveNet=grossNet-gasUsd-aavePremium;
       funding={...funding,morphoFlash:{availableUsdApprox:morphoCap,feeBps:0,sizeSupported:morphoCap>=usd,estimatedNetProfitUsd:Number(morphoNet.toFixed(6)),qualifies:morphoCap>=usd&&morphoNet>=15},aaveFlash:{availableUsdApprox:aaveCap,premiumBps:aaveBps,sizeSupported:aaveCap>=usd,estimatedPremiumUsd:Number(aavePremium.toFixed(6)),estimatedNetProfitUsd:Number(aaveNet.toFixed(6)),qualifies:aaveCap>=usd&&aaveNet>=15}};
      }else funding={...funding,flashFunding:{status:"PRESERVED_NOT_YET_CONFIGURED_FOR_THIS_CHAIN",note:"Flash-loan architecture is retained. This build only reads validated Morpho/Aave funding capacity on Base."}};
-     sizes.push({inputAsset:assetB,inputUsdApprox:usd,amountInRaw:amountIn.toString(),intermediateAsset:assetA,intermediateAmountRaw:acquiredA.toString(),finalAsset:assetB,finalAmount:finalUnits,roundTripPnlBeforeGasUsd:Number(grossNet.toFixed(6)),modeledRoundTripGasUnits:Number(ROUND_TRIP_GAS_UNITS_4490),modeledGasUsd:modeledGasUsd===null?null:Number(modeledGasUsd.toFixed(6)),estimatedNetOwnCapitalUsd:modeledGasUsd===null?null:Number(netOwn.toFixed(6)),funding,exactDexQuoteConfirmed:true,transactionSimulationConfirmed:false});
+     sizes.push({inputAsset:assetB,inputUsdApprox:usd,amountInRaw:amountIn.toString(),intermediateAsset:assetA,intermediateAmountRaw:acquiredA.toString(),finalAsset:assetB,finalAmount:finalUnits,roundTripPnlBeforeGasUsd:Number(grossNet.toFixed(6)),roundTripRetentionPct:Number((roundTripRetention*100).toFixed(6)),catastrophicDepthImpact,saturationDetected,modeledRoundTripGasUnits:Number(ROUND_TRIP_GAS_UNITS_4490),modeledGasUsd:modeledGasUsd===null?null:Number(modeledGasUsd.toFixed(6)),estimatedNetOwnCapitalUsd:modeledGasUsd===null?null:Number(netOwn.toFixed(6)),funding,exactDexQuoteConfirmed:true,transactionSimulationConfirmed:false});
+     previousSuccessful={usd,finalUnits};
+     if(catastrophicDepthImpact){depthRejected=true;break;}
+     if(saturationDetected){saturationStopped=true;break;}
     }catch(e){sizes.push({inputUsdApprox:usd,exactDexQuoteConfirmed:false,error:e?.shortMessage||e?.message||String(e)});}
    }
-   const valid=sizes.filter(x=>x.exactDexQuoteConfirmed&&x.estimatedNetOwnCapitalUsd!==null); const best=valid.sort((a,b)=>b.estimatedNetOwnCapitalUsd-a.estimatedNetOwnCapitalUsd)[0]||null;
-   results.push({...edge,quoter,quoteMethod:"UNISWAP_V3_QUOTER_EXACT_INPUT_ROUND_TRIP",sizes,bestOwnCapitalSize:best,classification:best&&best.estimatedNetOwnCapitalUsd>=15?"ESTIMATED_NET_POSITIVE_AFTER_MODELED_GAS":"NO_ESTIMATED_NET_PROFIT_AFTER_MODELED_GAS",exactQuoteConfirmed:valid.length>0,readOnly:true});
+   const valid=sizes.filter(x=>x.exactDexQuoteConfirmed&&x.estimatedNetOwnCapitalUsd!==null&&!x.catastrophicDepthImpact); const best=[...valid].sort((a,b)=>b.estimatedNetOwnCapitalUsd-a.estimatedNetOwnCapitalUsd)[0]||null;
+   const classification=depthRejected?"REJECTED_INSUFFICIENT_EXECUTABLE_DEPTH":saturationStopped?"REJECTED_QUOTE_OUTPUT_SATURATION":best&&best.estimatedNetOwnCapitalUsd>=15?"ESTIMATED_NET_POSITIVE_AFTER_MODELED_GAS":"NO_ESTIMATED_NET_PROFIT_AFTER_MODELED_GAS";
+   results.push({...edge,quoter,quoteMethod:"UNISWAP_V3_QUOTER_EXACT_INPUT_ROUND_TRIP",depthGate:{minimumRoundTripRetentionPct:MIN_ROUND_TRIP_RETENTION_4491*100,stopOnCatastrophicDepthImpact:true,stopOnOutputSaturation:true},sizes,bestOwnCapitalSize:best,classification,exactQuoteConfirmed:valid.length>0,readOnly:true});
   }catch(e){results.push({...edge,classification:"EXACT_SIZE_DIAGNOSTIC_FAILED",error:e?.shortMessage||e?.message||String(e),exactQuoteConfirmed:false,readOnly:true});}
  }
- return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"EXACT_UNISWAP_V3_ROUND_TRIP_QUOTES_PLUS_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+ return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"EXACT_UNISWAP_V3_ROUND_TRIP_QUOTES_PLUS_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/exact-size-funding",async(req,res)=>{try{res.json(await exactTradeSizeDiagnostic4490());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7439,7 +7453,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.49.0_EXACT_TRADE_SIZE_AND_FLASH_FUNDING_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.49.1_DEPTH_GATED_EXACT_SIZE_AND_FLASH_FUNDING_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7448,7 +7462,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.49.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.49.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
