@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.43.0";
+const VERSION = "4.44.0";
 
 /*
 =========================================================
@@ -5543,7 +5543,7 @@ async function runMorphoLiquidationBot450(){
 }
 
 
-// 4.43.0: Exhaustive hot-watch discovery. This is a latency lane, not a replacement
+// 4.44.0: Exhaustive hot-watch discovery. This is a latency lane, not a replacement
 // for runMorphoLiquidationBot450(). It uses the same uncapped pagination contract,
 // but asks Morpho only for positions at or below HF 1.01 so current risk candidates
 // can be refreshed without waiting for the broader <=1.10 universe scan.
@@ -7050,9 +7050,41 @@ app.get("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate43
 app.post("/api/production/base/execution-safety-gate",runFinalMainnetSafetyGate4390);
 
 
-// 4.43.0 fast lane: exhaustive <=1.01 refresh plus the same exact fork-accrual
-// safety gate for any API signal below 1.0. No signing or mainnet broadcast.
+// 4.44.0 fast lane: exhaustive <=1.01 refresh plus IN-PROCESS exact-accrual
+// confirmation for API signals below 1.0. A separate full production safety/economics
+// gate is spawned only if exact accrued state is truly liquidatable. This removes the
+// expensive Hardhat child-process startup from the common false-signal path.
+// No signing or mainnet broadcast is performed here.
 let hotWatchSafety4430Active=false;
+const hreFast4440=require("hardhat");
+const FAST4440_MORPHO="0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",FAST4440_WAD=10n**18n,FAST4440_SCALE=10n**36n;
+const fast4440DivUp=(a,b)=>(a+b-1n)/b;
+const fast4440ToAssetsUp=(shares,assets,totalShares)=>totalShares===0n?0n:fast4440DivUp(shares*assets,totalShares);
+async function exactAccruedConfirmBatch4440(candidates){
+  if(!process.env.BASE_RPC_URL) throw new Error("BASE_RPC_URL_REQUIRED");
+  const t0=Date.now(), ethersH=hreFast4440.ethers;
+  await hreFast4440.network.provider.request({method:"hardhat_reset",params:[{forking:{jsonRpcUrl:process.env.BASE_RPC_URL}}]});
+  const [tester]=await ethersH.getSigners(); const sourceBlock=await ethersH.provider.getBlockNumber();
+  await hreFast4440.network.provider.send("evm_mine");
+  const morpho=new ethersH.Contract(FAST4440_MORPHO,["function idToMarketParams(bytes32) view returns(address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)","function accrueInterest((address,address,address,address,uint256))","function market(bytes32) view returns(uint128 totalSupplyAssets,uint128 totalSupplyShares,uint128 totalBorrowAssets,uint128 totalBorrowShares,uint128 lastUpdate,uint128 fee)","function position(bytes32,address) view returns(uint256 supplyShares,uint128 borrowShares,uint128 collateral)"],tester);
+  const marketCache=new Map(), out=[];
+  for(const c of candidates){
+    try{
+      let x=marketCache.get(c.marketId.toLowerCase());
+      if(!x){
+        const mp=await morpho.idToMarketParams(c.marketId); if(mp.loanToken===ethersH.ZeroAddress) throw new Error("UNKNOWN_MARKET");
+        await (await morpho.accrueInterest([mp.loanToken,mp.collateralToken,mp.oracle,mp.irm,mp.lltv])).wait();
+        const m=await morpho.market(c.marketId), oracle=new ethersH.Contract(mp.oracle,["function price() view returns(uint256)"],tester), price=await oracle.price();
+        x={mp,m,price}; marketCache.set(c.marketId.toLowerCase(),x);
+      }
+      const p=await morpho.position(c.marketId,c.user), debt=fast4440ToAssetsUp(BigInt(p.borrowShares),BigInt(x.m.totalBorrowAssets),BigInt(x.m.totalBorrowShares));
+      if(!debt||!BigInt(p.collateral)) throw new Error("EMPTY_POSITION");
+      const hf=BigInt(p.collateral)*BigInt(x.price)/FAST4440_SCALE*BigInt(x.mp.lltv)/debt;
+      out.push({success:true,version:VERSION,sourceForkBlockNumber:sourceBlock,marketId:c.marketId,borrower:c.user,exactAccruedHealthFactorWad:hf.toString(),exactAccruedLiquidatable:hf<FAST4440_WAD,stateClassification:"FRESH_BASE_FORK_EXACT_ACCRUAL_IN_PROCESS_BATCH",controlledOracleShockUsed:false,mainnetDeployment:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,classification:hf<FAST4440_WAD?"EXACT_CONFIRMATION_LIQUIDATABLE":"EXACT_CONFIRMATION_WAIT",readyForExplicitExecutionApproval:false,reason:hf<FAST4440_WAD?"EXACT_ACCRUED_LIQUIDATABLE_REQUIRES_FULL_ECONOMICS_GATE":"CANDIDATE_NOT_LIQUIDATABLE_AFTER_EXACT_FORK_ACCRUAL",candidateDiscoveryHealthFactor:c.healthFactor});
+    }catch(e){out.push({success:false,version:VERSION,marketId:c.marketId,borrower:c.user,candidateDiscoveryHealthFactor:c.healthFactor,classification:"EXACT_CONFIRMATION_FAILED_CLOSED",readyForExplicitExecutionApproval:false,error:e?.message||String(e)});}
+  }
+  return {sourceForkBlockNumber:sourceBlock,evaluated:out,elapsedMs:Date.now()-t0};
+}
 const runHotWatchSafety4430=async(req,res)=>{
   const startedAt=Date.now();
   if(hotWatchSafety4430Active) return res.status(409).json({success:false,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_ALREADY_RUNNING",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
@@ -7063,18 +7095,20 @@ const runHotWatchSafety4430=async(req,res)=>{
     const hot=await runMorphoHotWatchDiscovery4430();
     if(!hot.success) return res.status(502).json({...hot,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});
     const discovered=hot.candidates.filter(x=>x?.marketId&&x?.user&&Number(x.healthFactor)<1);
-    if(!discovered.length) return res.json({success:true,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:false,reason:"NO_HOT_WATCH_LIQUIDATABLE_SIGNAL",hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:0,closest:hot.candidates[0]||null},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
-    const hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),maxCandidates=Math.max(1,Math.min(3,Number(process.env.ARBIFLOW_SAFETY_PIPELINE_MAX_CANDIDATES||3))),evaluated=[];
-    for(const candidate of discovered.slice(0,maxCandidates)){
-      const reportPath=path.join(__dirname,`hot-watch-safety-4430-${String(candidate.user).slice(2,10)}.json`); try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
-      const child=spawnSync(hardhatBin,["run","--no-compile","MainnetSafetyGate4390.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_MAINNET_SAFETY_CANDIDATE_JSON:JSON.stringify({marketId:candidate.marketId,user:candidate.user}),ARBIFLOW_MAINNET_SAFETY_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
-      let report=null; try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
-      if(child.status!==0||!report?.success){evaluated.push({marketId:candidate.marketId,user:candidate.user,discoveryHealthFactor:candidate.healthFactor,classification:"SAFETY_GATE_FAILED_CLOSED",readyForExplicitExecutionApproval:false,error:(child.stderr||child.stdout||"SAFETY_GATE_FAILED").slice(-2000)});continue;}
-      evaluated.push({...report,candidateDiscoveryHealthFactor:candidate.healthFactor,readyForExplicitExecutionApproval:report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED"});
-      if(report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED") break;
+    if(!discovered.length) return res.json({success:true,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:false,reason:"NO_HOT_WATCH_LIQUIDATABLE_SIGNAL",hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:0,closest:hot.candidates[0]||null},confirmationMode:"IN_PROCESS_BATCH_EXACT_ACCRUAL",readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+    const maxCandidates=Math.max(1,Math.min(10,Number(process.env.ARBIFLOW_SAFETY_PIPELINE_MAX_CANDIDATES||10))), selected=discovered.slice(0,maxCandidates);
+    const confirm=await exactAccruedConfirmBatch4440(selected); let evaluated=confirm.evaluated;
+    const trulyLiquidatable=evaluated.find(x=>x.success&&x.exactAccruedLiquidatable===true);
+    if(trulyLiquidatable){
+      const original=selected.find(x=>x.marketId===trulyLiquidatable.marketId&&String(x.user).toLowerCase()===String(trulyLiquidatable.borrower).toLowerCase());
+      const hardhatBin=path.join(__dirname,"node_modules",".bin",process.platform==="win32"?"hardhat.cmd":"hardhat"),reportPath=path.join(__dirname,`hot-watch-full-safety-4440-${String(trulyLiquidatable.borrower).slice(2,10)}.json`); try{if(fs.existsSync(reportPath))fs.unlinkSync(reportPath)}catch{}
+      const child=spawnSync(hardhatBin,["run","--no-compile","MainnetSafetyGate4390.js"],{cwd:__dirname,env:{...process.env,ARBIFLOW_MAINNET_SAFETY_CANDIDATE_JSON:JSON.stringify({marketId:trulyLiquidatable.marketId,user:trulyLiquidatable.borrower}),ARBIFLOW_MAINNET_SAFETY_REPORT:reportPath},encoding:"utf8",timeout:180000,maxBuffer:4*1024*1024});
+      let report=null;try{if(fs.existsSync(reportPath))report=JSON.parse(fs.readFileSync(reportPath,"utf8"))}catch{}
+      if(child.status!==0||!report?.success) evaluated.push({marketId:trulyLiquidatable.marketId,user:trulyLiquidatable.borrower,classification:"FULL_SAFETY_ECONOMICS_GATE_FAILED_CLOSED",readyForExplicitExecutionApproval:false,error:(child.stderr||child.stdout||"SAFETY_GATE_FAILED").slice(-2000)});
+      else evaluated.push({...report,candidateDiscoveryHealthFactor:original?.healthFactor,confirmationMode:"FULL_PRODUCTION_SAFETY_ECONOMICS_GATE",readyForExplicitExecutionApproval:report.classification==="MAINNET_EXECUTION_SAFETY_GATE_PASSED"});
     }
     const passed=evaluated.find(x=>x.readyForExplicitExecutionApproval===true);
-    return res.json({success:true,version:VERSION,classification:passed?"HOT_WATCH_SAFETY_PIPELINE_PASSED":"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:Boolean(passed),candidate:passed||null,evaluated,hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:discovered.length},readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,nextGate:passed?"SEPARATE_EXPLICIT_USER_APPROVAL_REQUIRED_BEFORE_ANY_MAINNET_TRANSACTION":"CONTINUE_MONITORING",elapsedMs:Date.now()-startedAt});
+    return res.json({success:true,version:VERSION,classification:passed?"HOT_WATCH_SAFETY_PIPELINE_PASSED":"HOT_WATCH_SAFETY_PIPELINE_WAIT",readyForExplicitExecutionApproval:Boolean(passed),candidate:passed||null,evaluated,hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:discovered.length},confirmationMode:"IN_PROCESS_BATCH_EXACT_ACCRUAL_THEN_FULL_GATE_ONLY_IF_TRULY_LIQUIDATABLE",exactConfirmationElapsedMs:confirm.elapsedMs,readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,nextGate:passed?"SEPARATE_EXPLICIT_USER_APPROVAL_REQUIRED_BEFORE_ANY_MAINNET_TRANSACTION":"CONTINUE_MONITORING",elapsedMs:Date.now()-startedAt});
   }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"HOT_WATCH_SAFETY_PIPELINE_ERROR",error:e?.message||String(e),readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
   finally{hotWatchSafety4430Active=false;}
 };
@@ -7114,7 +7148,7 @@ const runCandidateSafetyPipeline4400 = async (req,res)=>{
 };
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.43.0_EXHAUSTIVE_DISCOVERY_PLUS_HOT_WATCH_FAST_LANE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.44.0_EXHAUSTIVE_DISCOVERY_PLUS_HOT_WATCH_FAST_LANE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
