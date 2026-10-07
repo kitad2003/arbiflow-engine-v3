@@ -34,7 +34,7 @@ const RPC_URLS = {
   bnb: process.env.BNB_RPC_URL || ""
 };
 
-const VERSION = "4.44.0";
+const VERSION = "4.45.0";
 
 /*
 =========================================================
@@ -5578,7 +5578,7 @@ async function runMorphoHotWatchDiscovery4430(){
       if(!(debt>0&&coll>0&&lltv>0)) continue;
       const hf=coll*lltv/debt;
       const borrowAssetsRaw=String(p?.state?.borrowAssets||"0"),collateralAssetsRaw=String(p?.state?.collateral||"0");
-      const row={marketId:p.market.marketId,user:p.user.address,healthFactor:round(hf,6),borrowAssetsRaw,collateralAssetsRaw,borrowAssetsUsd:round(debt,2),collateralUsd:round(coll,2),lltv:round(lltv,6),readOnly:true};
+      const row={marketId:p.market.marketId,user:p.user.address,healthFactor:round(hf,6),borrowAssetsRaw,collateralAssetsRaw,borrowAssetsUsd:round(debt,2),collateralUsd:round(coll,2),lltv:round(lltv,6),loanAsset:p.market.loanAsset?.symbol||null,loanAssetAddress:p.market.loanAsset?.address||null,loanAssetDecimals:Number(p.market.loanAsset?.decimals??18),collateralAsset:p.market.collateralAsset?.symbol||null,collateralAssetAddress:p.market.collateralAsset?.address||null,collateralAssetDecimals:Number(p.market.collateralAsset?.decimals??18),readOnly:true};
       candidates.push(row);
     }
     candidates.sort((a,b)=>a.healthFactor-b.healthFactor);
@@ -7146,9 +7146,44 @@ const runCandidateSafetyPipeline4400 = async (req,res)=>{
   }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"LIVE_CANDIDATE_SAFETY_PIPELINE_ERROR",error:e?.message||String(e),readOnly:true,liveExecutionEnabled:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}
   finally{candidateSafetyPipeline4400Active=false;}
 };
+
+// 4.45.0 read-only market-liquidity diagnostic. Discovery remains exhaustive/uncapped.
+// Funding capacity is measured for every unique debt asset in the hot-watch universe.
+// Morpho flash capacity is the loan token balance held by Morpho Blue; Aave capacity
+// is the underlying balance held by the reserve aToken. No flash loan is requested.
+async function readFundingLiquidity4450(assetAddress,decimals){
+  const provider=getBaseProvider(), token=new Contract(assetAddress,ERC20_READ_ABI,provider);
+  const pool=new Contract(AAVE_V3_BASE.pool,AAVE_POOL_ABI,provider), dataProvider=new Contract(AAVE_V3_BASE.protocolDataProvider,AAVE_DATA_PROVIDER_ABI,provider);
+  const [morphoRaw,premiumRaw,reserve]=await Promise.all([token.balanceOf(MORPHO_BLUE_4210),pool.FLASHLOAN_PREMIUM_TOTAL(),dataProvider.getReserveTokensAddresses(assetAddress)]);
+  const aToken=reserve.aTokenAddress||reserve[0]; let aaveRaw=0n;
+  if(aToken && String(aToken).toLowerCase()!=="0x0000000000000000000000000000000000000000") aaveRaw=await token.balanceOf(aToken);
+  return {assetAddress,decimals,morphoFlash:{availableRaw:morphoRaw.toString(),availableTokenUnits:round(Number(formatUnits(morphoRaw,decimals)),8),feeBps:0},aaveFlash:{reserveSupported:Boolean(aToken&&String(aToken).toLowerCase()!=="0x0000000000000000000000000000000000000000"),aTokenAddress:aToken||null,availableRaw:aaveRaw.toString(),availableTokenUnits:round(Number(formatUnits(aaveRaw,decimals)),8),premiumBps:Number(premiumRaw)},readOnly:true};
+}
+async function kyberRoutePreview4450(tokenIn,tokenOut,amountIn){
+  const clientId=(process.env.ARBIFLOW_KYBER_CLIENT_ID||"ArbiFlow").trim()||"ArbiFlow";
+  const url="https://aggregator-api.kyberswap.com/base/api/v1/routes?"+new URLSearchParams({tokenIn,tokenOut,amountIn:String(amountIn),excludeRFQSources:"true",onlyScalableSources:"true",gasInclude:"true"});
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),8000);
+  try{const r=await fetch(url,{headers:{"X-Client-Id":clientId,"Accept":"application/json"},signal:c.signal});const body=await r.text();let data=null;try{data=JSON.parse(body)}catch{};const q=data?.data?.routeSummary;return {success:Boolean(r.ok&&q?.amountOut),httpStatus:r.status,amountIn:String(amountIn),amountOut:q?.amountOut??null,amountInUsd:q?.amountInUsd??null,amountOutUsd:q?.amountOutUsd??null,gasUsd:q?.gasUsd??null,routeLegs:Array.isArray(q?.route)?q.route.length:null,error:r.ok?null:(data?.message||body.slice(0,200)),readOnly:true};}catch(e){return {success:false,amountIn:String(amountIn),error:e?.message||String(e),readOnly:true};}finally{clearTimeout(t)}
+}
+let marketLiquidityDiagnostic4450Active=false;
+const runMarketLiquidityDiagnostic4450=async(req,res)=>{
+ const startedAt=Date.now(); if(marketLiquidityDiagnostic4450Active)return res.status(409).json({success:false,version:VERSION,classification:"MARKET_LIQUIDITY_DIAGNOSTIC_ALREADY_RUNNING",readOnly:true}); marketLiquidityDiagnostic4450Active=true;
+ try{
+  const hot=await runMorphoHotWatchDiscovery4430(); if(!hot.success)throw new Error(hot.error||"HOT_WATCH_DISCOVERY_FAILED");
+  const assets=new Map(); for(const x of hot.candidates||[]){if(x.loanAssetAddress&&!assets.has(x.loanAssetAddress.toLowerCase()))assets.set(x.loanAssetAddress.toLowerCase(),{symbol:x.loanAsset,address:x.loanAssetAddress,decimals:x.loanAssetDecimals});}
+  const funding=[]; for(const a of assets.values()){try{funding.push({symbol:a.symbol,...await readFundingLiquidity4450(a.address,a.decimals)});}catch(e){funding.push({symbol:a.symbol,assetAddress:a.address,error:e?.message||String(e),readOnly:true});}}
+  const closest=(hot.candidates||[])[0]||null,partialExitRouteProbes=[];
+  if(closest?.collateralAssetAddress&&closest?.loanAssetAddress&&BigInt(closest.collateralAssetsRaw||"0")>0n){for(const pct of [10,25,50,75,100]){const amt=(BigInt(closest.collateralAssetsRaw)*BigInt(pct))/100n;if(amt>0n)partialExitRouteProbes.push({percentOfCurrentCollateral:pct,...await kyberRoutePreview4450(closest.collateralAssetAddress,closest.loanAssetAddress,amt.toString())});}}
+  const fundingSummary=funding.map(x=>({symbol:x.symbol,assetAddress:x.assetAddress,morphoFlashTokenUnits:x.morphoFlash?.availableTokenUnits??null,aaveFlashTokenUnits:x.aaveFlash?.availableTokenUnits??null,aavePremiumBps:x.aaveFlash?.premiumBps??null,morphoFeeBps:x.morphoFlash?.feeBps??0}));
+  return res.json({success:true,version:VERSION,classification:"MARKET_LIQUIDITY_DIAGNOSTIC_COMPLETE",hotWatch:{positionsScanned:hot.positionsScanned,marketsRepresented:hot.marketsRepresented,pagesFetched:hot.pagesFetched,totalPositionCap:null,paginationExhausted:hot.paginationExhausted,healthFactorLte:hot.healthFactorLte,liquidatableSignals:hot.liquidatableSignals},fundingLiquidity:{uniqueDebtAssets:assets.size,assets:fundingSummary,detail:funding},callbackSelfFunding:{supportedByArchitecture:true,requiresExternalFlashLoan:false,condition:"Seized collateral exit must produce enough loan asset to satisfy Morpho repayment atomically",validatedForCurrentCandidate:false,note:"Capability diagnostic only; no liquidation callback or swap was executed."},closestHotWatch:closest,collateralExitLiquidity:{provider:"KYBERSWAP_READ_ONLY_ROUTE_PREVIEW",candidateBasis:"CLOSEST_HOT_WATCH_POSITION_CURRENT_COLLATERAL_NOT_A_LIQUIDATION_SIZE",partialSizePercents:[10,25,50,75,100],probes:partialExitRouteProbes,note:"These probes measure indicative exit-market depth only. They are not liquidation profitability or executable-size claims."},readOnly:true,flashLoanRequested:false,swapExecuted:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,mainnetStateChanged:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});
+ }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"MARKET_LIQUIDITY_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}finally{marketLiquidityDiagnostic4450Active=false;}
+};
+app.get("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
+app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
+
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.44.0_EXHAUSTIVE_DISCOVERY_PLUS_HOT_WATCH_FAST_LANE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.45.0_MARKET_LIQUIDITY_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7157,7 +7192,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.40.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.45.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
