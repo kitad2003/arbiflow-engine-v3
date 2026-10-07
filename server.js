@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.66.0";
+const VERSION = "4.67.0";
 
 /*
 =========================================================
@@ -8569,6 +8569,65 @@ app.get("/api/multivenue/dynamic/status",(req,res)=>res.json(dynamicSummary4641(
 app.get("/api/multivenue/dynamic/curves",(req,res)=>res.json(dynamicSummary4641(true)));
 
 
+
+/*
+=========================================================
+ArbiFlow 4.67.0 — INCREMENTAL / STREAMING MULTI-VENUE DISCOVERY
+Each completed qualified curve updates the live edge cache immediately.
+Only cycles touching the changed token pair are considered for emission.
+Candidates are frozen at emission and may be route-locked validated while
+the remaining discovery workers continue. Read-only.
+=========================================================
+*/
+let stream4670={status:"IDLE",startedAt:null,completedAt:null,error:null,curvesTotal:0,curvesCompleted:0,quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,usableEdges:0,rejectedCurves:0,candidatesEmitted:0,duplicateCandidatesSuppressed:0,firstCandidateAt:null,firstCandidateLatencyMs:null,currentJobs:[],lastProgressAt:null,elapsedMs:0,edgeCache:new Map(),emittedKeys:new Set(),emittedCandidates:[],validationQueueDepth:0};
+
+function streamEdgeKey4670(e){return `${e.venue}|${e.from}|${e.to}`;}
+function streamCandidateKey4670(c){return `${c.hops}|${c.edges.map(e=>`${e.venue}:${e.from}>${e.to}:${e.feeTier??e.poolType??""}`).join("|")}`;}
+function candidateTouches4670(c,edge){return c.edges.some(e=>e.from===edge.from||e.to===edge.from||e.from===edge.to||e.to===edge.to);}
+function incrementalCandidates4670(changedEdge){
+ const ranked=detectAndRank4641([...stream4670.edgeCache.values()]);
+ return ranked.candidates.filter(c=>candidateTouches4670(c,changedEdge));
+}
+async function runStreamingDiscovery4670(onCandidate){
+ if(stream4670.status==="RUNNING")return;
+ if(!RPC_URLS.base)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ const started=Date.now(),jobs=[];
+ for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME"])jobs.push({from,to,venue});}
+ stream4670={status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,curvesTotal:jobs.length,curvesCompleted:0,quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,usableEdges:0,rejectedCurves:0,candidatesEmitted:0,duplicateCandidatesSuppressed:0,firstCandidateAt:null,firstCandidateLatencyMs:null,currentJobs:[],lastProgressAt:new Date().toISOString(),elapsedMs:0,edgeCache:new Map(),emittedKeys:new Set(),emittedCandidates:[],validationQueueDepth:0};
+ await mapLimit4501(jobs,3,async j=>{
+  const jobKey=`${j.venue}:${j.from}>${j.to}`;stream4670.currentJobs=[...stream4670.currentJobs,jobKey].slice(-3);
+  const samples=[];
+  for(const size of MV4641_SIZES[j.from]){
+   stream4670.quotesAttempted++;
+   const q=await quoteVenue4641(j.venue,j.from,j.to,size);
+   if(q){stream4670.quotesSucceeded++;samples.push(q);}else{stream4670.quoteFailures++;samples.push(null);}
+  }
+  const quality=curveQuality4641(samples),good=samples.filter(Boolean),representative=good.length?good[Math.floor(good.length/2)]:null;
+  if(quality.usable&&representative){
+   const edge={...representative,curveDeformationPct:quality.deformationPct,curveSamples:quality.samples,dynamicQualified:true,streamQualified:true};
+   stream4670.edgeCache.set(streamEdgeKey4670(edge),edge);stream4670.usableEdges=stream4670.edgeCache.size;
+   for(const c of incrementalCandidates4670(edge)){
+    const key=streamCandidateKey4670(c);
+    if(stream4670.emittedKeys.has(key)){stream4670.duplicateCandidatesSuppressed++;continue;}
+    stream4670.emittedKeys.add(key);const frozen=JSON.parse(JSON.stringify(c));stream4670.emittedCandidates.push(frozen);stream4670.candidatesEmitted++;
+    if(!stream4670.firstCandidateAt){stream4670.firstCandidateAt=new Date().toISOString();stream4670.firstCandidateLatencyMs=Date.now()-started;}
+    if(onCandidate){stream4670.validationQueueDepth++;try{await onCandidate(frozen);}finally{stream4670.validationQueueDepth--;}}
+   }
+  }else stream4670.rejectedCurves++;
+  stream4670.curvesCompleted++;stream4670.elapsedMs=Date.now()-started;stream4670.lastProgressAt=new Date().toISOString();stream4670.currentJobs=stream4670.currentJobs.filter(x=>x!==jobKey);
+ });
+ stream4670.status="COMPLETE";stream4670.completedAt=new Date().toISOString();stream4670.elapsedMs=Date.now()-started;
+}
+function streamSummary4670(){
+ return {success:stream4670.status!=="ERROR",version:VERSION,status:stream4670.status,error:stream4670.error,architecture:"COMPLETED_CURVE_TO_INCREMENTAL_EDGE_CACHE_TO_AFFECTED_CYCLE_DETECTION_TO_IMMEDIATE_FROZEN_CANDIDATE_EMISSION",startedAt:stream4670.startedAt,completedAt:stream4670.completedAt,curvesTotal:stream4670.curvesTotal,curvesCompleted:stream4670.curvesCompleted,quotesAttempted:stream4670.quotesAttempted,quotesSucceeded:stream4670.quotesSucceeded,quoteFailures:stream4670.quoteFailures,usableEdges:stream4670.usableEdges,rejectedCurves:stream4670.rejectedCurves,candidatesEmitted:stream4670.candidatesEmitted,duplicateCandidatesSuppressed:stream4670.duplicateCandidatesSuppressed,firstCandidateAt:stream4670.firstCandidateAt,firstCandidateLatencyMs:stream4670.firstCandidateLatencyMs,currentJobs:stream4670.currentJobs,validationQueueDepth:stream4670.validationQueueDepth,lastProgressAt:stream4670.lastProgressAt,elapsedMs:stream4670.status==="RUNNING"?(Date.now()-new Date(stream4670.startedAt).getTime()):stream4670.elapsedMs,emittedCandidates:stream4670.emittedCandidates.slice(-20),executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/multivenue/stream/start",(req,res)=>{
+ if(stream4670.status==="RUNNING")return res.json({...streamSummary4670(),statusRoute:"/api/multivenue/stream/status"});
+ setImmediate(async()=>{try{await runStreamingDiscovery4670(null);}catch(e){stream4670.status="ERROR";stream4670.completedAt=new Date().toISOString();stream4670.error=e?.message||String(e);}});
+ res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/multivenue/stream/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+});
+app.get("/api/multivenue/stream/status",(req,res)=>res.json(streamSummary4670()));
+
 /*
 =========================================================
 ArbiFlow 4.65.0 — EXACT CROSS-VENUE ROUND-TRIP VALIDATOR
@@ -8668,25 +8727,39 @@ async function validateSnapshot4651(snapshot){
  exact4650.validationCompletedAt=new Date().toISOString();exact4650.validationLatencyMs=Date.now()-vs;
  return results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
 }
+async function validateOneStreaming4670(c,economicsContext){
+ const tests=[];
+ for(const size of candidateSizes4650(c)){
+  exact4650.sizeTests++;const t=await validateSize4650(c,size);tests.push(t);
+  if(t.ok){exact4650.successfulRoundTrips++;if(t.positive)exact4650.positiveRoundTrips++;}else exact4650.quoteFailures++;
+ }
+ const enriched=tests.map(t=>applyEconomics4660(t,economicsContext));
+ const viable=enriched.filter(x=>x.ok).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),positive=viable.filter(x=>x.positive),economicSurvivors=positive.filter(x=>x.economics?.passesMinNetProfitScreen),best=viable[0]||null;
+ exact4650.candidatesValidated++;
+ return {candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:enriched.length,positiveSizes:positive.length,economicSurvivorSizes:economicSurvivors.length,best,tests:enriched,economicsContext,streamEmitted:true,classification:economicSurvivors.length?"CONSERVATIVE_ECONOMICS_SURVIVOR_REQUIRES_ATOMIC_EXECUTOR_GAS_AND_SIMULATION":positive.length?"GROSS_POSITIVE_REJECTED_BY_CONSERVATIVE_ECONOMICS_SCREEN":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false};
+}
 async function runExact4650(limit=10){
  if(exact4650.status==="RUNNING")return;
- exact4650={...exact4650,status:"RUNNING",phase:"DISCOVERING",startedAt:new Date().toISOString(),completedAt:null,error:null,discoveryStartedAt:new Date().toISOString(),discoveryCompletedAt:null,validationStartedAt:null,validationCompletedAt:null,discoveryLatencyMs:null,validationLatencyMs:null,candidatesDetected:0,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],candidateSnapshot:[],economicsContext:null};
- const totalStart=Date.now(),ds=Date.now();
- // Always perform one fresh discovery run, then freeze its candidates and validate them immediately.
- await runDynamic4641();
- exact4650.discoveryCompletedAt=new Date().toISOString();exact4650.discoveryLatencyMs=Date.now()-ds;
- const detected=[...dynamic4641.candidates];exact4650.candidatesDetected=detected.length;
- const snapshot=snapshotCandidates4651(detected,limit);exact4650.candidateSnapshot=snapshot;exact4650.candidatesInput=snapshot.length;
- if(snapshot.length===0){
-  exact4650.phase="NO_POSITIVE_CANDIDATE_AT_DISCOVERY";
-  exact4650.status="COMPLETE";exact4650.completedAt=new Date().toISOString();exact4650.lastLatencyMs=Date.now()-totalStart;return;
- }
- // Critical 4.65.1 handoff: no rediscovery occurs between this snapshot and validation.
- const results=await validateSnapshot4651(snapshot);
- exact4650={...exact4650,status:"COMPLETE",phase:"COMPLETE",completedAt:new Date().toISOString(),results,lastLatencyMs:Date.now()-totalStart};
+ exact4650={...exact4650,status:"RUNNING",phase:"STREAM_DISCOVERING_AND_VALIDATING",startedAt:new Date().toISOString(),completedAt:null,error:null,discoveryStartedAt:new Date().toISOString(),discoveryCompletedAt:null,validationStartedAt:null,validationCompletedAt:null,discoveryLatencyMs:null,validationLatencyMs:null,candidatesDetected:0,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],candidateSnapshot:[],economicsContext:null,firstValidationAt:null,firstValidationLatencyMs:null,streamCandidatesAccepted:0};
+ const totalStart=Date.now(),ds=Date.now(),accepted=new Set(),validationStarted=Date.now();
+ const economicsContext=await economicsContext4660();exact4650.economicsContext=economicsContext;
+ await runStreamingDiscovery4670(async c=>{
+  exact4650.candidatesDetected=stream4670.candidatesEmitted;
+  if(exact4650.streamCandidatesAccepted>=limit)return;
+  const canonical=canonicalCandidate4650(c);if(accepted.has(canonical))return;accepted.add(canonical);
+  const frozen=JSON.parse(JSON.stringify(c));exact4650.candidateSnapshot.push(frozen);exact4650.candidatesInput++;exact4650.streamCandidatesAccepted++;
+  if(!exact4650.validationStartedAt){exact4650.validationStartedAt=new Date().toISOString();exact4650.firstValidationAt=exact4650.validationStartedAt;exact4650.firstValidationLatencyMs=Date.now()-totalStart;}
+  exact4650.phase="STREAM_DISCOVERING_AND_VALIDATING";
+  const result=await validateOneStreaming4670(frozen,economicsContext);exact4650.results.push(result);
+ });
+ exact4650.discoveryCompletedAt=new Date().toISOString();exact4650.discoveryLatencyMs=Date.now()-ds;exact4650.candidatesDetected=stream4670.candidatesEmitted;
+ exact4650.validationCompletedAt=new Date().toISOString();exact4650.validationLatencyMs=exact4650.validationStartedAt?Date.now()-validationStarted:0;
+ exact4650.results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
+ exact4650.phase=exact4650.candidatesInput?"COMPLETE":"NO_POSITIVE_CANDIDATE_DURING_STREAM";
+ exact4650.status="COMPLETE";exact4650.completedAt=new Date().toISOString();exact4650.lastLatencyMs=Date.now()-totalStart;
 }
 function exactSummary4650(){
- return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,phase:exact4650.phase,error:exact4650.error,architecture:"SAME_RUN_DISCOVERY_TO_FROZEN_CANDIDATE_TO_ROUTE_LOCKED_SEQUENTIAL_EXACT_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,discoveryStartedAt:exact4650.discoveryStartedAt,discoveryCompletedAt:exact4650.discoveryCompletedAt,validationStartedAt:exact4650.validationStartedAt,validationCompletedAt:exact4650.validationCompletedAt,discoveryLatencyMs:exact4650.discoveryLatencyMs,validationLatencyMs:exact4650.validationLatencyMs,candidatesDetected:exact4650.candidatesDetected,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,candidateSnapshot:exact4650.candidateSnapshot,results:exact4650.results,economicsContext:exact4650.economicsContext,lastLatencyMs:exact4650.lastLatencyMs,limitations:{sameRunCandidateHandoff:true,noRediscoveryBetweenDetectionAndValidation:true,routeLockedValidation:true,aerodromePoolTypeLocked:true,uniswapFeeTierLocked:true,uniswapPoolIdentityVerified:true,exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,conservativeGasScreenIncluded:true,gasIncludedInFinalNetProfit:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,minNetProfitUsd:15,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+ return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,phase:exact4650.phase,error:exact4650.error,architecture:"INCREMENTAL_CURVE_COMPLETION_TO_EDGE_CACHE_TO_AFFECTED_CYCLE_EMISSION_TO_IMMEDIATE_ROUTE_LOCKED_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,discoveryStartedAt:exact4650.discoveryStartedAt,discoveryCompletedAt:exact4650.discoveryCompletedAt,validationStartedAt:exact4650.validationStartedAt,validationCompletedAt:exact4650.validationCompletedAt,discoveryLatencyMs:exact4650.discoveryLatencyMs,validationLatencyMs:exact4650.validationLatencyMs,candidatesDetected:exact4650.candidatesDetected,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,candidateSnapshot:exact4650.candidateSnapshot,results:exact4650.results,economicsContext:exact4650.economicsContext,firstValidationAt:exact4650.firstValidationAt,firstValidationLatencyMs:exact4650.firstValidationLatencyMs,streamCandidatesAccepted:exact4650.streamCandidatesAccepted,streamDiscovery:streamSummary4670(),lastLatencyMs:exact4650.lastLatencyMs,limitations:{streamingCandidateEmission:true,incrementalEdgeCache:true,affectedCycleRecompute:true,immediateValidationDuringDiscovery:true,sameRunCandidateHandoff:true,noRediscoveryBetweenDetectionAndValidation:true,routeLockedValidation:true,aerodromePoolTypeLocked:true,uniswapFeeTierLocked:true,uniswapPoolIdentityVerified:true,exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,conservativeGasScreenIncluded:true,gasIncludedInFinalNetProfit:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,minNetProfitUsd:15,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
 }
 app.get("/api/validator/crossvenue/start",(req,res)=>{
  if(exact4650.status==="RUNNING")return res.json({...exactSummary4650(),statusRoute:"/api/validator/crossvenue/status"});

@@ -1,0 +1,34 @@
+ArbiFlow Engine 4.67.0 — Incremental / Streaming Discovery
+
+ARCHITECTURE CHANGE
+- A qualified venue curve enters an in-memory edge cache as soon as that curve finishes.
+- Candidate detection runs immediately from the updated cache rather than waiting for all curves.
+- Candidate emission is restricted to cycles touching the changed edge.
+- Emitted candidates are frozen/deep-copied and duplicate emissions are suppressed.
+- The cross-venue validator accepts emitted candidates immediately while other discovery workers continue.
+- Route locking from 4.65.2 is preserved.
+- Conservative Base gas screen and $15 minimum-net-profit screen from 4.66.0 are preserved.
+- The existing full dynamic discovery endpoints are preserved for A/B diagnostics.
+
+NEW TELEMETRY
+- curvesTotal / curvesCompleted
+- quotesAttempted / quotesSucceeded / quoteFailures
+- usableEdges / rejectedCurves
+- candidatesEmitted / duplicateCandidatesSuppressed
+- firstCandidateAt / firstCandidateLatencyMs
+- validationQueueDepth
+- firstValidationAt / firstValidationLatencyMs
+- currentJobs / lastProgressAt / elapsedMs
+
+ENDPOINTS
+- /api/multivenue/stream/start
+- /api/multivenue/stream/status
+- /api/validator/crossvenue/start?limit=10
+- /api/validator/crossvenue/status
+
+SAFETY
+Read-only. executionEligible=false. mainnetBroadcast=false. fundsMovedOnMainnet=false.
+No approvals, signatures, swaps, or flash borrowing. Atomic executor gas estimation and
+atomic simulation remain gated behind an economics survivor.
+
+Validation: npm run check PASS.

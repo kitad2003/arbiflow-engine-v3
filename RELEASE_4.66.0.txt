@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.66.0 — Economics Screen + Discovery Progress
+ArbiFlow Engine 4.67.0 — Economics Screen + Discovery Progress
 
 ADDITIVE CHANGES
 - Preserves 4.65.2 same-run frozen candidate handoff and route locking.

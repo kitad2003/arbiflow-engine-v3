@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.66.0 — Local Base Liquidity Graph
+ArbiFlow Engine 4.67.0 — Local Base Liquidity Graph
 
 PURPOSE
 Connect proven live Base Uniswap V3 state to an incremental local graph and candidate-cycle detector.
