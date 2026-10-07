@@ -7249,7 +7249,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.45.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.46.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
