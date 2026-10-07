@@ -1,0 +1,39 @@
+ArbiFlow Engine 4.64.0 — Base Multi-Venue Graph Foundation
+
+ARCHITECTURE
+Base RPC -> independent Uniswap V3 and Aerodrome adapters -> normalized
+venue edges -> unified candidate graph -> cross-venue 2-edge + 3-edge cycles.
+
+WHY
+4.63.1 proved same-venue spot graph candidates did not survive executable
+size simulation. 4.64 broadens discovery to independent liquidity venues.
+
+NEW
+- Reuses existing direct Uniswap V3 and Aerodrome read-only adapters.
+- Builds normalized directed quote edges for WETH, cbBTC, cbETH, USDC, USDbC.
+- Uses small per-token probe sizes to capture executable venue-specific rates.
+- Detects 2-edge cycles only when the two legs use different venues.
+- Detects 3-edge cycles only when at least two venues are represented.
+- Keeps candidate classification explicitly preliminary:
+  MULTI_VENUE_PROBE_CANDIDATE_REQUIRES_EXACT_ROUND_TRIP_VALIDATION
+
+ENDPOINTS
+GET /api/multivenue/base/start
+GET /api/multivenue/base/status
+GET /api/multivenue/base/edges
+
+PRESERVED
+4.61 live Base market state
+4.62 local graph
+4.63/4.63.1 V3 candidate simulator
+older diagnostics and fork safety gates
+
+NEXT GATE
+Exact sequential cross-venue round-trip validation at multiple sizes.
+Do not add gas/flash-loan economics until a candidate survives exact quotes.
+
+SAFETY
+Read-only. No approvals, signatures, swaps, broadcast, or funds movement.
+executionEligible=false.
+
+Validation: npm run check PASS.

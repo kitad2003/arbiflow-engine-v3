@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.63.1";
+const VERSION = "4.64.0";
 
 /*
 =========================================================
@@ -8419,6 +8419,75 @@ function simulatorSummary4630(){
 }
 app.get("/api/simulator/base/start",(req,res)=>{if(simulator4630.status==="RUNNING")return res.json({...simulatorSummary4630(),statusRoute:"/api/simulator/base/status"});const limit=Number(req.query.limit||20);setImmediate(async()=>{try{await runSimulator4630(limit);}catch(e){simulator4630.status="ERROR";simulator4630.completedAt=new Date().toISOString();simulator4630.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/simulator/base/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/simulator/base/status",(req,res)=>res.json(simulatorSummary4630()));
+
+
+/*
+=========================================================
+ArbiFlow 4.64.0 — BASE MULTI-VENUE GRAPH FOUNDATION
+Uniswap V3 + Aerodrome normalized quote edges, with cross-venue
+2-edge and 3-edge candidate detection. Read-only discovery only.
+=========================================================
+*/
+const MV4640_TOKENS=["WETH","cbBTC","cbETH","USDC","USDbC"];
+const MV4640_PROBES={WETH:0.001,cbETH:0.001,cbBTC:0.00005,USDC:5,USDbC:5};
+let multivenue4640={status:"IDLE",startedAt:null,completedAt:null,error:null,edges:[],candidates:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,lastLatencyMs:null,executionEligible:false};
+
+function normalizedRate4640(amountIn,amountOut){const a=Number(amountIn),b=Number(amountOut);return Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0?b/a:0;}
+async function quoteUv3Edge4640(from,to,probe){
+ try{
+  const q=await uniswapV3BestQuote({sellToken:from,buyToken:to,sellAmount:probe});
+  const best=q.best;if(!best)return null;
+  return {venue:"UNISWAP_V3",from,to,probeInput:probe,probeOutput:best.buyAmount,rate:normalizedRate4640(probe,best.buyAmount),feeTier:best.feeTier,pool:best.pool||null,liquidityModel:"CONCENTRATED_V3_QUOTER",quoteTimestamp:best.quoteTimestamp||Date.now(),readOnly:true};
+ }catch(e){return null;}
+}
+async function quoteAeroEdge4640(from,to,probe){
+ try{
+  const q=await aerodromeBestQuote({sellToken:from,buyToken:to,sellAmount:probe});
+  const best=q.best;if(!best)return null;
+  return {venue:"AERODROME",from,to,probeInput:probe,probeOutput:best.buyAmount,rate:normalizedRate4640(probe,best.buyAmount),poolType:best.poolType,router:best.router,factory:best.factory,liquidityModel:"AERODROME_DIRECT_ROUTER",quoteTimestamp:best.quoteTimestamp||Date.now(),readOnly:true};
+ }catch(e){return null;}
+}
+function detectMultiVenueCycles4640(edges){
+ const byFrom=new Map();for(const e of edges){if(!byFrom.has(e.from))byFrom.set(e.from,[]);byFrom.get(e.from).push(e);}
+ const out=[],seen=new Set();
+ // 2-edge cycles: require independent venues.
+ for(const a of edges)for(const b of byFrom.get(a.to)||[]){
+  if(b.to!==a.from||a.venue===b.venue)continue;
+  const key=[a.from,a.to].sort().join("|")+"|"+[a.venue,b.venue].sort().join("|");if(seen.has("2:"+key))continue;seen.add("2:"+key);
+  const mult=a.rate*b.rate,spread=(mult-1)*100;if(spread<=0)continue;
+  out.push({hops:2,path:[a.from,a.to,a.from],venues:[a.venue,b.venue],edges:[a,b],probeGrossMultiplier:mult,probeGrossSpreadPct:spread,classification:"MULTI_VENUE_PROBE_CANDIDATE_REQUIRES_EXACT_ROUND_TRIP_VALIDATION",executionEligible:false});
+ }
+ // 3-edge cycles: require at least two venues.
+ for(const a of edges)for(const b of byFrom.get(a.to)||[])for(const c of byFrom.get(b.to)||[]){
+  if(c.to!==a.from||new Set([a.venue,b.venue,c.venue]).size<2)continue;
+  const signature=[`${a.venue}:${a.from}>${a.to}`,`${b.venue}:${b.from}>${b.to}`,`${c.venue}:${c.from}>${c.to}`].sort().join("|");if(seen.has("3:"+signature))continue;seen.add("3:"+signature);
+  const mult=a.rate*b.rate*c.rate,spread=(mult-1)*100;if(spread<=0)continue;
+  out.push({hops:3,path:[a.from,a.to,b.to,a.from],venues:[a.venue,b.venue,c.venue],edges:[a,b,c],probeGrossMultiplier:mult,probeGrossSpreadPct:spread,classification:"MULTI_VENUE_PROBE_CANDIDATE_REQUIRES_EXACT_ROUND_TRIP_VALIDATION",executionEligible:false});
+ }
+ return out.sort((a,b)=>b.probeGrossSpreadPct-a.probeGrossSpreadPct).slice(0,100);
+}
+async function runMultiVenue4640(){
+ if(multivenue4640.status==="RUNNING")return;
+ const rpc=RPC_URLS.base;if(!rpc)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ multivenue4640={...multivenue4640,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,edges:[],candidates:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0};
+ const started=Date.now(),jobs=[];
+ for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME"])jobs.push({from,to,venue,probe:MV4640_PROBES[from]});}
+ const edges=await mapLimit4501(jobs,4,async j=>{
+  multivenue4640.quotesAttempted++;
+  const e=j.venue==="UNISWAP_V3"?await quoteUv3Edge4640(j.from,j.to,j.probe):await quoteAeroEdge4640(j.from,j.to,j.probe);
+  if(e)multivenue4640.quotesSucceeded++;else multivenue4640.quoteFailures++;return e;
+ });
+ const valid=edges.filter(Boolean),candidates=detectMultiVenueCycles4640(valid);
+ multivenue4640={...multivenue4640,status:"COMPLETE",completedAt:new Date().toISOString(),edges:valid,candidates,lastLatencyMs:Date.now()-started};
+}
+function multiVenueSummary4640(includeEdges=false){
+ const venues={};for(const e of multivenue4640.edges)venues[e.venue]=(venues[e.venue]||0)+1;
+ const hopCounts={twoEdge:multivenue4640.candidates.filter(x=>x.hops===2).length,threeEdge:multivenue4640.candidates.filter(x=>x.hops===3).length};
+ return {success:multivenue4640.status!=="ERROR",version:VERSION,status:multivenue4640.status,error:multivenue4640.error,architecture:"BASE_UNISWAP_V3_PLUS_AERODROME_TO_NORMALIZED_MULTI_VENUE_GRAPH_TO_2_AND_3_EDGE_CYCLE_DETECTION",startedAt:multivenue4640.startedAt,completedAt:multivenue4640.completedAt,quotesAttempted:multivenue4640.quotesAttempted,quotesSucceeded:multivenue4640.quotesSucceeded,quoteFailures:multivenue4640.quoteFailures,edgesBuilt:multivenue4640.edges.length,edgesByVenue:venues,candidateCycles:multivenue4640.candidates.length,candidateHops:hopCounts,candidates:multivenue4640.candidates,lastLatencyMs:multivenue4640.lastLatencyMs,...(includeEdges?{edges:multivenue4640.edges}:{}),limitations:{probeSizedGraph:true,independentVenueRequiredFor2Edge:true,exactCandidateRoundTripValidation:"NEXT_GATE",gasIncluded:false,flashLoanFeeIncluded:false,netProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/multivenue/base/start",(req,res)=>{if(multivenue4640.status==="RUNNING")return res.json({...multiVenueSummary4640(false),statusRoute:"/api/multivenue/base/status"});setImmediate(async()=>{try{await runMultiVenue4640();}catch(e){multivenue4640.status="ERROR";multivenue4640.completedAt=new Date().toISOString();multivenue4640.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/multivenue/base/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/multivenue/base/status",(req,res)=>res.json(multiVenueSummary4640(false)));
+app.get("/api/multivenue/base/edges",(req,res)=>res.json(multiVenueSummary4640(true)));
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.
