@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.53.1";
+const VERSION = "4.54.0";
 
 /*
 =========================================================
@@ -7557,6 +7557,20 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 
+
+/* 4.54.0 runtime health for the pre-existing PancakeSwap V3 Base adapter. */
+async function pancakeV3Health4540(){
+  const started=Date.now();
+  if(!RPC_URLS.base)return {configured:false,reachable:false,contractReadable:false,network:"Base",expectedChainId:8453,venue:"PancakeSwap V3",quoter:PANCAKESWAP_V3_BASE.quoter,factory:PANCAKESWAP_V3_BASE.factory,readOnly:true,error:"BASE_RPC_URL is not configured."};
+  try{
+    const provider=getBaseProvider();
+    const [net,qCode,fCode]=await Promise.all([provider.getNetwork(),provider.getCode(PANCAKESWAP_V3_BASE.quoter),provider.getCode(PANCAKESWAP_V3_BASE.factory)]);
+    const q=new Contract(PANCAKESWAP_V3_BASE.quoter,["function factory() view returns (address)"],provider);
+    const qFactory=await q.factory.staticCall();
+    return {configured:true,reachable:true,contractReadable:qCode!=="0x"&&fCode!=="0x",network:"Base",expectedChainId:8453,reportedChainId:Number(net.chainId),chainIdMatches:Number(net.chainId)===8453,venue:"PancakeSwap V3",quoter:PANCAKESWAP_V3_BASE.quoter,factory:PANCAKESWAP_V3_BASE.factory,quoterFactory:String(qFactory),factoryMatches:String(qFactory).toLowerCase()===PANCAKESWAP_V3_BASE.factory.toLowerCase(),quoterReadable:qCode!=="0x",factoryReadable:fCode!=="0x",feeTiers:PANCAKESWAP_V3_BASE.feeTiers,latencyMs:Date.now()-started,readOnly:true,error:null};
+  }catch(e){return {configured:true,reachable:false,contractReadable:false,network:"Base",expectedChainId:8453,venue:"PancakeSwap V3",quoter:PANCAKESWAP_V3_BASE.quoter,factory:PANCAKESWAP_V3_BASE.factory,latencyMs:Date.now()-started,readOnly:true,error:e?.shortMessage||e?.message||String(e)};}
+}
+
 /*
 =========================================================
 ARBIFLOW 4.53.0 MULTI-DEX ADAPTER FOUNDATION - READ ONLY
@@ -7574,6 +7588,7 @@ const CROSS_DEX_ASSETS_4520 = ["WETH","cbBTC","DAI"];
 async function venueQuote4520(venue,sellToken,buyToken,sellAmount){
   if(venue==="UNISWAP_V3") return (await uniswapV3BestQuote({sellToken,buyToken,sellAmount})).best;
   if(venue==="AERODROME") return (await aerodromeBestQuote({sellToken,buyToken,sellAmount})).best;
+  if(venue==="PANCAKESWAP_V3") return await pancakeSwapV3Quote430(sellToken,buyToken,sellAmount);
   throw new Error(`Unsupported venue ${venue}`);
 }
 
@@ -7591,12 +7606,12 @@ async function crossDexRoundTrip4520({asset,sizeUsd,buyVenue,sellVenue}){
 
 async function multiDexCrossVenueDiagnostic4520(){
   const startedAt=Date.now();
-  const [aeroHealth,uniHealth]=await Promise.all([aerodromeHealth(),uniswapV3Health()]);
+  const [aeroHealth,uniHealth,pancakeHealth]=await Promise.all([aerodromeHealth(),uniswapV3Health(),pancakeV3Health4540()]);
   const jobs=[];
   for(const asset of CROSS_DEX_ASSETS_4520){
     for(const sizeUsd of CROSS_DEX_PROBE_SIZES_4520){
-      jobs.push({asset,sizeUsd,buyVenue:"UNISWAP_V3",sellVenue:"AERODROME"});
-      jobs.push({asset,sizeUsd,buyVenue:"AERODROME",sellVenue:"UNISWAP_V3"});
+      const venues=["UNISWAP_V3","AERODROME","PANCAKESWAP_V3"];
+      for(const buyVenue of venues)for(const sellVenue of venues)if(buyVenue!==sellVenue)jobs.push({asset,sizeUsd,buyVenue,sellVenue});
     }
   }
   const results=[];
@@ -7607,7 +7622,7 @@ async function multiDexCrossVenueDiagnostic4520(){
   await Promise.all(workers);
   const quoted=results.filter(x=>x.exactReadOnlyQuotes);
   const positive=quoted.filter(x=>x.positiveBeforeGas).sort((a,b)=>b.roundTripPnlBeforeGasUsd-a.roundTripPnlBeforeGasUsd);
-  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"NORMALIZED_UNISWAP_V3_PLUS_AERODROME_EXACT_READ_ONLY_CROSS_DEX_GRAPH",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth}],coverage:{chains:1,venueAdapters:2,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,routeDirections:2,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,positiveBeforeGas:positive.length},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"NORMALIZED_THREE_VENUE_BASE_EXACT_READ_ONLY_CROSS_DEX_GRAPH",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth},{id:"PANCAKESWAP_V3",chain:"Base",health:pancakeHealth}],coverage:{chains:1,venueAdapters:3,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,routeDirections:6,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,positiveBeforeGas:positive.length},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/cross-dex-base",async(req,res)=>{try{res.json(await multiDexCrossVenueDiagnostic4520());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7687,11 +7702,11 @@ async function crossDexEconomicDiagnostic4531(){
   const eligible=results.filter(x=>x.executionEligibility==="SIMULATION_ELIGIBLE").sort((a,b)=>Number(b.estimatedBestNetUsd||-Infinity)-Number(a.estimatedBestNetUsd||-Infinity));
   const depthRejected=results.filter(x=>x.economicClassification==="REJECTED_INSUFFICIENT_EXECUTABLE_DEPTH").length;
   const netRejected=results.filter(x=>x.economicClassification==="REJECTED_NET_BELOW_MINIMUM").length;
-  return {success:true,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"UNISWAP_V3_PLUS_AERODROME_TO_DEPTH_REAL_NATIVE_USD_GAS_DIRECT_PROTOCOL_FUNDING_MIN_NET_SIMULATION_GATE",minimumNetProfitUsd:CROSS_DEX_MIN_NET_USD_4530,minimumRoundTripRetentionPct:CROSS_DEX_MIN_RETENTION_PCT_4530,coverage:base.coverage,adapters:base.adapters,economics:{modeledRoundTripGasUnits:Number(CROSS_DEX_GAS_UNITS_4530),nativeGasToken:"ETH",nativeUsd:round(nativeUsd,6),nativeUsdSource:nativeRef.source,modeledGasNative:round(gasNative,10),modeledGasUsd:round(modeledGasUsd,6),aavePremiumBps:aaveBps,morphoFlashFeeBps:0},fundingCapacity:{...fundingCapacity,morphoAvailableUsdApprox:round(morphoUsd,6),aaveAvailableUsdApprox:round(aaveUsd,6)},plumbingChecks:{nativeUsdNonZero:nativeUsd>0,modeledGasUsdNonZero:modeledGasUsd>0,morphoCapacityRead:Number.isFinite(morphoUsd)&&morphoUsd>0,aaveCapacityRead:Number.isFinite(aaveUsd)&&aaveUsd>0,passed:nativeUsd>0&&modeledGasUsd>0&&morphoUsd>0&&aaveUsd>0},gates:{jobsEvaluated:results.length,depthRejected,netRejected,simulationEligible:eligible.length,transactionSimulated:0,executionEligible:0},topSimulationEligible:eligible.slice(0,10),results,importantLimitations:{gas:"LIVE_GAS_PRICE_TIMES_MODELED_UNITS_NOT_TRANSACTION_SIMULATED",mevModeled:false,transactionSimulationPerformed:false,executionEligibility:false,note:"SIMULATION_ELIGIBLE means only that read-only exact quotes pass depth, modeled gas, live read-only funding-capacity and $15 estimated-net gates. It is not approval to trade and is not an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+  return {success:true,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"THREE_VENUE_BASE_GRAPH_TO_DEPTH_REAL_NATIVE_USD_GAS_DIRECT_PROTOCOL_FUNDING_MIN_NET_SIMULATION_GATE",minimumNetProfitUsd:CROSS_DEX_MIN_NET_USD_4530,minimumRoundTripRetentionPct:CROSS_DEX_MIN_RETENTION_PCT_4530,coverage:base.coverage,adapters:base.adapters,economics:{modeledRoundTripGasUnits:Number(CROSS_DEX_GAS_UNITS_4530),nativeGasToken:"ETH",nativeUsd:round(nativeUsd,6),nativeUsdSource:nativeRef.source,modeledGasNative:round(gasNative,10),modeledGasUsd:round(modeledGasUsd,6),aavePremiumBps:aaveBps,morphoFlashFeeBps:0},fundingCapacity:{...fundingCapacity,morphoAvailableUsdApprox:round(morphoUsd,6),aaveAvailableUsdApprox:round(aaveUsd,6)},plumbingChecks:{nativeUsdNonZero:nativeUsd>0,modeledGasUsdNonZero:modeledGasUsd>0,morphoCapacityRead:Number.isFinite(morphoUsd)&&morphoUsd>0,aaveCapacityRead:Number.isFinite(aaveUsd)&&aaveUsd>0,passed:nativeUsd>0&&modeledGasUsd>0&&morphoUsd>0&&aaveUsd>0},gates:{jobsEvaluated:results.length,depthRejected,netRejected,simulationEligible:eligible.length,transactionSimulated:0,executionEligible:0},topSimulationEligible:eligible.slice(0,10),results,importantLimitations:{gas:"LIVE_GAS_PRICE_TIMES_MODELED_UNITS_NOT_TRANSACTION_SIMULATED",mevModeled:false,transactionSimulationPerformed:false,executionEligibility:false,note:"SIMULATION_ELIGIBLE means only that read-only exact quotes pass depth, modeled gas, live read-only funding-capacity and $15 estimated-net gates. It is not approval to trade and is not an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/cross-dex-economic",async(req,res)=>{try{res.json(await crossDexEconomicDiagnostic4531());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.53.1_ECONOMIC_PLUMBING_FIX",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.54.0_BASE_MULTI_DEX_EXPANSION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7700,7 +7715,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.53.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.54.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
