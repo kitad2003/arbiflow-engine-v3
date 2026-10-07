@@ -1,0 +1,21 @@
+ArbiFlow Engine 4.59.4 — Cross-DEX Opportunity Graph
+
+Additive release. 4.59.3 normalized multichain graph and candidate scanner remain intact.
+
+New verified cross-DEX lane:
+- Base
+- Uniswap V3 <-> Aerodrome
+- Direct venue quotes, not aggregator discovery
+- Both venue directions
+- Default test sizes: $100, $500, $2500
+- Stable base tokens versus configured non-stable Base assets
+- Two-leg round-trip gross P/L ranking
+- Quote failure classification
+- No signing, no broadcast, no funds moved
+- Positive gross is NOT execution approval. Gas, flash-loan cost, slippage buffer and fork simulation remain required.
+
+Endpoints:
+GET /api/opportunities/crossdex/start
+GET /api/opportunities/crossdex/status
+
+Validation: npm run check PASS.

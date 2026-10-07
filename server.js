@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.59.3";
+const VERSION = "4.59.4";
 
 /*
 =========================================================
@@ -8028,6 +8028,54 @@ async function runOpportunityGraph4590(){
 app.get("/api/opportunities/graph/start",(req,res)=>{if(opportunityGraphState4590.status!=="RUNNING")setImmediate(()=>runOpportunityGraph4590());res.json({success:true,version:VERSION,status:opportunityGraphState4590.status==="RUNNING"?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/opportunities/graph/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/opportunities/graph/status",(req,res)=>{const st=opportunityGraphState4590;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
+
+
+/* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
+   First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.
+   Uses the already-present direct venue quote adapters; no aggregator is used
+   for discovery and no transaction is signed or broadcast. */
+let crossDexState4594={status:"IDLE",startedAt:null,completedAt:null,error:null,result:null,progress:{pairsConsidered:0,routeJobsBuilt:0,routeJobsCompleted:0,quoteFailures:0,quoteFailureClasses:{},positiveGross:0,elapsedMs:0}};
+
+function crossDexSizes4594(){
+ const raw=String(process.env.ARBIFLOW_CROSSDEX_SIZES_USD||"100,500,2500").split(",").map(Number).filter(x=>Number.isFinite(x)&&x>0);
+ return [...new Set(raw)].sort((a,b)=>a-b).slice(0,5);
+}
+function crossDexPairs4594(){
+ const n=NETWORKS.base, st=Object.values(n.tokens).filter(x=>x.stable), assets=Object.values(n.tokens).filter(x=>!x.stable);
+ const out=[]; for(const b of st)for(const a of assets)out.push({base:b.symbol,asset:a.symbol}); return out;
+}
+async function crossDexQuoteLeg4594(venue,sellToken,buyToken,sellAmount){
+ if(venue==="UNISWAP_V3")return (await uniswapV3BestQuote({sellToken,buyToken,sellAmount})).best;
+ if(venue==="AERODROME")return (await aerodromeBestQuote({sellToken,buyToken,sellAmount})).best;
+ throw new Error("CROSSDEX_VENUE_NOT_SUPPORTED");
+}
+async function crossDexOpportunityScan4594(){
+ const started=Date.now(),progress=crossDexState4594.progress,sizes=crossDexSizes4594(),pairs=crossDexPairs4594();
+ progress.pairsConsidered=pairs.length;
+ const jobs=[]; for(const pair of pairs)for(const usd of sizes){
+  jobs.push({...pair,usd,buyVenue:"UNISWAP_V3",sellVenue:"AERODROME"});
+  jobs.push({...pair,usd,buyVenue:"AERODROME",sellVenue:"UNISWAP_V3"});
+ }
+ progress.routeJobsBuilt=jobs.length;
+ const rows=await mapLimit4501(jobs,4,async j=>{try{
+  const first=await withTimeout4501(crossDexQuoteLeg4594(j.buyVenue,j.base,j.asset,j.usd),12000,"CROSSDEX_BUY_TIMEOUT");
+  const second=await withTimeout4501(crossDexQuoteLeg4594(j.sellVenue,j.asset,j.base,first.buyAmount),12000,"CROSSDEX_SELL_TIMEOUT");
+  const finalUsd=Number(second.buyAmount),grossUsd=finalUsd-j.usd,grossReturnPct=grossUsd/j.usd*100;
+  progress.routeJobsCompleted++; if(grossUsd>0)progress.positiveGross++;
+  return {chain:"base",pair:`${j.base}/${j.asset}`,base:j.base,asset:j.asset,sizeUsd:j.usd,buyVenue:j.buyVenue,sellVenue:j.sellVenue,intermediateAmount:first.buyAmount,finalUsd:round(finalUsd,8),grossUsd:round(grossUsd,8),grossReturnPct:round(grossReturnPct,8),positiveGross:grossUsd>0,buyDetail:first,sellDetail:second};
+ }catch(e){progress.quoteFailures++;const cls=classifyQuoteFailure4580(e);progress.quoteFailureClasses[cls]=(progress.quoteFailureClasses[cls]||0)+1;return null;}});
+ progress.elapsedMs=Date.now()-started;
+ const valid=rows.filter(Boolean),ranked=valid.filter(x=>x.positiveGross).sort((a,b)=>b.grossUsd-a.grossUsd);
+ return {success:true,version:VERSION,classification:"CROSS_DEX_OPPORTUNITY_GRAPH_COMPLETE",architecture:"DIRECT_UNISWAP_V3_AND_AERODROME_QUOTES_TO_TWO_LEG_ROUND_TRIP_VALIDATION",scope:{chain:"base",venues:["Uniswap V3","Aerodrome"],pairs:pairs.map(x=>`${x.base}/${x.asset}`),sizesUsd:sizes,bothVenueDirections:true},progress:{...progress},testedRoutes:valid.length,rankedOpportunities:ranked.slice(0,100),positiveOpportunityCount:ranked.length,nextGate:"GAS_FLASH_LOAN_SLIPPAGE_AND_FORK_SIMULATION_REQUIRED_BEFORE_EXECUTION",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
+}
+async function runCrossDex4594(){
+ if(crossDexState4594.status==="RUNNING")return;
+ crossDexState4594={status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,result:crossDexState4594.result,progress:{pairsConsidered:0,routeJobsBuilt:0,routeJobsCompleted:0,quoteFailures:0,quoteFailureClasses:{},positiveGross:0,elapsedMs:0}};
+ try{const result=await crossDexOpportunityScan4594();crossDexState4594={...crossDexState4594,status:"COMPLETE",completedAt:new Date().toISOString(),result};}
+ catch(e){crossDexState4594={...crossDexState4594,status:"ERROR",completedAt:new Date().toISOString(),error:e?.message||String(e)};}
+}
+app.get("/api/opportunities/crossdex/start",(req,res)=>{const running=crossDexState4594.status==="RUNNING";if(!running)setImmediate(()=>runCrossDex4594());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/opportunities/crossdex/status",scope:"Base: Uniswap V3 <-> Aerodrome",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/opportunities/crossdex/status",(req,res)=>{const st=crossDexState4594;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,progress:st.progress,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
 /* ArbiFlow 4.59.2 — local economics + route pruning before exact validation.
    The graph spread is a screening signal only. We conservatively remove fee-tier
