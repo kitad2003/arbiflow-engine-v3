@@ -1,0 +1,37 @@
+ArbiFlow Engine 4.61.0 — Live Base Market State
+
+PURPOSE
+Advance from static Base bootstrap snapshots to continuously reconciled Base Uniswap V3 market state.
+
+ARCHITECTURE
+Base block-consistent bootstrap registry
+-> Base head polling
+-> Swap/Mint/Burn eth_getLogs reconciliation
+-> changed-pool-only slot0/liquidity refresh
+-> in-memory state update
+-> stale-state monitoring
+-> head-regression/rebootstrap safety gate
+
+ENDPOINTS
+GET /api/market-state/live/base/start
+GET /api/market-state/live/base/status
+GET /api/market-state/live/base/stop
+GET /api/market-state/live/base/pools
+
+SAFETY
+- Requires block-consistent Base bootstrap pools before live mode starts.
+- HTTP RPC polling is explicitly identified; no fake WebSocket claim.
+- Event reconciliation is read-only.
+- Changed pools are refreshed at their event block.
+- Head regression triggers STALE_REBOOTSTRAP_REQUIRED.
+- executionEligible remains false.
+- No signing, transaction broadcasting, approvals or mainnet fund movement.
+
+PRESERVED
+4.60.2 bootstrap diagnostics and integrity gates.
+4.59.4 cross-DEX diagnostic scanner and older endpoints.
+
+NEXT GATE
+Verify live Base head advances, logs reconcile, changed pools refresh, and state remains current before building the local liquidity graph/arbitrage detector.
+
+Validation: npm run check PASS.

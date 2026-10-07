@@ -14,7 +14,8 @@ const {
   parseUnits,
   formatUnits,
   Interface,
-  keccak256
+  keccak256,
+  id
 } = require("ethers");
 
 const app = express();
@@ -43,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.60.2";
+const VERSION = "4.61.0";
 
 /*
 =========================================================
@@ -8123,6 +8124,97 @@ async function runMarketBootstrap4600(){
 app.get("/api/market-state/bootstrap/start",(req,res)=>{const running=marketState4600.status==="RUNNING";if(!running)setImmediate(()=>runMarketBootstrap4600());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/market-state/bootstrap/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/market-state/bootstrap/status",(req,res)=>{const summary=marketStateSummary4600();res.json({...summary,result:marketState4600.result||null});});
 app.get("/api/market-state/registry",(req,res)=>{const chain=String(req.query.chain||"").toLowerCase(),limit=Math.max(1,Math.min(500,Number(req.query.limit||100)));let rows=[...marketState4600.registry.values()];if(chain)rows=rows.filter(x=>x.chain===chain);res.json({success:true,version:VERSION,status:marketState4600.status,count:rows.length,returned:Math.min(rows.length,limit),pools:rows.slice(0,limit),synchronization:{eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",executionEligible:false},readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+
+
+/*
+=========================================================
+ArbiFlow 4.61.0 — LIVE BASE MARKET STATE
+Read-only Base-first event reconciliation. Uses block polling + eth_getLogs
+over the configured Base RPC so it works with HTTP RPC endpoints.
+Only block-consistent Base bootstrap pools are admitted.
+=========================================================
+*/
+const V3_SWAP_TOPIC_4610=id("Swap(address,address,int256,int256,uint160,uint128,int24)");
+const V3_MINT_TOPIC_4610=id("Mint(address,address,int24,int24,uint128,uint256,uint256)");
+const V3_BURN_TOPIC_4610=id("Burn(address,int24,int24,uint128,uint256,uint256)");
+const V3_EVENT_IFACE_4610=new Interface([
+ "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)",
+ "event Mint(address sender,address indexed owner,int24 indexed tickLower,int24 indexed tickUpper,uint128 amount,uint256 amount0,uint256 amount1)",
+ "event Burn(address indexed owner,int24 indexed tickLower,int24 indexed tickUpper,uint128 amount,uint256 amount0,uint256 amount1)"
+]);
+let liveBase4610={status:"IDLE",startedAt:null,stoppedAt:null,error:null,timer:null,provider:null,lastHeadBlock:null,lastProcessedBlock:null,lastHeadAt:null,lastEventAt:null,
+ bootstrapPools:0,trackedPools:0,blocksObserved:0,blocksReconciled:0,logsReceived:0,swapEvents:0,mintEvents:0,burnEvents:0,poolsUpdated:0,reconciliationErrors:0,reorgSignals:0,stalePools:0,
+ poolLastEvent:new Map(),recentErrors:[],recentEvents:[],executionEligible:false};
+function liveBaseSummary4610(){
+ const now=Date.now(),basePools=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&x.source==="BLOCK_TAGGED_RPC_BOOTSTRAP");
+ const ages=basePools.map(x=>Math.max(0,now-Date.parse(x.snapshotAt||0))).filter(Number.isFinite);
+ return {success:liveBase4610.status!=="ERROR",version:VERSION,status:liveBase4610.status,error:liveBase4610.error,architecture:"BASE_BLOCK_POLLING_TO_LOG_RECONCILIATION_TO_CHANGED_POOL_STATE_REFRESH",
+  base:{bootstrapPools:liveBase4610.bootstrapPools,trackedPools:liveBase4610.trackedPools,lastHeadBlock:liveBase4610.lastHeadBlock,lastProcessedBlock:liveBase4610.lastProcessedBlock,lastHeadAt:liveBase4610.lastHeadAt,lastEventAt:liveBase4610.lastEventAt,
+   blocksObserved:liveBase4610.blocksObserved,blocksReconciled:liveBase4610.blocksReconciled,logsReceived:liveBase4610.logsReceived,swapEvents:liveBase4610.swapEvents,mintEvents:liveBase4610.mintEvents,burnEvents:liveBase4610.burnEvents,poolsUpdated:liveBase4610.poolsUpdated,reconciliationErrors:liveBase4610.reconciliationErrors,reorgSignals:liveBase4610.reorgSignals,stalePools:liveBase4610.stalePools,
+   oldestStateAgeMs:ages.length?Math.max(...ages):null,newestStateAgeMs:ages.length?Math.min(...ages):null},
+  synchronization:{bootstrapRequired:true,eventReconciliation:liveBase4610.status==="RUNNING"?"ACTIVE":"INACTIVE",websocketSubscriptions:"HTTP_RPC_BLOCK_POLLING_ACTIVE",reorgRollback:"DETECTION_AND_REBOOTSTRAP_GATE",tickStateCache:"NOT_ACTIVE",executionEligible:false},
+  recentErrors:liveBase4610.recentErrors.slice(-10),recentEvents:liveBase4610.recentEvents.slice(-20),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+function pushLiveError4610(e){liveBase4610.recentErrors.push({at:new Date().toISOString(),error:e?.message||String(e)});if(liveBase4610.recentErrors.length>50)liveBase4610.recentErrors.shift();}
+async function refreshBasePool4610(provider,poolAddress,blockNumber,eventType){
+ const key=`base:${String(poolAddress).toLowerCase()}`,row=marketState4600.registry.get(key);if(!row)return false;
+ const pc=new Contract(poolAddress,UNISWAP_V3_POOL_READ_ABI_4470,provider);
+ const [slot0,liq]=await withTimeout4501(Promise.all([pc.slot0({blockTag:blockNumber}),pc.liquidity({blockTag:blockNumber})]),6000,"BASE_LIVE_POOL_REFRESH");
+ row.sqrtPriceX96=(slot0.sqrtPriceX96??slot0[0]).toString();row.tick=Number(slot0.tick??slot0[1]);row.liquidityRaw=liq.toString();row.snapshotBlock=blockNumber;row.snapshotAt=new Date().toISOString();row.source="LIVE_BASE_EVENT_RECONCILED";row.stateFreshness="LIVE_BLOCK_CONSISTENT";row.lastEventType=eventType;row.executionEligible=false;
+ marketState4600.registry.set(key,row);marketState4600.lastUpdateAt=row.snapshotAt;liveBase4610.poolLastEvent.set(key,{blockNumber,eventType,at:row.snapshotAt});liveBase4610.poolsUpdated++;return true;
+}
+async function reconcileBaseRange4610(provider,fromBlock,toBlock,addresses){
+ if(fromBlock>toBlock)return;
+ const maxSpan=250;
+ for(let from=fromBlock;from<=toBlock;from+=maxSpan){
+  const to=Math.min(toBlock,from+maxSpan-1);
+  const logs=await withTimeout4501(provider.getLogs({fromBlock:from,toBlock:to,address:addresses,topics:[[V3_SWAP_TOPIC_4610,V3_MINT_TOPIC_4610,V3_BURN_TOPIC_4610]]}),10000,"BASE_LIVE_GETLOGS");
+  liveBase4610.logsReceived+=logs.length;
+  const changed=new Map();
+  for(const log of logs){
+   let type="UNKNOWN";if(log.topics[0]===V3_SWAP_TOPIC_4610){type="SWAP";liveBase4610.swapEvents++;}else if(log.topics[0]===V3_MINT_TOPIC_4610){type="MINT";liveBase4610.mintEvents++;}else if(log.topics[0]===V3_BURN_TOPIC_4610){type="BURN";liveBase4610.burnEvents++;}
+   changed.set(String(log.address).toLowerCase(),{address:log.address,blockNumber:Number(log.blockNumber),type});
+   liveBase4610.recentEvents.push({blockNumber:Number(log.blockNumber),pool:log.address,type,txHash:log.transactionHash});if(liveBase4610.recentEvents.length>100)liveBase4610.recentEvents.shift();
+  }
+  for(const ev of changed.values())try{await refreshBasePool4610(provider,ev.address,ev.blockNumber,ev.type);}catch(e){liveBase4610.reconciliationErrors++;pushLiveError4610(e);}
+  liveBase4610.blocksReconciled+=to-from+1;liveBase4610.lastProcessedBlock=to;
+ }
+}
+async function liveBaseTick4610(){
+ if(liveBase4610.status!=="RUNNING")return;
+ try{
+  const provider=liveBase4610.provider,head=await withTimeout4501(provider.getBlockNumber(),6000,"BASE_LIVE_HEAD");
+  if(liveBase4610.lastHeadBlock!==null&&head<liveBase4610.lastHeadBlock){liveBase4610.reorgSignals++;liveBase4610.status="STALE_REBOOTSTRAP_REQUIRED";liveBase4610.error=`BASE_HEAD_REGRESSION_${liveBase4610.lastHeadBlock}_TO_${head}`;return;}
+  if(liveBase4610.lastHeadBlock===null||head>liveBase4610.lastHeadBlock){liveBase4610.blocksObserved+=liveBase4610.lastHeadBlock===null?1:head-liveBase4610.lastHeadBlock;liveBase4610.lastHeadBlock=head;liveBase4610.lastHeadAt=new Date().toISOString();}
+  const rows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&["BLOCK_TAGGED_RPC_BOOTSTRAP","LIVE_BASE_EVENT_RECONCILED"].includes(x.source));
+  const addresses=rows.map(x=>x.pool);liveBase4610.trackedPools=addresses.length;
+  if(addresses.length){
+   const start=liveBase4610.lastProcessedBlock===null?head:liveBase4610.lastProcessedBlock+1;
+   if(start<=head)await reconcileBaseRange4610(provider,start,head,addresses);
+  }
+  const now=Date.now(),staleMs=Number(process.env.ARBIFLOW_BASE_STALE_MS||30000);
+  liveBase4610.stalePools=rows.filter(x=>now-Date.parse(x.snapshotAt||0)>staleMs).length;
+ }catch(e){liveBase4610.reconciliationErrors++;pushLiveError4610(e);}
+}
+async function startLiveBase4610(){
+ if(liveBase4610.status==="RUNNING")return;
+ const baseRows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&x.source==="BLOCK_TAGGED_RPC_BOOTSTRAP");
+ if(!baseRows.length)throw new Error("BASE_LIVE_REQUIRES_BLOCK_CONSISTENT_BOOTSTRAP");
+ const rpc=RPC_URLS.base;if(!rpc)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ const provider=new JsonRpcProvider(rpc,8453,{staticNetwork:false}),head=await withTimeout4501(provider.getBlockNumber(),8000,"BASE_LIVE_START_HEAD");
+ liveBase4610={...liveBase4610,status:"RUNNING",startedAt:new Date().toISOString(),stoppedAt:null,error:null,provider,lastHeadBlock:head,lastProcessedBlock:Math.max(...baseRows.map(x=>Number(x.snapshotBlock||x.bootstrapBlock||head))),lastHeadAt:new Date().toISOString(),bootstrapPools:baseRows.length,trackedPools:baseRows.length,blocksObserved:0,blocksReconciled:0,logsReceived:0,swapEvents:0,mintEvents:0,burnEvents:0,poolsUpdated:0,reconciliationErrors:0,reorgSignals:0,stalePools:0,poolLastEvent:new Map(),recentErrors:[],recentEvents:[],executionEligible:false};
+ // Catch up from the common bootstrap floor through current head.
+ const floor=Math.min(...baseRows.map(x=>Number(x.snapshotBlock||x.bootstrapBlock||head)));liveBase4610.lastProcessedBlock=floor-1;
+ await liveBaseTick4610();
+ liveBase4610.timer=setInterval(()=>{liveBaseTick4610();},Number(process.env.ARBIFLOW_BASE_POLL_MS||2000));liveBase4610.timer.unref?.();
+}
+function stopLiveBase4610(){
+ if(liveBase4610.timer)clearInterval(liveBase4610.timer);liveBase4610.timer=null;liveBase4610.status="STOPPED";liveBase4610.stoppedAt=new Date().toISOString();liveBase4610.executionEligible=false;
+}
+app.get("/api/market-state/live/base/start",async(req,res)=>{try{await startLiveBase4610();res.json({...liveBaseSummary4610(),statusRoute:"/api/market-state/live/base/status"});}catch(e){liveBase4610.status="ERROR";liveBase4610.error=e?.message||String(e);res.status(409).json(liveBaseSummary4610());}});
+app.get("/api/market-state/live/base/status",(req,res)=>res.json(liveBaseSummary4610()));
+app.get("/api/market-state/live/base/stop",(req,res)=>{stopLiveBase4610();res.json(liveBaseSummary4610());});
+app.get("/api/market-state/live/base/pools",(req,res)=>{const limit=Math.max(1,Math.min(200,Number(req.query.limit||100))),rows=[...marketState4600.registry.values()].filter(x=>x.chain==="base");res.json({success:true,version:VERSION,count:rows.length,returned:Math.min(limit,rows.length),pools:rows.slice(0,limit),live:liveBaseSummary4610().base,executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.
