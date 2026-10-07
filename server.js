@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.77.2";
+const VERSION = "4.77.3";
 
 /*
 =========================================================
@@ -9170,22 +9170,35 @@ const QUOTE477={nextAt:0,blockedUntil:0,requests:0,rateLimited:0};
 let quoteQueue477=Promise.resolve();
 async function permit477(){const t=quoteQueue477.then(async()=>{const wait=Math.max(0,QUOTE477.nextAt-Date.now(),QUOTE477.blockedUntil-Date.now());if(wait)await new Promise(r=>setTimeout(r,wait));QUOTE477.nextAt=Date.now()+1500;QUOTE477.requests++;});quoteQueue477=t.catch(()=>{});await t;}
 async function quote1inch4760(c,src,dst,amount){const st=DISC4760.chains[c.key],key=process.env.ONEINCH_API_KEY||"";st.quoteRequests++;if(!key)throw new Error("ONEINCH_API_KEY_MISSING");const u=new URL(`https://api.1inch.dev/swap/v6.1/${c.chainId}/quote`);u.searchParams.set("src",src);u.searchParams.set("dst",dst);u.searchParams.set("amount",String(amount));await permit477();const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),4500);try{const r=await fetch(u,{headers:{Authorization:`Bearer ${key}`},signal:ctl.signal});const body=await r.text();if(r.status===429){QUOTE477.rateLimited++;const sec=Number(r.headers.get("retry-after"));QUOTE477.blockedUntil=Date.now()+(Number.isFinite(sec)&&sec>0?Math.min(60000,sec*1000):10000);}if(!r.ok)throw new Error(`HTTP_${r.status}:${body.slice(0,120)}`);const j=JSON.parse(body);if(!j?.dstAmount)throw new Error("NO_DST_AMOUNT");st.quoteSuccesses++;return BigInt(j.dstAmount);}catch(e){st.quoteFailures++;if(e?.name==="AbortError"||String(e?.message||e).includes("TIMEOUT"))st.quoteTimeouts++;throw e;}finally{clearTimeout(timer);}}
+// Lightweight eth_gasPrice RPC avoids ethers getFeeData's multiple RPC calls.
+// Screening only: no assumption that this covers L2 L1-data fees or exact route gas.
+const gasCache4773=new Map();
 async function gas4760(c,ethUsd){
- const st=DISC4760.chains[c.key];
- const provider=new JsonRpcProvider(c.rpc,undefined,{staticNetwork:false});
+ const st=DISC4760.chains[c.key],now=Date.now(),cached=gasCache4773.get(c.chainId);
+ if(cached&&now-cached.at<30000){
+  st.gasEstimates++;return Number(formatUnits(cached.wei*500000n,18))*ethUsd;
+ }
  let lastError=null;
  for(let attempt=0;attempt<2;attempt++){
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),attempt?6500:4000);
   try{
-   const f=await timeout4760(provider.getFeeData(),attempt===0?4000:6500,`${c.key}_GAS`);
-   const gp=f.gasPrice||f.maxFeePerGas;
-   if(!gp||gp<=0n)throw new Error("GAS_PRICE_UNAVAILABLE");
-   // Screening estimate only. Exact route gas and L1 data fees remain unverified.
-   const usd=Number(formatUnits(gp*500000n,18))*ethUsd;
+   const response=await fetch(c.rpc,{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_gasPrice",params:[]}),signal:ctl.signal});
+   if(!response.ok)throw new Error(`GAS_RPC_HTTP_${response.status}`);
+   const json=await response.json();
+   if(json.error)throw new Error(`GAS_RPC_ERROR_${json.error.code}`);
+   if(typeof json.result!=="string"||!/^0x[0-9a-fA-F]+$/.test(json.result))throw new Error("GAS_RPC_INVALID_RESPONSE");
+   const wei=BigInt(json.result);
+   if(wei<=0n)throw new Error("GAS_PRICE_UNAVAILABLE");
+   gasCache4773.set(c.chainId,{wei,at:Date.now()});
+   const usd=Number(formatUnits(wei*500000n,18))*ethUsd;
    if(!Number.isFinite(usd)||usd<=0)throw new Error("GAS_USD_INVALID");
    st.gasEstimates++;return usd;
   }catch(e){lastError=e;if(attempt===0)await new Promise(r=>setTimeout(r,250));}
+  finally{clearTimeout(timer);}
  }
- st.gasFailures++;throw new Error(`GAS_UNAVAILABLE_AFTER_RETRY:${lastError?.message||lastError}`);
+ st.gasFailures++;
+ throw new Error(`GAS_RPC_UNAVAILABLE_AFTER_RETRY:${lastError?.name==="AbortError"?"TIMEOUT":lastError?.message||lastError}`);
 }
 async function discoverChain4760(c,ref){const st=DISC4760.chains[c.key];st.status="RUNNING";st.lastRunAt=new Date().toISOString();st.lastError=null;const out=[];try{
   const health=mc4750.chains[c.key];
@@ -9210,7 +9223,7 @@ async function discoverChain4760(c,ref){const st=DISC4760.chains[c.key];st.statu
     if(estimatedNet!==null&&estimatedNet>=DISC4760.policy.minimumNetProfitUsd)st.netProfitPasses++;
     if(!rejection){st.simulationEligible++;} // intentionally unreachable until simulation implementation promotes explicitly
     out.push({candidateId:`${c.key.toUpperCase()}:WETH-USDC:1INCH-ROUNDTRIP:${usd}`,opportunityType:"REFERENCE_DIRECTED_ONCHAIN_ROUNDTRIP_SCREEN",canonicalPair:"WETH/USDC",chainId:c.chainId,notionalUsd:usd,referenceMidUsd:ref.mid,onchainBuyPriceUsd:buyPx,referenceDeviationPct:deviationPct,roundTripUsd:backUsd,executableSpreadPct,grossProfitUsd:gross,modeledGasUsd:gasUsd,gasError,estimatedNetProfitUsd:estimatedNet,depthPassed:depthPass,financingStatus,simulationStatus:"NOT_RUN",riskLevel:"UNASSESSED",status:"REJECTED",rejectionReason:rejection,executionEligible:false,detectedAt:new Date().toISOString()});
-  }} st.candidates=out.sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd).slice(0,20); st.status=out.some(x=>x.gasError)?"COMPLETE_WITH_GAS_FAILURES":"COMPLETE";
+  }} st.candidates=out.sort((a,b)=>(b.estimatedNetProfitUsd??-Infinity)-(a.estimatedNetProfitUsd??-Infinity)).slice(0,20); st.status=out.some(x=>x.gasError)?"COMPLETE_WITH_GAS_FAILURES":"COMPLETE";
  }catch(e){st.status="ERROR";st.lastError=e?.message||String(e);}finally{st.lastCompletedAt=new Date().toISOString();}}
 async function run4760(){if(DISC4760.running)return;DISC4760.running=true;DISC4760.runs++;DISC4760.lastRunAt=new Date().toISOString();try{const ref=globalDiscrepancy4710._state?.reference?.ETHUSD;if(!ref||ref.status!=="LIVE"||!Number.isFinite(ref.mid))throw new Error("REFERENCE_CONSENSUS_NOT_LIVE");await Promise.all(MC4750_CHAINS.map(c=>discoverChain4760(c,ref)));}catch(e){for(const st of Object.values(DISC4760.chains))if(st.status==="IDLE")st.lastError=e?.message||String(e);}finally{DISC4760.running=false;DISC4760.lastCompletedAt=new Date().toISOString();}}
 function summary4760(){const chains=Object.values(DISC4760.chains).map(x=>({...x,candidates:x.candidates.slice(0,10)}));const sum=k=>chains.reduce((n,x)=>n+(x[k]||0),0);return {success:true,version:VERSION,architecture:"CEX_CONSENSUS_TO_THREE_CHAIN_REFERENCE_TRIGGER_TO_EXACT_1INCH_ROUNDTRIP_TO_GAS_TO_FAIL_CLOSED_QUALIFICATION",status:DISC4760.running?"RUNNING":"IDLE_WAIT",startedAt:DISC4760.startedAt,intervalMs:DISC4760.intervalMs,runs:DISC4760.runs,lastRunAt:DISC4760.lastRunAt,lastCompletedAt:DISC4760.lastCompletedAt,policy:DISC4760.policy,quoteScheduler:QUOTE477,limitations:["SINGLE_AGGREGATOR_SCREEN_ONLY","INDEPENDENT_DEX_COMPARISON_NOT_YET_IMPLEMENTED","FLASH_FINANCING_NOT_VERIFIED","ATOMIC_SIMULATION_NOT_RUN"],metrics:{observations:sum("observations"),referenceDiscrepancies:sum("referenceDiscrepancies"),quoteRequests:sum("quoteRequests"),quoteSuccesses:sum("quoteSuccesses"),quoteFailures:sum("quoteFailures"),quoteTimeouts:sum("quoteTimeouts"),positiveExecutableSpreads:sum("positiveExecutableSpreads"),depthPassed:sum("depthPassed"),optimalSizes:sum("optimalSizes"),gasEstimates:sum("gasEstimates"),gasFailures:sum("gasFailures"),financingPasses:sum("financingPasses"),netProfitPasses:sum("netProfitPasses"),simulationEligible:sum("simulationEligible"),qualified:sum("qualified")},chains,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};}
