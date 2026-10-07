@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.63.0";
+const VERSION = "4.63.1";
 
 /*
 =========================================================
@@ -8342,9 +8342,9 @@ let simulator4630={status:"IDLE",startedAt:null,completedAt:null,error:null,cand
 function decimals4630(sym){const s=String(sym||"").toUpperCase();if(s==="USDC"||s==="USDBC")return 6;if(s==="CBBTC")return 8;return 18;}
 function defaultSizes4630(sym){
  const s=String(sym||"").toUpperCase();
- if(s==="USDC"||s==="USDBC")return [10,25,50,100,250,500,1000,2500];
- if(s==="WETH"||s==="CBETH")return [0.005,0.01,0.025,0.05,0.1,0.25,0.5,1];
- if(s==="CBBTC")return [0.0001,0.00025,0.0005,0.001,0.0025,0.005,0.01,0.025];
+ if(s==="USDC"||s==="USDBC")return [0.25,0.5,1,2.5,5,10,25,50,100,250,500];
+ if(s==="WETH"||s==="CBETH")return [0.00005,0.0001,0.00025,0.0005,0.001,0.0025,0.005,0.01,0.025,0.05,0.1];
+ if(s==="CBBTC")return [0.000001,0.0000025,0.000005,0.00001,0.000025,0.00005,0.0001,0.00025,0.0005,0.001];
  return [0.001,0.005,0.01,0.05,0.1];
 }
 function candidateEdges4630(c){
@@ -8374,11 +8374,17 @@ async function simulateCandidateSize4630(quoter,c,size){
  for(const edge of edges){
   const q=await quoteLeg4630(quoter,edge,current);
   if(!q.ok)return {ok:false,size,startSymbol:startSym,rejectionReason:"LEG_QUOTE_FAILED",failedLeg:legs.length+1,errorClass:q.errorClass,error:q.error,legs};
+  if(q.amountOut===0n)return {ok:false,size,startSymbol:startSym,rejectionReason:"ZERO_OUTPUT_LIQUIDITY_EXHAUSTED",failedLeg:legs.length+1,legs,liquidityExhausted:true};
   legs.push({leg:legs.length+1,from:edge.from,to:edge.to,pool:edge.pool,feeTier:edge.fee,amountInRaw:current.toString(),amountOutRaw:q.amountOut.toString(),sqrtPriceX96After:q.sqrtPriceX96After,initializedTicksCrossed:q.initializedTicksCrossed,quotedGas:q.gasEstimate,latencyMs:q.latencyMs});
   totalTicks+=q.initializedTicksCrossed;totalQuotedGas+=BigInt(q.gasEstimate);current=q.amountOut;
  }
  const pnlRaw=current-amount,returnPct=Number(pnlRaw)*100/Number(amount);
  return {ok:true,size,startSymbol:startSym,inputRaw:amount.toString(),outputRaw:current.toString(),grossPnlRaw:pnlRaw.toString(),grossReturnPct:returnPct,positive:pnlRaw>0n,totalInitializedTicksCrossed:totalTicks,totalQuotedGas:totalQuotedGas.toString(),legs,classification:pnlRaw>0n?"V3_QUOTER_SIMULATED_POSITIVE":"V3_QUOTER_SIMULATED_REJECTED",gasCostApplied:false,flashLoanFeeApplied:false,executionEligible:false};
+}
+function refinementSizes4631(tests){
+ const viable=tests.filter(x=>x.ok&&Number.isFinite(x.grossReturnPct)).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),best=viable[0];if(!best)return [];
+ const x=Number(best.size);if(!Number.isFinite(x)||x<=0)return [];
+ return [...new Set([x*0.4,x*0.6,x*0.8,x*1.2,x*1.5,x*2].filter(v=>v>0).map(v=>Number(v.toPrecision(8))))];
 }
 async function runSimulator4630(limit=20){
  if(simulator4630.status==="RUNNING")return;
@@ -8394,15 +8400,22 @@ async function runSimulator4630(limit=20){
    const t=await simulateCandidateSize4630(quoter,c,size);tests.push(t);simulator4630.sizeTests++;
    if(t.ok){simulator4630.successfulRoundTrips++;if(t.positive)simulator4630.positiveRoundTrips++;}else simulator4630.quoteFailures++;
   }
-  const good=tests.filter(x=>x.ok),positive=good.filter(x=>x.positive).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),best=positive[0]||good.sort((a,b)=>b.grossReturnPct-a.grossReturnPct)[0]||null;
-  results.push({path:c.path,pools:c.pools,feeTiers:c.feeTiers,spotGrossSpreadPct:c.grossSpotSpreadPct,sizeTests:tests,bestSize:best?best.size:null,bestGrossReturnPct:best?best.grossReturnPct:null,positiveSizes:positive.length,classification:positive.length?"SIZE_TESTED_POSITIVE_REQUIRES_ECONOMICS_GATE":"REJECTED_BY_V3_QUOTER_SIZE_TESTS"});
+  for(const size of refinementSizes4631(tests)){
+   if(tests.some(x=>Number(x.size)===Number(size)))continue;
+   const t=await simulateCandidateSize4630(quoter,c,size);t.adaptiveRefinement=true;tests.push(t);simulator4630.sizeTests++;
+   if(t.ok){simulator4630.successfulRoundTrips++;if(t.positive)simulator4630.positiveRoundTrips++;}else simulator4630.quoteFailures++;
+  }
+  const good=tests.filter(x=>x.ok),positive=good.filter(x=>x.positive).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),best=positive[0]||[...good].sort((a,b)=>b.grossReturnPct-a.grossReturnPct)[0]||null;
+  const exhausted=tests.filter(x=>x.rejectionReason==="ZERO_OUTPUT_LIQUIDITY_EXHAUSTED").length;
+  const quality=positive.length?"SURVIVES_SIZE_IMPACT":best&&best.grossReturnPct>-0.25?"NEAR_BREAK_EVEN_MICRO_CANDIDATE":exhausted?"SHALLOW_OR_EXHAUSTED_LIQUIDITY":"IMPACT_REJECTED";
+  results.push({path:c.path,pools:c.pools,feeTiers:c.feeTiers,spotGrossSpreadPct:c.grossSpotSpreadPct,sizeTests:tests,bestSize:best?best.size:null,bestGrossReturnPct:best?best.grossReturnPct:null,positiveSizes:positive.length,liquidityExhaustionTests:exhausted,candidateQuality:quality,classification:positive.length?"SIZE_TESTED_POSITIVE_REQUIRES_ECONOMICS_GATE":"REJECTED_BY_V3_QUOTER_SIZE_TESTS"});
   simulator4630.candidatesTested++;
  }
  results.sort((a,b)=>(b.bestGrossReturnPct??-Infinity)-(a.bestGrossReturnPct??-Infinity));
  simulator4630={...simulator4630,status:"COMPLETE",completedAt:new Date().toISOString(),lastLatencyMs:Date.now()-started,results};
 }
 function simulatorSummary4630(){
- return {success:simulator4630.status!=="ERROR",version:VERSION,status:simulator4630.status,error:simulator4630.error,architecture:"SPOT_GRAPH_CANDIDATES_TO_EXACT_V3_QUOTER_MULTI_SIZE_ROUND_TRIP_SIMULATION",startedAt:simulator4630.startedAt,completedAt:simulator4630.completedAt,candidatesTested:simulator4630.candidatesTested,sizeTests:simulator4630.sizeTests,successfulRoundTrips:simulator4630.successfulRoundTrips,positiveRoundTrips:simulator4630.positiveRoundTrips,quoteFailures:simulator4630.quoteFailures,lastLatencyMs:simulator4630.lastLatencyMs,results:simulator4630.results,limitations:{quoterBasedImpact:true,initializedTicksCrossedReported:true,localTickCache:false,continuousOptimalSolver:false,gasCostApplied:false,flashLoanFeeApplied:false,netProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+ return {success:simulator4630.status!=="ERROR",version:VERSION,status:simulator4630.status,error:simulator4630.error,architecture:"SPOT_GRAPH_CANDIDATES_TO_EXACT_V3_QUOTER_MULTI_SIZE_ROUND_TRIP_SIMULATION",startedAt:simulator4630.startedAt,completedAt:simulator4630.completedAt,candidatesTested:simulator4630.candidatesTested,sizeTests:simulator4630.sizeTests,successfulRoundTrips:simulator4630.successfulRoundTrips,positiveRoundTrips:simulator4630.positiveRoundTrips,quoteFailures:simulator4630.quoteFailures,lastLatencyMs:simulator4630.lastLatencyMs,results:simulator4630.results,limitations:{quoterBasedImpact:true,initializedTicksCrossedReported:true,localTickCache:false,adaptiveMicroSizeRefinement:true,zeroOutputLiquidityRejection:true,continuousOptimalSolver:false,gasCostApplied:false,flashLoanFeeApplied:false,netProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
 }
 app.get("/api/simulator/base/start",(req,res)=>{if(simulator4630.status==="RUNNING")return res.json({...simulatorSummary4630(),statusRoute:"/api/simulator/base/status"});const limit=Number(req.query.limit||20);setImmediate(async()=>{try{await runSimulator4630(limit);}catch(e){simulator4630.status="ERROR";simulator4630.completedAt=new Date().toISOString();simulator4630.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/simulator/base/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/simulator/base/status",(req,res)=>res.json(simulatorSummary4630()));

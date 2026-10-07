@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.63.0 — Market State Foundation
+ArbiFlow Engine 4.63.1 — Market State Foundation
 
 This is an additive architectural foundation release. Existing 4.59.4 diagnostic scanners remain available.
 

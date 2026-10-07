@@ -1,0 +1,27 @@
+ArbiFlow Engine 4.63.1 — Candidate Quality + Micro-Size Search
+
+WHY
+4.63.0 successfully rejected all 5 tested candidates, but its minimum WETH/cbETH
+size was 0.005 and zero-output legs were reported as completed -100% round trips.
+
+CHANGES
+- WETH/cbETH probes now begin at 0.00005.
+- cbBTC probes now begin at 0.000001.
+- USDC/USDbC probes now begin at 0.25.
+- After the coarse/micro sweep, six adaptive sizes are tested around the best viable size.
+- A zero-output V3 leg immediately rejects the size as ZERO_OUTPUT_LIQUIDITY_EXHAUSTED.
+- Candidate quality labels:
+  SURVIVES_SIZE_IMPACT
+  NEAR_BREAK_EVEN_MICRO_CANDIDATE
+  SHALLOW_OR_EXHAUSTED_LIQUIDITY
+  IMPACT_REJECTED
+- Reports liquidityExhaustionTests per candidate.
+- Existing live state, graph and simulator endpoints preserved.
+
+Still intentionally excluded:
+- gas cost deduction
+- flash-loan financing cost
+- net-profit claim
+- mainnet execution
+
+Validation: npm run check PASS.
