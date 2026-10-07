@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.58.4";
+const VERSION = "4.58.5";
 
 /*
 =========================================================
@@ -7902,8 +7902,12 @@ async function multiChainOpportunityWorker4581(){
   const v=await withTimeout4501(factory.getPool(a,b,fee),timeoutMs,"POOL_TIMEOUT"); poolCache.set(k,v); return v;
  };
  const scanChain=async(chain)=>{
-  const cfg=uniswapV3ChainConfig4490(chain);
-  if(!cfg)return {chain,classification:"NO_CONFIG",rows:[],failures:[]};
+  const baseCfg=UNISWAP_V3_DISCOVERY_4470[chain], rpc=RPC_URLS[chain]||"", quoter=UNISWAP_V3_QUOTER_V1_4490[chain];
+  if(!baseCfg)return {chain,classification:"NO_CONFIG",rows:[],failures:[]};
+  if(!rpc)return {chain,classification:"RPC_NOT_CONFIGURED",rows:[],failures:[]};
+  if(!quoter)return {chain,classification:"QUOTER_NOT_CONFIGURED",rows:[],failures:[]};
+  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+  const cfg={chain,factory:baseCfg.factory,tokens:baseCfg.tokens,provider,quoter,venue:chain==="bnb"?"PancakeSwap V3":"Uniswap V3"};
   progress.currentChains=[...(progress.currentChains||[]),chain];
   const network=await withTimeout4501(cfg.provider.getNetwork(),timeoutMs,"NETWORK_TIMEOUT");
   const tokens=cfg.tokens||{}, stableEntries=Object.entries(tokens).filter(([sym])=>stableLike4490(sym));
@@ -7912,7 +7916,7 @@ async function multiChainOpportunityWorker4581(){
   for(const [baseSym,base] of stableEntries)for(const [assetSym,asset] of assetEntries)for(const fee of OPPORTUNITY_FEE_TIERS_4580)
     poolJobs.push({baseSym,base,assetSym,asset,fee});
   const pools=await mapLimit4501(poolJobs,6,async j=>{
-    try{const pool=await getPool(cfg,j.base,j.asset,j.fee);progress.poolsChecked++;return {...j,pool,ok:pool&&pool!==ethers.ZeroAddress};}
+    try{const pool=await getPool(cfg,j.base,j.asset,j.fee);progress.poolsChecked++;return {...j,pool,ok:pool&&String(pool).toLowerCase()!=="0x0000000000000000000000000000000000000000"};}
     catch(e){progress.poolFailures++;return {...j,ok:false,error:e?.message||String(e)};}
   });
   const byPair=new Map();
@@ -7926,11 +7930,11 @@ async function multiChainOpportunityWorker4581(){
   const rows=await mapLimit4501(jobs,quoteConcurrency,async j=>{
     try{
       const bd=await getDecimals(j.cfg,j.buy.base), ad=await getDecimals(j.cfg,j.buy.asset);
-      const amountIn=ethers.parseUnits(String(j.usd),bd);
-      const q1=await withTimeout4501(quoteV3Single4490(j.cfg,j.buy.base,j.buy.asset,j.buy.fee,amountIn),timeoutMs,"BUY_QUOTE_TIMEOUT");
-      const q2=await withTimeout4501(quoteV3Single4490(j.cfg,j.buy.asset,j.buy.base,j.sell.fee,q1.amountOut),timeoutMs,"SELL_QUOTE_TIMEOUT");
+      const amountIn=parseUnits(String(j.usd),bd);
+      const q1=await withTimeout4501(quoteV3Single4490(j.cfg.provider,j.cfg.quoter,j.buy.base,j.buy.asset,j.buy.fee,amountIn,j.cfg.chain),timeoutMs,"BUY_QUOTE_TIMEOUT");
+      const q2=await withTimeout4501(quoteV3Single4490(j.cfg.provider,j.cfg.quoter,j.buy.asset,j.buy.base,j.sell.fee,q1,j.cfg.chain),timeoutMs,"SELL_QUOTE_TIMEOUT");
       progress.quotesCompleted+=2; progress.exactQuotes+=2;
-      const out=Number(ethers.formatUnits(q2.amountOut,bd)), gross=out-j.usd;
+      const out=Number(formatUnits(q2,bd)), gross=out-j.usd;
       if(gross>0)progress.positiveGross++;
       return {chain,venue:j.cfg.venue||"V3",base:j.buy.baseSym,asset:j.buy.assetSym,sizeUsd:j.usd,buyFee:j.buy.fee,sellFee:j.sell.fee,amountOutUsd:out,grossUsd:gross,positive:gross>0};
     }catch(e){progress.quoteFailures++;return null;}
@@ -7960,7 +7964,7 @@ app.get("/api/opportunities/multichain/start",(req,res)=>{const running=opportun
 app.get("/api/opportunities/multichain/status",(req,res)=>{const st=opportunityScanState4581;if(st.status==="RUNNING"&&st.startedAt)st.progress.elapsedMs=Date.now()-Date.parse(st.startedAt);res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,progress:st.progress,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/opportunities/multichain",(req,res)=>{const st=opportunityScanState4581;res.json({success:true,version:VERSION,status:st.status,instruction:st.status==="IDLE"?"Open /api/opportunities/multichain/start once, then /api/opportunities/multichain/status.":"Use /api/opportunities/multichain/status for progress/results.",startRoute:"/api/opportunities/multichain/start",statusRoute:"/api/opportunities/multichain/status",result:st.status==="COMPLETE"?st.result:null,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.4_NONBLOCKING_READINESS_GATE_REPAIR",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.5_NONBLOCKING_READINESS_GATE_REPAIR",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7970,10 +7974,10 @@ SERVER
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.58.4] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.58.5] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.58.4] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.58.5] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,
