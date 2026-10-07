@@ -1,0 +1,27 @@
+ArbiFlow Engine 4.61.1 — Base-Only Live Bootstrap
+
+FIX
+4.61.0 live startup depended on the full multi-chain bootstrap and could fail with
+BASE_LIVE_REQUIRES_BLOCK_CONSISTENT_BOOTSTRAP or wait on unrelated chains.
+
+NEW LIVE START FLOW
+/api/market-state/live/base/start
+-> reuse existing block-consistent Base registry if available
+-> otherwise discover Base Uniswap V3 pools only
+-> obtain one Base bootstrap block
+-> snapshot Base pools at that block
+-> require at least one block-consistent Base pool
+-> start Base head polling and Swap/Mint/Burn reconciliation
+
+The multi-chain bootstrap endpoint is preserved but is no longer a prerequisite
+for starting the Base live engine.
+
+SAFETY
+- No latest-state fallback is accepted by the Base-only live bootstrap.
+- executionEligible=false throughout.
+- No signing, approvals, transaction broadcast, or mainnet fund movement.
+- HTTP polling status now reports INACTIVE unless live mode is actually RUNNING.
+- Reorg/head-regression gate preserved.
+
+VALIDATION
+npm run check PASS.

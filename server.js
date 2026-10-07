@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.61.0";
+const VERSION = "4.61.1";
 
 /*
 =========================================================
@@ -8152,7 +8152,7 @@ function liveBaseSummary4610(){
   base:{bootstrapPools:liveBase4610.bootstrapPools,trackedPools:liveBase4610.trackedPools,lastHeadBlock:liveBase4610.lastHeadBlock,lastProcessedBlock:liveBase4610.lastProcessedBlock,lastHeadAt:liveBase4610.lastHeadAt,lastEventAt:liveBase4610.lastEventAt,
    blocksObserved:liveBase4610.blocksObserved,blocksReconciled:liveBase4610.blocksReconciled,logsReceived:liveBase4610.logsReceived,swapEvents:liveBase4610.swapEvents,mintEvents:liveBase4610.mintEvents,burnEvents:liveBase4610.burnEvents,poolsUpdated:liveBase4610.poolsUpdated,reconciliationErrors:liveBase4610.reconciliationErrors,reorgSignals:liveBase4610.reorgSignals,stalePools:liveBase4610.stalePools,
    oldestStateAgeMs:ages.length?Math.max(...ages):null,newestStateAgeMs:ages.length?Math.min(...ages):null},
-  synchronization:{bootstrapRequired:true,eventReconciliation:liveBase4610.status==="RUNNING"?"ACTIVE":"INACTIVE",websocketSubscriptions:"HTTP_RPC_BLOCK_POLLING_ACTIVE",reorgRollback:"DETECTION_AND_REBOOTSTRAP_GATE",tickStateCache:"NOT_ACTIVE",executionEligible:false},
+  synchronization:{bootstrapRequired:true,eventReconciliation:liveBase4610.status==="RUNNING"?"ACTIVE":"INACTIVE",websocketSubscriptions:liveBase4610.status==="RUNNING"?"HTTP_RPC_BLOCK_POLLING_ACTIVE":"INACTIVE",reorgRollback:"DETECTION_AND_REBOOTSTRAP_GATE",tickStateCache:"NOT_ACTIVE",executionEligible:false},
   recentErrors:liveBase4610.recentErrors.slice(-10),recentEvents:liveBase4610.recentEvents.slice(-20),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
 }
 function pushLiveError4610(e){liveBase4610.recentErrors.push({at:new Date().toISOString(),error:e?.message||String(e)});if(liveBase4610.recentErrors.length>50)liveBase4610.recentErrors.shift();}
@@ -8196,14 +8196,50 @@ async function liveBaseTick4610(){
   liveBase4610.stalePools=rows.filter(x=>now-Date.parse(x.snapshotAt||0)>staleMs).length;
  }catch(e){liveBase4610.reconciliationErrors++;pushLiveError4610(e);}
 }
+async function discoverBasePools4611(){
+ const started=Date.now(),cfg=UNISWAP_V3_DISCOVERY_4470.base,rpc=RPC_URLS.base||"";
+ if(!cfg)throw new Error("BASE_V3_ADAPTER_NOT_CONFIGURED");if(!rpc)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ const provider=new JsonRpcProvider(rpc,8453,{staticNetwork:false});
+ const [net,code]=await withTimeout4501(Promise.all([provider.getNetwork(),provider.getCode(cfg.factory)]),8000,"BASE_FACTORY");
+ if(Number(net.chainId)!==8453)throw new Error(`BASE_CHAIN_ID_MISMATCH_${Number(net.chainId)}`);if(!code||code==="0x")throw new Error("BASE_FACTORY_NOT_DEPLOYED");
+ const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider),jobs=[];
+ for(const [[symA,tokenA],[symB,tokenB]] of pairCombos4470(cfg.tokens))for(const fee of [100,500,3000,10000])jobs.push({symA,tokenA,symB,tokenB,fee});
+ const rows=await mapLimit4501(jobs,8,async j=>{try{
+  const pool=await withTimeout4501(factory.getPool(String(j.tokenA).toLowerCase(),String(j.tokenB).toLowerCase(),j.fee),6000,"BASE_GET_POOL");
+  if(!pool||pool==="0x0000000000000000000000000000000000000000")return null;
+  const pc=new Contract(pool,UNISWAP_V3_POOL_READ_ABI_4470,provider),liq=await withTimeout4501(pc.liquidity(),6000,"BASE_DISCOVERY_LIQUIDITY");
+  return {dex:"Uniswap V3",pair:`${j.symA}/${j.symB}`,tokenA:j.tokenA,tokenB:j.tokenB,feeTier:j.fee,pool,liquidityRaw:liq.toString(),hasLiquidity:BigInt(liq)>0n,readOnly:true};
+ }catch(e){return {pair:`${j.symA}/${j.symB}`,feeTier:j.fee,status:"POOL_QUERY_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true};}});
+ const pools=rows.filter(x=>x?.pool&&x?.hasLiquidity);
+ return {provider,pools,queries:jobs.length,elapsedMs:Date.now()-started};
+}
+async function bootstrapBaseOnly4611(){
+ const started=Date.now(),disc=await discoverBasePools4611(),provider=disc.provider;
+ const bootstrapBlock=await withTimeout4501(provider.getBlockNumber(),10000,"BASE_ONLY_BOOTSTRAP_BLOCK"),registryRows=[],failures=[];
+ const rows=await mapLimit4501(disc.pools,4,async meta=>{try{
+  const pc=new Contract(meta.pool,UNISWAP_V3_POOL_READ_ABI_4470,provider);
+  const [slot0,liq,t0,t1]=await withTimeout4501(Promise.all([pc.slot0({blockTag:bootstrapBlock}),pc.liquidity({blockTag:bootstrapBlock}),pc.token0({blockTag:bootstrapBlock}),pc.token1({blockTag:bootstrapBlock})]),8000,"BASE_ONLY_POOL_SNAPSHOT");
+  return {ok:true,value:{key:`base:${String(meta.pool).toLowerCase()}`,chain:"base",chainId:8453,dex:meta.dex,pair:meta.pair,pool:meta.pool,feeTier:meta.feeTier,token0:String(t0),token1:String(t1),sqrtPriceX96:(slot0.sqrtPriceX96??slot0[0]).toString(),tick:Number(slot0.tick??slot0[1]),liquidityRaw:liq.toString(),bootstrapBlock,snapshotBlock:bootstrapBlock,snapshotAt:new Date().toISOString(),source:"BLOCK_TAGGED_RPC_BOOTSTRAP",stateFreshness:"BOOTSTRAP_BLOCK_CONSISTENT",executionEligible:false,readOnly:true}};
+ }catch(e){return {ok:false,pool:meta.pool,pair:meta.pair,feeTier:meta.feeTier,error:e?.shortMessage||e?.message||String(e),errorClass:snapshotErrorClass4602(e)};}});
+ for(const r of rows){if(r?.ok){registryRows.push(r.value);marketState4600.registry.set(r.value.key,r.value);}else failures.push(r);}
+ if(!registryRows.length)throw new Error(`BASE_ONLY_BOOTSTRAP_EMPTY: discovered=${disc.pools.length} failures=${failures.length}`);
+ marketState4600.chains.base={chainId:8453,status:"SNAPSHOT_COMPLETE",bootstrapBlock,discoveredPools:disc.pools.length,snapshotAttempts:rows.length,snapshottedPools:registryRows.length,snapshotFailures:failures.length,blockTaggedSuccesses:registryRows.length,latestFallbackSuccesses:0};
+ marketState4600.bootstrapBlockByChain.base=bootstrapBlock;marketState4600.lastUpdateAt=new Date().toISOString();
+ return {success:true,classification:"BASE_ONLY_BLOCK_CONSISTENT_BOOTSTRAP_COMPLETE",bootstrapBlock,poolQueries:disc.queries,poolsDiscovered:disc.pools.length,snapshotAttempts:rows.length,snapshotSuccesses:registryRows.length,snapshotFailures:failures.length,failures:failures.slice(0,25),elapsedMs:Date.now()-started,executionEligible:false,readOnly:true};
+}
 async function startLiveBase4610(){
  if(liveBase4610.status==="RUNNING")return;
- const baseRows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&x.source==="BLOCK_TAGGED_RPC_BOOTSTRAP");
- if(!baseRows.length)throw new Error("BASE_LIVE_REQUIRES_BLOCK_CONSISTENT_BOOTSTRAP");
  const rpc=RPC_URLS.base;if(!rpc)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ let baseRows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&x.source==="BLOCK_TAGGED_RPC_BOOTSTRAP");
+ let autoBootstrap=null;
+ if(!baseRows.length){
+  liveBase4610.status="BOOTSTRAPPING_BASE";
+  autoBootstrap=await bootstrapBaseOnly4611();
+  baseRows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&x.source==="BLOCK_TAGGED_RPC_BOOTSTRAP");
+ }
+ if(!baseRows.length)throw new Error("BASE_LIVE_AUTO_BOOTSTRAP_PRODUCED_NO_BLOCK_CONSISTENT_POOLS");
  const provider=new JsonRpcProvider(rpc,8453,{staticNetwork:false}),head=await withTimeout4501(provider.getBlockNumber(),8000,"BASE_LIVE_START_HEAD");
- liveBase4610={...liveBase4610,status:"RUNNING",startedAt:new Date().toISOString(),stoppedAt:null,error:null,provider,lastHeadBlock:head,lastProcessedBlock:Math.max(...baseRows.map(x=>Number(x.snapshotBlock||x.bootstrapBlock||head))),lastHeadAt:new Date().toISOString(),bootstrapPools:baseRows.length,trackedPools:baseRows.length,blocksObserved:0,blocksReconciled:0,logsReceived:0,swapEvents:0,mintEvents:0,burnEvents:0,poolsUpdated:0,reconciliationErrors:0,reorgSignals:0,stalePools:0,poolLastEvent:new Map(),recentErrors:[],recentEvents:[],executionEligible:false};
- // Catch up from the common bootstrap floor through current head.
+ liveBase4610={...liveBase4610,status:"RUNNING",startedAt:new Date().toISOString(),stoppedAt:null,error:null,provider,lastHeadBlock:head,lastProcessedBlock:Math.max(...baseRows.map(x=>Number(x.snapshotBlock||x.bootstrapBlock||head))),lastHeadAt:new Date().toISOString(),bootstrapPools:baseRows.length,trackedPools:baseRows.length,blocksObserved:0,blocksReconciled:0,logsReceived:0,swapEvents:0,mintEvents:0,burnEvents:0,poolsUpdated:0,reconciliationErrors:0,reorgSignals:0,stalePools:0,poolLastEvent:new Map(),recentErrors:[],recentEvents:[],executionEligible:false,autoBootstrap};
  const floor=Math.min(...baseRows.map(x=>Number(x.snapshotBlock||x.bootstrapBlock||head)));liveBase4610.lastProcessedBlock=floor-1;
  await liveBaseTick4610();
  liveBase4610.timer=setInterval(()=>{liveBaseTick4610();},Number(process.env.ARBIFLOW_BASE_POLL_MS||2000));liveBase4610.timer.unref?.();
