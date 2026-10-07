@@ -1,0 +1,38 @@
+ArbiFlow Engine 4.63.0 — V3 Candidate Simulator + Size Solver
+
+PURPOSE
+Challenge 4.62 spot-graph candidates with exact read-only Uniswap V3 Quoter
+round-trip simulations across multiple input sizes.
+
+FLOW
+Live Base state -> local graph candidates -> map each 3-leg path to exact pool
+tokens/fees -> test multiple start sizes -> quote all 3 legs -> compare final
+starting-token amount to input -> rank tested sizes.
+
+NEW ENDPOINTS
+GET /api/simulator/base/start?limit=20
+GET /api/simulator/base/status
+
+OUTPUT
+- per candidate spot gross spread
+- each tested input size
+- each leg input/output
+- sqrtPriceX96After
+- initializedTicksCrossed
+- Quoter gas estimate
+- final round-trip gross return %
+- best tested size
+- positive size count
+- explicit rejection/quote failure reasons
+
+IMPORTANT
+This stage uses the V3 Quoter to capture trade-size price impact/tick traversal.
+It is not yet the fully local tick-cache simulator/continuous optimizer.
+Gas estimates are reported but gas cost is NOT subtracted.
+Flash-loan fee is NOT subtracted.
+No net-profit or execution claim is made.
+
+SAFETY
+executionEligible=false; read-only; no signing, approvals, broadcast or funds moved.
+
+Validation: npm run check PASS.

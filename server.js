@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.62.0";
+const VERSION = "4.63.0";
 
 /*
 =========================================================
@@ -8324,6 +8324,88 @@ app.get("/api/graph/base/build",(req,res)=>{try{const pools=buildGraph4620(),sca
 app.get("/api/graph/base/scan",(req,res)=>{try{const scan=cyclesForDirty4620();res.json({...graphSummary4620(),lastScan:scan});}catch(e){res.status(500).json({success:false,version:VERSION,error:e?.message||String(e),executionEligible:false,readOnly:true});}});
 app.get("/api/graph/base/status",(req,res)=>res.json(graphSummary4620()));
 app.get("/api/graph/base/edges",(req,res)=>{const limit=Math.max(1,Math.min(500,Number(req.query.limit||200))),rows=[...graph4620.edges.values()];res.json({success:true,version:VERSION,count:rows.length,returned:Math.min(limit,rows.length),edges:rows.slice(0,limit),executionEligible:false,readOnly:true});});
+
+
+/*
+=========================================================
+ArbiFlow 4.63.0 — V3 CANDIDATE SIMULATOR + SIZE SOLVER
+Exact read-only Uniswap V3 Quoter validation of local graph candidates.
+This stage models executable quote impact across the full 3-leg path at
+multiple input sizes. Gas/flash-loan costs remain a later economics gate.
+=========================================================
+*/
+const BASE_V3_QUOTER_4630="0x222ca98f00ed15b1fae10b61c277703a194cf5d2";
+const V3_QUOTER_ABI_4630=[
+ "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"
+];
+let simulator4630={status:"IDLE",startedAt:null,completedAt:null,error:null,candidatesTested:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,lastLatencyMs:null,results:[],executionEligible:false};
+function decimals4630(sym){const s=String(sym||"").toUpperCase();if(s==="USDC"||s==="USDBC")return 6;if(s==="CBBTC")return 8;return 18;}
+function defaultSizes4630(sym){
+ const s=String(sym||"").toUpperCase();
+ if(s==="USDC"||s==="USDBC")return [10,25,50,100,250,500,1000,2500];
+ if(s==="WETH"||s==="CBETH")return [0.005,0.01,0.025,0.05,0.1,0.25,0.5,1];
+ if(s==="CBBTC")return [0.0001,0.00025,0.0005,0.001,0.0025,0.005,0.01,0.025];
+ return [0.001,0.005,0.01,0.05,0.1];
+}
+function candidateEdges4630(c){
+ const syms=c.path||[],pools=c.pools||[],fees=c.feeTiers||[];if(syms.length!==4||pools.length!==3)return null;
+ const out=[];
+ for(let i=0;i<3;i++){
+  const row=marketState4600.registry.get(`base:${String(pools[i]).toLowerCase()}`);if(!row)return null;
+  const from=String(syms[i]),to=String(syms[i+1]),t0sym=tokenSymbol4620(row.token0),t1sym=tokenSymbol4620(row.token1);
+  let tokenIn,tokenOut;
+  if(from===t0sym&&to===t1sym){tokenIn=row.token0;tokenOut=row.token1;}
+  else if(from===t1sym&&to===t0sym){tokenIn=row.token1;tokenOut=row.token0;}
+  else return null;
+  out.push({pool:row.pool,fee:Number(fees[i]??row.feeTier),tokenIn,tokenOut,from,to});
+ }
+ return out;
+}
+async function quoteLeg4630(quoter,leg,amountIn){
+ const started=Date.now();
+ try{
+  const q=await withTimeout4501(quoter.quoteExactInputSingle.staticCall({tokenIn:leg.tokenIn,tokenOut:leg.tokenOut,amountIn,fee:leg.fee,sqrtPriceLimitX96:0}),8000,"V3_SIM_QUOTE");
+  return {ok:true,amountOut:q.amountOut??q[0],sqrtPriceX96After:(q.sqrtPriceX96After??q[1]).toString(),initializedTicksCrossed:Number(q.initializedTicksCrossed??q[2]),gasEstimate:(q.gasEstimate??q[3]).toString(),latencyMs:Date.now()-started};
+ }catch(e){return {ok:false,error:e?.shortMessage||e?.message||String(e),errorClass:snapshotErrorClass4602(e),latencyMs:Date.now()-started};}
+}
+async function simulateCandidateSize4630(quoter,c,size){
+ const edges=candidateEdges4630(c);if(!edges)return {ok:false,size,rejectionReason:"CANDIDATE_EDGE_MAPPING_FAILED"};
+ const startSym=c.path[0],dec=decimals4630(startSym);let amount=parseUnits(String(size),dec),current=amount;const legs=[];let totalTicks=0,totalQuotedGas=0n;
+ for(const edge of edges){
+  const q=await quoteLeg4630(quoter,edge,current);
+  if(!q.ok)return {ok:false,size,startSymbol:startSym,rejectionReason:"LEG_QUOTE_FAILED",failedLeg:legs.length+1,errorClass:q.errorClass,error:q.error,legs};
+  legs.push({leg:legs.length+1,from:edge.from,to:edge.to,pool:edge.pool,feeTier:edge.fee,amountInRaw:current.toString(),amountOutRaw:q.amountOut.toString(),sqrtPriceX96After:q.sqrtPriceX96After,initializedTicksCrossed:q.initializedTicksCrossed,quotedGas:q.gasEstimate,latencyMs:q.latencyMs});
+  totalTicks+=q.initializedTicksCrossed;totalQuotedGas+=BigInt(q.gasEstimate);current=q.amountOut;
+ }
+ const pnlRaw=current-amount,returnPct=Number(pnlRaw)*100/Number(amount);
+ return {ok:true,size,startSymbol:startSym,inputRaw:amount.toString(),outputRaw:current.toString(),grossPnlRaw:pnlRaw.toString(),grossReturnPct:returnPct,positive:pnlRaw>0n,totalInitializedTicksCrossed:totalTicks,totalQuotedGas:totalQuotedGas.toString(),legs,classification:pnlRaw>0n?"V3_QUOTER_SIMULATED_POSITIVE":"V3_QUOTER_SIMULATED_REJECTED",gasCostApplied:false,flashLoanFeeApplied:false,executionEligible:false};
+}
+async function runSimulator4630(limit=20){
+ if(simulator4630.status==="RUNNING")return;
+ if(graph4620.status!=="READY")buildGraph4620();cyclesForDirty4620();
+ const candidates=graph4620.candidates.slice(0,Math.max(1,Math.min(50,Number(limit||20))));
+ if(!candidates.length){simulator4630={...simulator4630,status:"COMPLETE",startedAt:new Date().toISOString(),completedAt:new Date().toISOString(),error:null,candidatesTested:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,lastLatencyMs:0,results:[]};return;}
+ const rpc=RPC_URLS.base;if(!rpc)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ simulator4630={...simulator4630,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,candidatesTested:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[]};
+ const started=Date.now(),provider=new JsonRpcProvider(rpc,8453,{staticNetwork:false}),quoter=new Contract(BASE_V3_QUOTER_4630,V3_QUOTER_ABI_4630,provider),results=[];
+ for(const c of candidates){
+  const sizes=defaultSizes4630(c.path?.[0]),tests=[];
+  for(const size of sizes){
+   const t=await simulateCandidateSize4630(quoter,c,size);tests.push(t);simulator4630.sizeTests++;
+   if(t.ok){simulator4630.successfulRoundTrips++;if(t.positive)simulator4630.positiveRoundTrips++;}else simulator4630.quoteFailures++;
+  }
+  const good=tests.filter(x=>x.ok),positive=good.filter(x=>x.positive).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),best=positive[0]||good.sort((a,b)=>b.grossReturnPct-a.grossReturnPct)[0]||null;
+  results.push({path:c.path,pools:c.pools,feeTiers:c.feeTiers,spotGrossSpreadPct:c.grossSpotSpreadPct,sizeTests:tests,bestSize:best?best.size:null,bestGrossReturnPct:best?best.grossReturnPct:null,positiveSizes:positive.length,classification:positive.length?"SIZE_TESTED_POSITIVE_REQUIRES_ECONOMICS_GATE":"REJECTED_BY_V3_QUOTER_SIZE_TESTS"});
+  simulator4630.candidatesTested++;
+ }
+ results.sort((a,b)=>(b.bestGrossReturnPct??-Infinity)-(a.bestGrossReturnPct??-Infinity));
+ simulator4630={...simulator4630,status:"COMPLETE",completedAt:new Date().toISOString(),lastLatencyMs:Date.now()-started,results};
+}
+function simulatorSummary4630(){
+ return {success:simulator4630.status!=="ERROR",version:VERSION,status:simulator4630.status,error:simulator4630.error,architecture:"SPOT_GRAPH_CANDIDATES_TO_EXACT_V3_QUOTER_MULTI_SIZE_ROUND_TRIP_SIMULATION",startedAt:simulator4630.startedAt,completedAt:simulator4630.completedAt,candidatesTested:simulator4630.candidatesTested,sizeTests:simulator4630.sizeTests,successfulRoundTrips:simulator4630.successfulRoundTrips,positiveRoundTrips:simulator4630.positiveRoundTrips,quoteFailures:simulator4630.quoteFailures,lastLatencyMs:simulator4630.lastLatencyMs,results:simulator4630.results,limitations:{quoterBasedImpact:true,initializedTicksCrossedReported:true,localTickCache:false,continuousOptimalSolver:false,gasCostApplied:false,flashLoanFeeApplied:false,netProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/simulator/base/start",(req,res)=>{if(simulator4630.status==="RUNNING")return res.json({...simulatorSummary4630(),statusRoute:"/api/simulator/base/status"});const limit=Number(req.query.limit||20);setImmediate(async()=>{try{await runSimulator4630(limit);}catch(e){simulator4630.status="ERROR";simulator4630.completedAt=new Date().toISOString();simulator4630.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/simulator/base/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/simulator/base/status",(req,res)=>res.json(simulatorSummary4630()));
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.

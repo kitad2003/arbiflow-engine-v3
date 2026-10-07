@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.62.0 — Price Normalization & Quote Diagnostics
+ArbiFlow Engine 4.63.0 — Price Normalization & Quote Diagnostics
 
 - Fixes V3 graph pricing to account for pool token0/token1 orientation.
 - Applies ERC-20 decimal normalization before comparing pool prices.
