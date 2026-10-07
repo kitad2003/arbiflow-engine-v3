@@ -1,0 +1,35 @@
+ArbiFlow 4.71.0 Verification Record
+
+PASS — exact 4.70.0 milestone used as baseline.
+PASS — existing 4.70 candidate-engine endpoints preserved in server.js.
+PASS — package version advanced to 4.71.0.
+PASS — server.js syntax check.
+PASS — Startup4300.js syntax check.
+PASS — all existing fork/safety harness JavaScript syntax checks.
+PASS — GlobalDiscrepancy4710.js syntax check.
+PASS — new route registration statically present for all documented 4.71 endpoints.
+PASS — execution safety flags hard-coded fail-closed on all new surfaces: readOnly=true, executionEligible=false, mainnetBroadcast=false, fundsMovedOnMainnet=false.
+PASS — CEX-to-DEX candidate classification explicitly REFERENCE_SIGNAL_ONLY / executionEligible=false.
+PASS — qualified list cannot be populated by reference signal code path.
+PASS — 1inch firm quote calls require ONEINCH_API_KEY; no silent unauthenticated fallback.
+PASS — Morpho flash fee modeled as zero and capacity read from live USDC balance when Base RPC is available.
+PASS — Aave Pool is resolved through PoolAddressesProvider when possible; fallback address retained only if provider resolution fails; FLASHLOAN_PREMIUM_TOTAL read live.
+PASS — wallet balance is not used as a discovery/sizing ceiling.
+PASS — reference consensus requires at least two fresh live books.
+PASS — stale feed status is derived from last-message age.
+PASS — system readiness is separated from process status.
+
+LOCAL HTTP RUNTIME TEST — NOT COMPLETED in build workspace.
+Reason: source ZIP does not include node_modules and npm dependency installation did not complete within the workspace runtime window. This is not recorded as a runtime PASS. Render/npm install remains required before web-service execution.
+
+LIVE ACCEPTANCE STILL REQUIRED AFTER DEPLOYMENT:
+1. /api/global/start
+2. /api/system/health
+3. /api/reference/status
+4. /api/coverage/status
+5. /api/financing/status?refresh=1
+6. /api/candidates/status
+7. /api/candidates/qualified
+8. /api/validator/status
+
+Do not call the milestone fully live until those deployed results are reviewed.

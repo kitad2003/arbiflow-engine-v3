@@ -1,0 +1,42 @@
+ArbiFlow Engine 4.71.0 — Global Discrepancy Foundation
+
+Preserves the 4.70.0 candidate discovery milestone and adds a read-only global-discrepancy foundation.
+
+New surfaces:
+/api/global/start
+/api/global/stop
+/api/global/reconcile
+/api/system/health
+/api/reference/status
+/api/assets/status
+/api/market/base/status
+/api/coverage/status
+/api/candidates/status
+/api/candidates/qualified
+/api/financing/status
+/api/validator/status
+
+Milestone behavior:
+- Three independent public CEX reference-book adapters (Coinbase, Binance, Kraken) with median consensus and stale-feed handling.
+- Canonical ETH/USDC registry using chainId+address identity; symbols are display metadata only.
+- Base block heartbeat/state version.
+- Optional 1inch Base firm quote integration via ONEINCH_API_KEY. No blind quote grid.
+- Read-only Morpho USDC flash capacity from token balance; modeled flash fee 0.
+- Read-only Aave V3 pool resolution via PoolAddressesProvider, reserve capacity and live FLASHLOAN_PREMIUM_TOTAL.
+- Candidate/rejection telemetry and hard >0.50% executable-spread policy surface.
+- CEX-to-DEX discrepancies are explicitly REFERENCE SIGNAL ONLY in this milestone, never claimed as atomic arbitrage.
+- Qualified list remains fail-closed until exact simulation exists for the global candidate type.
+- Existing 4.70 candidate engine endpoints preserved.
+
+Safety:
+readOnly=true
+executionEligible=false
+mainnetBroadcast=false
+fundsMovedOnMainnet=false
+
+Required deployment environment:
+BASE_RPC_URL
+Optional but required for aggregator validation:
+ONEINCH_API_KEY
+
+This milestone intentionally does not enable mainnet execution, MetaMask, CEX account trading, bridge execution, or automatic trading.

@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.70.0";
+const VERSION = "4.71.0";
 
 /*
 =========================================================
@@ -9053,16 +9053,26 @@ app.get("/api/candidate-engine/stop",(req,res)=>{stopCandidate4700();res.json(ca
 
 /*
 =========================================================
+ArbiFlow 4.71.0 — GLOBAL DISCREPANCY FOUNDATION
+Preserves 4.70 candidate engine and adds independently observable
+reference, normalization, Base, aggregator, financing, candidate and
+validator health surfaces. Read-only; no mainnet execution.
+=========================================================
+*/
+require("./GlobalDiscrepancy4710").register(app);
+
+/*
+=========================================================
 SERVER
 =========================================================
 */
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.70.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.71.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.70.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.71.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,
