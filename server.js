@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.61.1";
+const VERSION = "4.62.0";
 
 /*
 =========================================================
@@ -8161,7 +8161,9 @@ async function refreshBasePool4610(provider,poolAddress,blockNumber,eventType){
  const pc=new Contract(poolAddress,UNISWAP_V3_POOL_READ_ABI_4470,provider);
  const [slot0,liq]=await withTimeout4501(Promise.all([pc.slot0({blockTag:blockNumber}),pc.liquidity({blockTag:blockNumber})]),6000,"BASE_LIVE_POOL_REFRESH");
  row.sqrtPriceX96=(slot0.sqrtPriceX96??slot0[0]).toString();row.tick=Number(slot0.tick??slot0[1]);row.liquidityRaw=liq.toString();row.snapshotBlock=blockNumber;row.snapshotAt=new Date().toISOString();row.source="LIVE_BASE_EVENT_RECONCILED";row.stateFreshness="LIVE_BLOCK_CONSISTENT";row.lastEventType=eventType;row.executionEligible=false;
- marketState4600.registry.set(key,row);marketState4600.lastUpdateAt=row.snapshotAt;liveBase4610.poolLastEvent.set(key,{blockNumber,eventType,at:row.snapshotAt});liveBase4610.poolsUpdated++;return true;
+ marketState4600.registry.set(key,row);marketState4600.lastUpdateAt=row.snapshotAt;liveBase4610.poolLastEvent.set(key,{blockNumber,eventType,at:row.snapshotAt});liveBase4610.lastEventAt=row.snapshotAt;liveBase4610.poolsUpdated++;
+ if(typeof markGraphDirty4620==="function")markGraphDirty4620(row.pool);
+ return true;
 }
 async function reconcileBaseRange4610(provider,fromBlock,toBlock,addresses){
  if(fromBlock>toBlock)return;
@@ -8251,6 +8253,77 @@ app.get("/api/market-state/live/base/start",async(req,res)=>{try{await startLive
 app.get("/api/market-state/live/base/status",(req,res)=>res.json(liveBaseSummary4610()));
 app.get("/api/market-state/live/base/stop",(req,res)=>{stopLiveBase4610();res.json(liveBaseSummary4610());});
 app.get("/api/market-state/live/base/pools",(req,res)=>{const limit=Math.max(1,Math.min(200,Number(req.query.limit||100))),rows=[...marketState4600.registry.values()].filter(x=>x.chain==="base");res.json({success:true,version:VERSION,count:rows.length,returned:Math.min(limit,rows.length),pools:rows.slice(0,limit),live:liveBaseSummary4610().base,executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+
+
+/*
+=========================================================
+ArbiFlow 4.62.0 — LOCAL BASE LIQUIDITY GRAPH
+Incremental, read-only candidate detection from live Base V3 state.
+Spot-price graph only: candidates are NOT executable quotes and NOT net profit.
+=========================================================
+*/
+let graph4620={status:"IDLE",builtAt:null,lastUpdateAt:null,nodes:new Map(),edges:new Map(),poolEdges:new Map(),dirtyPools:new Set(),cyclesEvaluated:0,candidateCycles:0,lastDetectionLatencyMs:null,candidates:[],executionEligible:false};
+function tokenSymbol4620(addr){
+ const a=String(addr||"").toLowerCase(),cfg=UNISWAP_V3_DISCOVERY_4470.base?.tokens||{};
+ for(const [sym,v] of Object.entries(cfg))if(String(v).toLowerCase()===a)return sym;
+ return `${a.slice(0,6)}…${a.slice(-4)}`;
+}
+function edgePrice4620(row,zeroForOne){
+ const sqrt=Number(row.sqrtPriceX96)/2**96;if(!Number.isFinite(sqrt)||sqrt<=0)return null;
+ const raw=sqrt*sqrt,fee=1-Number(row.feeTier||0)/1e6;
+ const p=zeroForOne?raw:1/raw,rate=p*fee;
+ return Number.isFinite(rate)&&rate>0?rate:null;
+}
+function upsertPoolEdges4620(row){
+ if(!row?.pool||!row?.token0||!row?.token1)return;
+ const pool=String(row.pool).toLowerCase(),t0=String(row.token0).toLowerCase(),t1=String(row.token1).toLowerCase();
+ graph4620.nodes.set(t0,{address:row.token0,symbol:tokenSymbol4620(t0)});graph4620.nodes.set(t1,{address:row.token1,symbol:tokenSymbol4620(t1)});
+ const r01=edgePrice4620(row,true),r10=edgePrice4620(row,false),ids=[];
+ if(r01){const id=`${pool}:0`;graph4620.edges.set(id,{id,pool:row.pool,from:t0,to:t1,rate:r01,feeTier:row.feeTier,tick:row.tick,liquidityRaw:row.liquidityRaw,snapshotBlock:row.snapshotBlock,updatedAt:row.snapshotAt});ids.push(id);}
+ if(r10){const id=`${pool}:1`;graph4620.edges.set(id,{id,pool:row.pool,from:t1,to:t0,rate:r10,feeTier:row.feeTier,tick:row.tick,liquidityRaw:row.liquidityRaw,snapshotBlock:row.snapshotBlock,updatedAt:row.snapshotAt});ids.push(id);}
+ graph4620.poolEdges.set(pool,ids);
+}
+function buildGraph4620(){
+ const started=Date.now();graph4620.nodes=new Map();graph4620.edges=new Map();graph4620.poolEdges=new Map();
+ const rows=[...marketState4600.registry.values()].filter(x=>x.chain==="base"&&["BLOCK_TAGGED_RPC_BOOTSTRAP","LIVE_BASE_EVENT_RECONCILED"].includes(x.source));
+ for(const row of rows)upsertPoolEdges4620(row);
+ graph4620.status="READY";graph4620.builtAt=new Date().toISOString();graph4620.lastUpdateAt=graph4620.builtAt;graph4620.lastDetectionLatencyMs=Date.now()-started;return rows.length;
+}
+function markGraphDirty4620(pool){graph4620.dirtyPools.add(String(pool).toLowerCase());}
+function cyclesForDirty4620(){
+ const started=Date.now();if(graph4620.status!=="READY")buildGraph4620();
+ const dirty=[...graph4620.dirtyPools];graph4620.dirtyPools.clear();
+ for(const pool of dirty){
+  const row=marketState4600.registry.get(`base:${pool}`);if(row)upsertPoolEdges4620(row);
+ }
+ const edges=[...graph4620.edges.values()],byFrom=new Map();for(const e of edges){const a=byFrom.get(e.from)||[];a.push(e);byFrom.set(e.from,a);}
+ const affected=dirty.length?new Set(dirty):null,candidates=[],seen=new Set();let evaluated=0;
+ for(const e1 of edges){
+  for(const e2 of byFrom.get(e1.to)||[]){
+   if(e2.pool.toLowerCase()===e1.pool.toLowerCase())continue;
+   for(const e3 of byFrom.get(e2.to)||[]){
+    if(e3.to!==e1.from||new Set([e1.pool.toLowerCase(),e2.pool.toLowerCase(),e3.pool.toLowerCase()]).size<2)continue;
+    if(affected&&!affected.has(e1.pool.toLowerCase())&&!affected.has(e2.pool.toLowerCase())&&!affected.has(e3.pool.toLowerCase()))continue;
+    evaluated++;
+    const key=[e1.id,e2.id,e3.id].sort().join("|");if(seen.has(key))continue;seen.add(key);
+    const grossMultiplier=e1.rate*e2.rate*e3.rate,grossSpreadPct=(grossMultiplier-1)*100;
+    if(Number.isFinite(grossSpreadPct)&&grossSpreadPct>0){
+     candidates.push({path:[graph4620.nodes.get(e1.from)?.symbol,graph4620.nodes.get(e1.to)?.symbol,graph4620.nodes.get(e2.to)?.symbol,graph4620.nodes.get(e3.to)?.symbol],pools:[e1.pool,e2.pool,e3.pool],feeTiers:[e1.feeTier,e2.feeTier,e3.feeTier],grossSpotMultiplier:grossMultiplier,grossSpotSpreadPct:grossSpreadPct,affectedByDirtyPool:dirty.length>0,classification:"SPOT_GRAPH_CANDIDATE_ONLY",requires:"TICK_AWARE_SWAP_SIMULATION_AND_SIZE_OPTIMIZATION"});
+    }
+   }
+  }
+ }
+ candidates.sort((a,b)=>b.grossSpotSpreadPct-a.grossSpotSpreadPct);
+ graph4620.cyclesEvaluated+=evaluated;graph4620.candidateCycles=candidates.length;graph4620.candidates=candidates.slice(0,100);graph4620.lastDetectionLatencyMs=Date.now()-started;graph4620.lastUpdateAt=new Date().toISOString();
+ return {dirtyPoolsProcessed:dirty.length,cyclesEvaluated:evaluated,candidates:graph4620.candidates};
+}
+function graphSummary4620(){
+ return {success:true,version:VERSION,status:graph4620.status,architecture:"LIVE_BASE_STATE_TO_INCREMENTAL_DIRECTED_LIQUIDITY_GRAPH_TO_AFFECTED_3_EDGE_CYCLE_DETECTION",graphNodes:graph4620.nodes.size,graphEdges:graph4620.edges.size,poolsIndexed:graph4620.poolEdges.size,dirtyPools:graph4620.dirtyPools.size,cyclesEvaluated:graph4620.cyclesEvaluated,candidateCycles:graph4620.candidateCycles,lastDetectionLatencyMs:graph4620.lastDetectionLatencyMs,builtAt:graph4620.builtAt,lastUpdateAt:graph4620.lastUpdateAt,candidates:graph4620.candidates,limitations:{spotGraphOnly:true,tickTraversal:false,tradeSizeOptimization:false,gasIncluded:false,flashLoanFeeIncluded:false,executableProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/graph/base/build",(req,res)=>{try{const pools=buildGraph4620(),scan=cyclesForDirty4620();res.json({...graphSummary4620(),poolsLoaded:pools,lastScan:scan});}catch(e){res.status(500).json({success:false,version:VERSION,error:e?.message||String(e),executionEligible:false,readOnly:true});}});
+app.get("/api/graph/base/scan",(req,res)=>{try{const scan=cyclesForDirty4620();res.json({...graphSummary4620(),lastScan:scan});}catch(e){res.status(500).json({success:false,version:VERSION,error:e?.message||String(e),executionEligible:false,readOnly:true});}});
+app.get("/api/graph/base/status",(req,res)=>res.json(graphSummary4620()));
+app.get("/api/graph/base/edges",(req,res)=>{const limit=Math.max(1,Math.min(500,Number(req.query.limit||200))),rows=[...graph4620.edges.values()];res.json({success:true,version:VERSION,count:rows.length,returned:Math.min(limit,rows.length),edges:rows.slice(0,limit),executionEligible:false,readOnly:true});});
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.

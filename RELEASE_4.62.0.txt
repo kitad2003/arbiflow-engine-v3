@@ -1,0 +1,30 @@
+ArbiFlow Engine 4.62.0 — Local Base Liquidity Graph
+
+PURPOSE
+Connect proven live Base Uniswap V3 state to an incremental local graph and candidate-cycle detector.
+
+NEW
+- Directed token graph from block-consistent/live-reconciled Base pools.
+- Two directed edges per usable pool.
+- Live pool refresh marks that pool dirty.
+- Dirty pool refresh updates only its graph edges.
+- Three-edge closed-cycle detector evaluates cycles affected by dirty pools.
+- Candidate output includes path, pools, fee tiers, gross spot multiplier/spread and explicit validation requirement.
+- Detection latency/cycle counts/dirty pool counts exposed.
+- Fixed live lastEventAt bookkeeping.
+
+ENDPOINTS
+GET /api/graph/base/build
+GET /api/graph/base/scan
+GET /api/graph/base/status
+GET /api/graph/base/edges
+
+IMPORTANT LIMITATIONS
+This is a spot-price graph detector. It does NOT model V3 tick traversal, price impact,
+optimal trade size, gas, flash-loan fees, or executable net profit. Candidates are
+classified SPOT_GRAPH_CANDIDATE_ONLY and require tick-aware simulation.
+
+SAFETY
+executionEligible=false; read-only; no signing/broadcast/fund movement.
+
+Validation: npm run check PASS.
