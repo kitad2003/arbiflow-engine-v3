@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.58.3";
+const VERSION = "4.58.4";
 
 /*
 =========================================================
@@ -7887,80 +7887,80 @@ async function exactV3FeeRoute4580(provider,chainKey,quoter,cfg,baseSym,assetSym
    grossPnlUsd:round(pnl,6),grossReturnPct:round(pnl/sizeUsd*100,6),retentionPct:round(finalUsd/sizeUsd*100,6)};
 }
 async function multiChainOpportunityWorker4581(){
- const startedAt=Date.now(),all=[],chainCoverage=[],failures={NO_POOL:0,QUOTER_REVERT:0,TIMEOUT:0,RPC_ERROR:0,NO_QUOTE:0};
- for(const chainKey of OPPORTUNITY_CHAINS_4580){
-  const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey],rpc=RPC_URLS[chainKey]||"",quoter=UNISWAP_V3_QUOTER_V1_4490[chainKey];
-  if(!cfg||!rpc||!quoter){chainCoverage.push({chain:chainKey,status:!rpc?"RPC_NOT_CONFIGURED":"ADAPTER_NOT_CONFIGURED",jobs:0,quoted:0});continue;}
-  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
-  let chainId=null;try{chainId=Number((await withTimeout4501(provider.getNetwork(),8000,`${chainKey}_NETWORK`)).chainId);}catch(e){chainCoverage.push({chain:chainKey,status:"RPC_ERROR",error:e?.message||String(e),jobs:0,quoted:0});continue;}
-  const baseSyms=["USDC","USDT","USDbC"].filter(x=>cfg.tokens[x]);
-  const assetSyms=Object.keys(cfg.tokens).filter(x=>!baseSyms.includes(x));
-  const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider);
-  const jobs=[];
-  // Only schedule fee-tier combinations backed by real pools, avoiding known-invalid blind quoter calls.
-  for(const baseSym of baseSyms)for(const assetSym of assetSyms){
-   const active=[];
-   for(const fee of OPPORTUNITY_FEE_TIERS_4580){
-    try{const pool=await withTimeout4501(factory.getPool(cfg.tokens[baseSym],cfg.tokens[assetSym],fee),5000,`${chainKey}_POOL`);
-      if(pool&&String(pool).toLowerCase()!=="0x0000000000000000000000000000000000000000")active.push({fee,pool});
-    }catch(e){failures.RPC_ERROR++;}
-   }
-   for(const sizeUsd of OPPORTUNITY_SIZES_4580)for(const b of active)for(const q of active)if(b.fee!==q.fee)jobs.push({baseSym,assetSym,sizeUsd,buyFee:b.fee,sellFee:q.fee,buyPool:b.pool,sellPool:q.pool});
-  }
-  const rows=await mapLimit4501(jobs,3,async j=>{
-   try{return {...await exactV3FeeRoute4580(provider,chainKey,quoter,cfg,j.baseSym,j.assetSym,j.sizeUsd,j.buyFee,j.sellFee),buyPool:j.buyPool,sellPool:j.sellPool,exactReadOnlyQuotes:true};}
-   catch(e){const failureClass=classifyQuoteFailure4580(e);failures[failureClass]=(failures[failureClass]||0)+1;return {...j,chain:chainKey,status:"QUOTE_FAILED",failureClass,error:e?.shortMessage||e?.message||String(e),exactReadOnlyQuotes:false};}
+ const started=Date.now();
+ const progress=opportunityScanState4581.progress;
+ const decimalCache=new Map(), poolCache=new Map();
+ const timeoutMs=12000, chainConcurrency=3, quoteConcurrency=8;
+ const getDecimals=async(cfg,token)=>{
+  const k=cfg.chain+":"+token.toLowerCase(); if(decimalCache.has(k))return decimalCache.get(k);
+  const v=Number(await withTimeout4501(new ethers.Contract(token,ERC20_META_ABI_4480,cfg.provider).decimals(),timeoutMs,"DECIMALS_TIMEOUT"));
+  decimalCache.set(k,v); return v;
+ };
+ const getPool=async(cfg,a,b,fee)=>{
+  const k=[cfg.chain,a.toLowerCase(),b.toLowerCase(),fee].join(":"); if(poolCache.has(k))return poolCache.get(k);
+  const factory=new ethers.Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,cfg.provider);
+  const v=await withTimeout4501(factory.getPool(a,b,fee),timeoutMs,"POOL_TIMEOUT"); poolCache.set(k,v); return v;
+ };
+ const scanChain=async(chain)=>{
+  const cfg=uniswapV3ChainConfig4490(chain);
+  if(!cfg)return {chain,classification:"NO_CONFIG",rows:[],failures:[]};
+  progress.currentChains=[...(progress.currentChains||[]),chain];
+  const network=await withTimeout4501(cfg.provider.getNetwork(),timeoutMs,"NETWORK_TIMEOUT");
+  const tokens=cfg.tokens||{}, stableEntries=Object.entries(tokens).filter(([sym])=>stableLike4490(sym));
+  const assetEntries=Object.entries(tokens).filter(([sym])=>!stableLike4490(sym));
+  const poolJobs=[];
+  for(const [baseSym,base] of stableEntries)for(const [assetSym,asset] of assetEntries)for(const fee of OPPORTUNITY_FEE_TIERS_4580)
+    poolJobs.push({baseSym,base,assetSym,asset,fee});
+  const pools=await mapLimit4501(poolJobs,6,async j=>{
+    try{const pool=await getPool(cfg,j.base,j.asset,j.fee);progress.poolsChecked++;return {...j,pool,ok:pool&&pool!==ethers.ZeroAddress};}
+    catch(e){progress.poolFailures++;return {...j,ok:false,error:e?.message||String(e)};}
   });
-  const ok=rows.filter(x=>x.exactReadOnlyQuotes); all.push(...ok);
-  chainCoverage.push({chain:chainKey,chainId,status:"SCANNED",stableBases:baseSyms,assets:assetSyms,jobs:jobs.length,quoted:ok.length,failed:rows.length-ok.length});
- }
- // Approximate gas in USD from a small USDC->native exact quote on each chain where possible.
- const gasCache=new Map();
- async function gasUsd(row){
-  if(gasCache.has(row.chain))return gasCache.get(row.chain);
-  const cfg=UNISWAP_V3_DISCOVERY_4470[row.chain],rpc=RPC_URLS[row.chain],native=NATIVE_GAS_SYMBOL_4511[row.chain];
-  let v=null;
-  try{
-   if(cfg&&rpc&&native&&cfg.tokens.USDC){
-    const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false}),fd=await provider.getFeeData(),gp=fd.gasPrice??fd.maxFeePerGas;
-    let nativeOut=0n;
-    for(const fee of OPPORTUNITY_FEE_TIERS_4580){try{nativeOut=await quoteV3Single4490(provider,UNISWAP_V3_QUOTER_V1_4490[row.chain],cfg.tokens.USDC,cfg.tokens[native],fee,parseUnits("100",6),row.chain);if(nativeOut>0n)break;}catch{}}
-    if(nativeOut>0n&&gp){const nd=Number(await new Contract(cfg.tokens[native],ERC20_META_ABI_4480,provider).decimals()),nativeUnits=Number(formatUnits(nativeOut,nd)),usdPerNative=100/nativeUnits;v=Number(formatUnits(gp*OPPORTUNITY_GAS_UNITS_4580,18))*usdPerNative;}
-   }
-  }catch{}
-  gasCache.set(row.chain,v);return v;
- }
- const positives=all.filter(x=>x.grossPnlUsd>0).sort((a,b)=>b.grossPnlUsd-a.grossPnlUsd);
- const ranked=[];
- for(const r of positives.slice(0,100)){
-  const g=await gasUsd(r),net=g==null?null:r.grossPnlUsd-g;
-  ranked.push({...r,modeledGasUsd:g==null?null:round(g,6),estimatedNetAfterGasUsd:net==null?null:round(net,6),minimumNetProfitUsd:15,passesMinimumNet:net!=null&&net>=15,simulationStatus:net!=null&&net>=15?"SIMULATION_CANDIDATE":"SCREEN_ONLY"});
- }
- ranked.sort((a,b)=>(b.estimatedNetAfterGasUsd??-1e99)-(a.estimatedNetAfterGasUsd??-1e99));
- return {success:true,version:VERSION,classification:"MULTI_CHAIN_OPPORTUNITY_BOARD_COMPLETE",
-  architecture:"SIX_CHAIN_V3_FAMILY_EXACT_FEE_TIER_DISLOCATION_GRAPH_PLUS_EXISTING_BASE_MULTI_DEX_AND_LIQUIDATION_MODULES",
-  coverage:{chainsTargeted:OPPORTUNITY_CHAINS_4580.length,chainsScanned:chainCoverage.filter(x=>x.status==="SCANNED").length,
-   exactQuotes:all.length,positiveGross:positives.length,probeSizesUsd:OPPORTUNITY_SIZES_4580,chainCoverage},
-  rankedOpportunities:ranked.slice(0,50),topGrossOpportunities:positives.slice(0,50),failureClasses:failures,
-  preservedArchitecture:{baseFourDexGraph:true,morphoLiquidations:true,morphoFlashLiquidity:true,aaveFlashLiquidity:true,productionExecutorPreserved:true},
-  importantLimitations:{crossVenueBeyondBase:"NOT_YET_ALL_CHAINS",cexCoverage:"NOT_YET_CONNECTED",multiHopExecution:"NOT_YET_IN_THIS_BOARD",
-   fundingBeyondBase:"NOT_YET_CONFIGURED",transactionSimulationPerformed:false,executionEligibility:false,
-   note:"This release materially broadens discovery across every currently connected V3-family chain, but fee-tier dislocations are screening candidates. No trade is executable until strategy-specific funding and transaction simulation pass."},
-  readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+  const byPair=new Map();
+  for(const q of pools.filter(x=>x.ok)){const k=q.baseSym+":"+q.assetSym;if(!byPair.has(k))byPair.set(k,[]);byPair.get(k).push(q);}
+  const jobs=[];
+  for(const routes of byPair.values())for(const buy of routes)for(const sell of routes){
+    if(buy.fee===sell.fee)continue;
+    for(const usd of OPPORTUNITY_SIZES_4580)jobs.push({cfg,buy,sell,usd});
+  }
+  progress.routeJobsBuilt+=jobs.length;
+  const rows=await mapLimit4501(jobs,quoteConcurrency,async j=>{
+    try{
+      const bd=await getDecimals(j.cfg,j.buy.base), ad=await getDecimals(j.cfg,j.buy.asset);
+      const amountIn=ethers.parseUnits(String(j.usd),bd);
+      const q1=await withTimeout4501(quoteV3Single4490(j.cfg,j.buy.base,j.buy.asset,j.buy.fee,amountIn),timeoutMs,"BUY_QUOTE_TIMEOUT");
+      const q2=await withTimeout4501(quoteV3Single4490(j.cfg,j.buy.asset,j.buy.base,j.sell.fee,q1.amountOut),timeoutMs,"SELL_QUOTE_TIMEOUT");
+      progress.quotesCompleted+=2; progress.exactQuotes+=2;
+      const out=Number(ethers.formatUnits(q2.amountOut,bd)), gross=out-j.usd;
+      if(gross>0)progress.positiveGross++;
+      return {chain,venue:j.cfg.venue||"V3",base:j.buy.baseSym,asset:j.buy.assetSym,sizeUsd:j.usd,buyFee:j.buy.fee,sellFee:j.sell.fee,amountOutUsd:out,grossUsd:gross,positive:gross>0};
+    }catch(e){progress.quoteFailures++;return null;}
+  });
+  progress.chainsCompleted++; progress.currentChains=(progress.currentChains||[]).filter(x=>x!==chain);
+  return {chain,chainId:Number(network.chainId),rows:rows.filter(Boolean)};
+ };
+ const chainResults=await mapLimit4501(OPPORTUNITY_CHAINS_4580,chainConcurrency,async chain=>{
+  try{return await scanChain(chain);}catch(e){progress.chainsCompleted++;progress.chainFailures++;return {chain,classification:"CHAIN_ERROR",error:e?.message||String(e),rows:[]};}
+ });
+ let ranked=chainResults.flatMap(x=>x.rows||[]).filter(x=>x.positive).sort((a,b)=>b.grossUsd-a.grossUsd);
+ progress.elapsedMs=Date.now()-started;
+ return {success:true,version:VERSION,classification:"MULTI_CHAIN_OPPORTUNITY_SCAN_COMPLETE",readOnly:true,
+  coverage:{chainsRequested:OPPORTUNITY_CHAINS_4580,chainsCompleted:progress.chainsCompleted,chainResults:chainResults.map(x=>({chain:x.chain,classification:x.classification||"SCANNED",rows:(x.rows||[]).length,error:x.error||null}))},
+  progress:{...progress,elapsedMs:Date.now()-started},rankedOpportunities:ranked.slice(0,100),positiveOpportunityCount:ranked.length,
+  preservedArchitecture:["Base four-DEX graph","Morpho liquidation","Morpho flash liquidity","Aave fallback","production executor"],
+  mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
 }
-
-let opportunityScanState4581={status:"IDLE",version:VERSION,startedAt:null,completedAt:null,error:null,result:null};
+let opportunityScanState4581={status:"IDLE",version:VERSION,startedAt:null,completedAt:null,error:null,result:null,progress:{chainsTotal:OPPORTUNITY_CHAINS_4580.length,chainsCompleted:0,chainFailures:0,poolsChecked:0,poolFailures:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,currentChains:[],elapsedMs:0}};
 async function runOpportunityScan4581(){
  if(opportunityScanState4581.status==="RUNNING")return;
- opportunityScanState4581={status:"RUNNING",version:VERSION,startedAt:new Date().toISOString(),completedAt:null,error:null,result:opportunityScanState4581.result};
- try{const result=await multiChainOpportunityWorker4581();opportunityScanState4581={status:"COMPLETE",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:null,result};}
- catch(e){opportunityScanState4581={status:"ERROR",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:e?.message||String(e),result:opportunityScanState4581.result};}
+ opportunityScanState4581={status:"RUNNING",version:VERSION,startedAt:new Date().toISOString(),completedAt:null,error:null,result:opportunityScanState4581.result,progress:{chainsTotal:OPPORTUNITY_CHAINS_4580.length,chainsCompleted:0,chainFailures:0,poolsChecked:0,poolFailures:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,currentChains:[],elapsedMs:0}};
+ try{const result=await multiChainOpportunityWorker4581();opportunityScanState4581={status:"COMPLETE",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:null,result,progress:opportunityScanState4581.progress};}
+ catch(e){opportunityScanState4581={status:"ERROR",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:e?.message||String(e),result:opportunityScanState4581.result,progress:opportunityScanState4581.progress};}
 }
 app.get("/api/opportunities/multichain/start",(req,res)=>{const running=opportunityScanState4581.status==="RUNNING";if(!running)setImmediate(()=>runOpportunityScan4581());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/opportunities/multichain/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
-app.get("/api/opportunities/multichain/status",(req,res)=>{const st=opportunityScanState4581;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/opportunities/multichain/status",(req,res)=>{const st=opportunityScanState4581;if(st.status==="RUNNING"&&st.startedAt)st.progress.elapsedMs=Date.now()-Date.parse(st.startedAt);res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,progress:st.progress,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/opportunities/multichain",(req,res)=>{const st=opportunityScanState4581;res.json({success:true,version:VERSION,status:st.status,instruction:st.status==="IDLE"?"Open /api/opportunities/multichain/start once, then /api/opportunities/multichain/status.":"Use /api/opportunities/multichain/status for progress/results.",startRoute:"/api/opportunities/multichain/start",statusRoute:"/api/opportunities/multichain/status",result:st.status==="COMPLETE"?st.result:null,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.3_NONBLOCKING_READINESS_GATE_REPAIR",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.4_NONBLOCKING_READINESS_GATE_REPAIR",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7970,10 +7970,10 @@ SERVER
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.58.3] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.58.4] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.58.3] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.58.4] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,
