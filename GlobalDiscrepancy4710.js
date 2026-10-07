@@ -2,7 +2,7 @@
 
 const { JsonRpcProvider, Contract, formatUnits, parseUnits, getAddress } = require("ethers");
 
-const VERSION="4.71.1";
+const VERSION="4.72.0";
 const BASE_CHAIN_ID=8453;
 const BASE_WETH="0x4200000000000000000000000000000000000006";
 const BASE_USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";

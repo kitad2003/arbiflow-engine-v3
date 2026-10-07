@@ -1,0 +1,19 @@
+ArbiFlow Engine 4.72.0 — Broad Market Candidate Discovery
+
+Built from accepted 4.71.1 baseline.
+
+Adds:
+- Background broad Base cross-DEX discovery worker (<=5 minute full scan interval)
+- Four direct venue adapters: Uniswap V3, Aerodrome, PancakeSwap V3, SushiSwap V3
+- Asset universe: WETH, cbBTC, DAI, cbETH, USDbC against USDC
+- Exact read-only round-trip quotes across venue directions
+- >0.50% executable-spread gate
+- depth gate, live gas model, Morpho/Aave funding economics, $15 net gate
+- /api/discovery/start, /api/discovery/status, /api/discovery/scan, /api/discovery/qualified
+
+Preserves:
+- 4.71.1 CEX reference / 1inch / financing health surfaces
+- 4.70 candidate engine endpoints
+- fail-closed read-only safety
+
+Important: SIMULATION_ELIGIBLE is not execution approval. Mainnet broadcast and funds movement remain disabled.

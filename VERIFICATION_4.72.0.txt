@@ -1,0 +1,8 @@
+ArbiFlow 4.72.0 verification
+- node --check server.js: PASS
+- node --check GlobalDiscrepancy4710.js: PASS
+- npm run check: PASS
+- startup fail-closed without BASE_RPC_URL: PASS (expected environment gate)
+- broad discovery mainnet execution: DISABLED
+- readOnly: TRUE by design
+- live market behavior: REQUIRES DEPLOYMENT ACCEPTANCE TEST; not claimed locally

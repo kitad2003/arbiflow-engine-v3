@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.71.0";
+const VERSION = "4.72.0";
 
 /*
 =========================================================
@@ -7810,6 +7810,44 @@ async function crossDexEconomicDiagnostic4531(){
 }
 app.get("/api/diagnostics/multimarket/cross-dex-economic",async(req,res)=>{try{res.json(await crossDexEconomicDiagnostic4531());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
+/*
+=========================================================
+ARBIFLOW 4.72.0 — BROAD MARKET CANDIDATE DISCOVERY
+Promotes the already-validated four-venue Base cross-DEX diagnostic
+into a bounded background discovery worker. It does not execute trades.
+=========================================================
+*/
+const DISCOVERY4720_INTERVAL_MS=Math.max(60000,Math.min(300000,Number(process.env.ARBIFLOW_BROAD_DISCOVERY_MS||"300000")));
+const DISCOVERY4720_MIN_SPREAD_PCT=Math.max(0.01,Number(process.env.ARBIFLOW_GLOBAL_MIN_SPREAD_PCT||"0.50"));
+const DISCOVERY4720_MIN_NET_USD=Math.max(0,Number(process.env.ARBIFLOW_GLOBAL_MIN_NET_USD||"15"));
+const discovery4720=global.__arbiflow4720||{status:"IDLE",startedAt:null,lastRunAt:null,lastCompletedAt:null,lastError:null,runs:0,jobsEvaluated:0,exactQuotes:0,positiveBeforeGas:0,spreadGatePassed:0,depthPassed:0,netGatePassed:0,simulationEligible:0,candidates:[],rejections:{},timer:null,running:false};
+global.__arbiflow4720=discovery4720;
+function reject4720(reason,n=1){discovery4720.rejections[reason]=(discovery4720.rejections[reason]||0)+n;}
+function candidate4720(x){
+ const input=Number(x.inputUsd||0),gross=Number(x.roundTripPnlBeforeGasUsd||0),spread=input>0?gross/input*100:null;
+ const f=x.funding||{};let financingProvider=null,net=null;
+ const choices=[['MORPHO',f.morphoFlash],['AAVE_V3',f.aaveFlash],['OWN_CAPITAL',f.ownCapital]].filter(([,v])=>v&&Number.isFinite(Number(v.estimatedNetProfitUsd)));
+ choices.sort((a,b)=>Number(b[1].estimatedNetProfitUsd)-Number(a[1].estimatedNetProfitUsd));if(choices.length){financingProvider=choices[0][0];net=Number(choices[0][1].estimatedNetProfitUsd);}
+ const spreadPass=Number.isFinite(spread)&&spread>DISCOVERY4720_MIN_SPREAD_PCT,depthPass=Boolean(x.depthGate?.passed),netPass=Number.isFinite(net)&&net>=DISCOVERY4720_MIN_NET_USD;
+ let reason=null;if(!spreadPass)reason="EXECUTABLE_SPREAD_TOO_LOW";else if(!depthPass)reason="INSUFFICIENT_DEPTH";else if(!netPass)reason="NET_PROFIT_TOO_LOW";else reason="SIMULATION_REQUIRED";
+ return {candidateId:`BASE:${x.asset}:${x.buyVenue}:${x.sellVenue}:${input}`,opportunityType:"SAME_CHAIN_DEX_TO_DEX",canonicalPair:`${x.asset}/USDC`,chainId:8453,buyVenue:x.buyVenue,sellVenue:x.sellVenue,referencePrice:null,rawSpreadPct:spread,executableSpreadPct:spread,optimalNotionalUsd:input,grossProfitUsd:gross,estimatedNetProfitUsd:net,financingProvider,riskLevel:"UNASSESSED",detectedAt:new Date().toISOString(),stateVersion:`base-broad:${discovery4720.runs}`,quoteAgeMs:0,deadline:new Date(Date.now()+DISCOVERY4720_INTERVAL_MS).toISOString(),validationStatus:"EXACT_READ_ONLY_ROUND_TRIP",simulationStatus:"NOT_RUN",executionMode:"READ_ONLY",executionEligible:false,status:reason==="SIMULATION_REQUIRED"?"SIMULATION_ELIGIBLE":"REJECTED",rejectionReason:reason,depthGate:x.depthGate,gasModel:x.gasModel};
+}
+async function runBroadDiscovery4720(){
+ if(discovery4720.running)return {started:false,reason:"RUN_ALREADY_IN_PROGRESS"};discovery4720.running=true;discovery4720.status="RUNNING";discovery4720.lastRunAt=new Date().toISOString();
+ try{const r=await crossDexEconomicDiagnostic4531();discovery4720.runs++;discovery4720.lastCompletedAt=new Date().toISOString();discovery4720.lastError=null;discovery4720.jobsEvaluated+=Number(r.gates?.jobsEvaluated||0);discovery4720.exactQuotes+=Number(r.coverage?.exactRoundTripsQuoted||0);discovery4720.positiveBeforeGas+=Number(r.coverage?.positiveBeforeGas||0);
+  const cs=(r.results||[]).filter(x=>x.exactReadOnlyQuotes).map(candidate4720);discovery4720.candidates=cs.sort((a,b)=>Number(b.estimatedNetProfitUsd??-1e99)-Number(a.estimatedNetProfitUsd??-1e99)).slice(0,100);
+  let sp=0,dp=0,np=0;for(const c of cs){if(Number(c.executableSpreadPct)>DISCOVERY4720_MIN_SPREAD_PCT)sp++;if(c.depthGate?.passed)dp++;if(c.status==="SIMULATION_ELIGIBLE")np++;if(c.rejectionReason)reject4720(c.rejectionReason);}discovery4720.spreadGatePassed+=sp;discovery4720.depthPassed+=dp;discovery4720.netGatePassed+=np;discovery4720.simulationEligible+=np;
+  return {started:true,completed:true,candidates:cs.length,simulationEligible:np};
+ }catch(e){discovery4720.lastError=e?.message||String(e);reject4720("DISCOVERY_RUN_FAILED");return {started:true,completed:false,error:discovery4720.lastError};}finally{discovery4720.running=false;}
+}
+function startBroadDiscovery4720(){if(discovery4720.timer)return false;discovery4720.status="RUNNING";discovery4720.startedAt=discovery4720.startedAt||new Date().toISOString();setImmediate(()=>runBroadDiscovery4720());discovery4720.timer=setInterval(()=>runBroadDiscovery4720(),DISCOVERY4720_INTERVAL_MS);return true;}
+function broadSummary4720(){const eligible=discovery4720.candidates.filter(x=>x.status==="SIMULATION_ELIGIBLE");return {success:true,version:VERSION,status:discovery4720.status,architecture:"FOUR_VENUE_BASE_BROAD_DISCOVERY_TO_DEPTH_TO_NET_DOLLAR_TO_SIMULATION_GATE",intervalMs:DISCOVERY4720_INTERVAL_MS,coverage:{chain:"Base",chainId:8453,venues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520},policy:{minimumExecutableSpreadPct:DISCOVERY4720_MIN_SPREAD_PCT,minimumNetProfitUsd:DISCOVERY4720_MIN_NET_USD,simulationRequired:true},metrics:{runs:discovery4720.runs,jobsEvaluated:discovery4720.jobsEvaluated,exactQuotes:discovery4720.exactQuotes,positiveBeforeGas:discovery4720.positiveBeforeGas,spreadGatePassed:discovery4720.spreadGatePassed,depthPassed:discovery4720.depthPassed,netGatePassed:discovery4720.netGatePassed,simulationEligible:discovery4720.simulationEligible},rejections:discovery4720.rejections,lastRunAt:discovery4720.lastRunAt,lastCompletedAt:discovery4720.lastCompletedAt,lastError:discovery4720.lastError,candidateCount:discovery4720.candidates.length,simulationEligibleCount:eligible.length,candidates:discovery4720.candidates.slice(0,30),simulationEligible:eligible.slice(0,20),readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};}
+app.get("/api/discovery/start",(req,res)=>{const started=startBroadDiscovery4720();res.json({...broadSummary4720(),startResult:started?"STARTED_BACKGROUND":"ALREADY_RUNNING",statusRoute:"/api/discovery/status"});});
+app.get("/api/discovery/status",(req,res)=>res.json(broadSummary4720()));
+app.get("/api/discovery/scan",(req,res)=>{setImmediate(()=>runBroadDiscovery4720());res.json({...broadSummary4720(),scanResult:"STARTED_BACKGROUND"});});
+app.get("/api/discovery/qualified",(req,res)=>{const s=broadSummary4720();res.json({success:true,version:VERSION,policy:s.policy,count:s.simulationEligibleCount,candidates:s.simulationEligible,readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+
+
 
 /*
 =========================================================
@@ -9060,6 +9098,8 @@ validator health surfaces. Read-only; no mainnet execution.
 =========================================================
 */
 require("./GlobalDiscrepancy4710").register(app);
+// 4.72 broad discovery starts independently; failures cannot block the web process.
+startBroadDiscovery4720();
 
 /*
 =========================================================
@@ -9069,10 +9109,10 @@ SERVER
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.71.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.72.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.71.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.72.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,
