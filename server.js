@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.56.0";
+const VERSION = "4.56.1";
 
 /*
 =========================================================
@@ -7599,7 +7599,7 @@ USDC probe sizes. No approvals, signatures, swaps, loans or broadcasts.
 */
 
 
-/* ARBIFLOW 4.56.0 - SUSHISWAP V3 BASE DIRECT READ-ONLY ADAPTER */
+/* ARBIFLOW 4.56.1 - SUSHISWAP V3 BASE DIRECT READ-ONLY ADAPTER */
 const SUSHISWAP_V3_BASE = {
   factory: "0xc35DADB65012eC5796536bD9864eD8773aBc74C4",
   quoter: "0xb1E835Dc2785b52265711e17fCCb0fd018226a6e",
@@ -7663,7 +7663,12 @@ async function crossDexRoundTrip4520({asset,sizeUsd,buyVenue,sellVenue}){
     const pnl=finalUsd-Number(sizeUsd);
     return {asset,inputUsd:sizeUsd,buyVenue,sellVenue,intermediateAmount:first.buyAmount,finalUsd:round(finalUsd,6),roundTripPnlBeforeGasUsd:round(pnl,6),roundTripRetentionPct:round((finalUsd/Number(sizeUsd))*100,6),positiveBeforeGas:pnl>0,buyQuote:first,sellQuote:second,exactReadOnlyQuotes:true,mainnetBroadcast:false,fundsMoved:false};
   }catch(error){
-    return {asset,inputUsd:sizeUsd,buyVenue,sellVenue,status:"QUOTE_PATH_UNAVAILABLE",error:error?.shortMessage||error?.message||String(error),exactReadOnlyQuotes:false,mainnetBroadcast:false,fundsMoved:false};
+    const message=error?.shortMessage||error?.message||String(error);
+    const upper=String(message).toUpperCase();
+    let failureClass="NO_QUOTE";
+    if(upper.includes("POOL") && (upper.includes("NO")||upper.includes("NOT")||upper.includes("MISSING")||upper.includes("UNAVAILABLE"))) failureClass="NO_POOL";
+    else if(upper.includes("RPC")||upper.includes("TIMEOUT")||upper.includes("NETWORK")||upper.includes("SERVER")||upper.includes("429")||upper.includes("503")) failureClass="RPC_ERROR";
+    return {asset,inputUsd:sizeUsd,buyVenue,sellVenue,status:"QUOTE_PATH_UNAVAILABLE",failureClass,error:message,exactReadOnlyQuotes:false,mainnetBroadcast:false,fundsMoved:false};
   }
 }
 
@@ -7684,8 +7689,23 @@ async function multiDexCrossVenueDiagnostic4520(){
   });
   await Promise.all(workers);
   const quoted=results.filter(x=>x.exactReadOnlyQuotes);
+  const failed=results.filter(x=>!x.exactReadOnlyQuotes);
   const positive=quoted.filter(x=>x.positiveBeforeGas).sort((a,b)=>b.roundTripPnlBeforeGasUsd-a.roundTripPnlBeforeGasUsd);
-  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"FOUR_VENUE_BASE_EXACT_READ_ONLY_CROSS_DEX_GRAPH",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth},{id:"PANCAKESWAP_V3",chain:"Base",health:pancakeHealth},{id:"SUSHISWAP_V3",chain:"Base",health:sushiHealth}],coverage:{chains:1,venueAdapters:4,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,routeDirections:12,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,positiveBeforeGas:positive.length},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+  const failureClasses={NO_POOL:0,NO_QUOTE:0,RPC_ERROR:0};
+  for(const x of failed) failureClasses[x.failureClass]=(failureClasses[x.failureClass]||0)+1;
+  const venueCoverage={};
+  const assetCoverage={};
+  for(const v of ["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"]){
+    const touched=results.filter(x=>x.buyVenue===v||x.sellVenue===v);
+    venueCoverage[v]={jobs:touched.length,quoted:touched.filter(x=>x.exactReadOnlyQuotes).length,failed:touched.filter(x=>!x.exactReadOnlyQuotes).length};
+    venueCoverage[v].successPct=round(venueCoverage[v].jobs?venueCoverage[v].quoted/venueCoverage[v].jobs*100:0,2);
+  }
+  for(const a of CROSS_DEX_ASSETS_4520){
+    const touched=results.filter(x=>x.asset===a);
+    assetCoverage[a]={jobs:touched.length,quoted:touched.filter(x=>x.exactReadOnlyQuotes).length,failed:touched.filter(x=>!x.exactReadOnlyQuotes).length};
+    assetCoverage[a].successPct=round(assetCoverage[a].jobs?assetCoverage[a].quoted/assetCoverage[a].jobs*100:0,2);
+  }
+  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"FOUR_VENUE_BASE_EXACT_READ_ONLY_CROSS_DEX_GRAPH_WITH_ROUTE_COVERAGE",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth},{id:"PANCAKESWAP_V3",chain:"Base",health:pancakeHealth},{id:"SUSHISWAP_V3",chain:"Base",health:sushiHealth}],coverage:{chains:1,venueAdapters:4,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,routeDirections:12,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,failedRoundTrips:failed.length,positiveBeforeGas:positive.length},routeCoverage:{failureClasses,venueCoverage,assetCoverage,failedRoutes:failed},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/cross-dex-base",async(req,res)=>{try{res.json(await multiDexCrossVenueDiagnostic4520());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7769,7 +7789,7 @@ async function crossDexEconomicDiagnostic4531(){
 }
 app.get("/api/diagnostics/multimarket/cross-dex-economic",async(req,res)=>{try{res.json(await crossDexEconomicDiagnostic4531());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.56.0_BASE_SUSHISWAP_V3_EXPANSION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.56.1_BASE_SUSHISWAP_V3_EXPANSION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
