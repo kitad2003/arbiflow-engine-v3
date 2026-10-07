@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.47.1";
+const VERSION = "4.48.0";
 
 /*
 =========================================================
@@ -7282,11 +7282,81 @@ async function discoverUniswapV3Pools4470(){
 }
 app.get("/api/diagnostics/multimarket/dex-pools",async(req,res)=>{try{res.json(await discoverUniswapV3Pools4470());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
+
+
+/*
+=========================================================
+ARBIFLOW 4.48 REAL POOL PRICE + SPREAD DIAGNOSTIC - READ ONLY
+
+Reads live Uniswap V3 pool slot0 state from the pools discovered by
+4.47.1, normalizes token decimals, and compares fee-tier pools for the
+same pair on the same chain. This is a market-state diagnostic, not an
+execution quote: it does not claim executable profit and does not sign,
+approve, swap, borrow, or broadcast.
+=========================================================
+*/
+const UNISWAP_V3_POOL_STATE_ABI_4480 = [
+  "function slot0() view returns (uint160 sqrtPriceX96,int24 tick,uint16 observationIndex,uint16 observationCardinality,uint16 observationCardinalityNext,uint8 feeProtocol,bool unlocked)",
+  "function liquidity() view returns (uint128)",
+  "function token0() view returns (address)",
+  "function token1() view returns (address)"
+];
+const ERC20_META_ABI_4480 = ["function decimals() view returns (uint8)","function symbol() view returns (string)"];
+function ratio4480(sqrtPriceX96,dec0,dec1){
+  const q=Number(sqrtPriceX96)/2**96;
+  if(!Number.isFinite(q)||q<=0)return null;
+  const raw=q*q;
+  const px=raw*(10**(Number(dec0)-Number(dec1)));
+  return Number.isFinite(px)&&px>0?px:null;
+}
+async function realDexSpreadDiagnostic4480(){
+  const startedAt=Date.now();
+  const discovery=await discoverUniswapV3Pools4470();
+  const chains=[]; let poolsPriced=0,pairsCompared=0,comparisons=0;
+  const allSpreads=[];
+  for(const c of discovery.chains){
+    if(c.status!=="SCANNED"){chains.push({key:c.key,name:c.name,chainId:c.chainId,status:c.status,pairs:[]});continue;}
+    const rpc=RPC_URLS[c.key]||""; const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+    const groups=new Map();
+    for(const p of c.pools||[]){if(!p.pool||!p.hasLiquidity)continue; const a=groups.get(p.pair)||[]; a.push(p); groups.set(p.pair,a);}
+    const pairResults=[];
+    for(const [pair,pools] of groups){
+      const states=[];
+      for(const p of pools){
+        try{
+          const pc=new Contract(p.pool,UNISWAP_V3_POOL_STATE_ABI_4480,provider);
+          const [slot,liq,t0,t1]=await Promise.all([pc.slot0(),pc.liquidity(),pc.token0(),pc.token1()]);
+          const [d0,d1]=await Promise.all([new Contract(t0,ERC20_META_ABI_4480,provider).decimals(),new Contract(t1,ERC20_META_ABI_4480,provider).decimals()]);
+          const token1PerToken0=ratio4480(slot.sqrtPriceX96??slot[0],d0,d1);
+          states.push({dex:"Uniswap V3",pair,feeTier:p.feeTier,pool:p.pool,token0:t0,token1:t1,decimals0:Number(d0),decimals1:Number(d1),sqrtPriceX96:String(slot.sqrtPriceX96??slot[0]),tick:Number(slot.tick??slot[1]),liquidityRaw:String(liq),token1PerToken0,readOnly:true});
+          poolsPriced++;
+        }catch(e){states.push({dex:"Uniswap V3",pair,feeTier:p.feeTier,pool:p.pool,status:"POOL_STATE_READ_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true});}
+      }
+      const priced=states.filter(x=>x.token1PerToken0&&Number.isFinite(x.token1PerToken0));
+      const spreads=[];
+      if(priced.length>=2){pairsCompared++; for(let i=0;i<priced.length;i++)for(let j=i+1;j<priced.length;j++){
+        const a=priced[i],b=priced[j]; const lo=a.token1PerToken0<=b.token1PerToken0?a:b, hi=lo===a?b:a;
+        const grossPct=((hi.token1PerToken0/lo.token1PerToken0)-1)*100;
+        const feePct=(Number(lo.feeTier)+Number(hi.feeTier))/10000;
+        const feeAdjustedPct=grossPct-feePct;
+        const row={chain:c.name,chainKey:c.key,pair,buyPool:lo.pool,buyFeeTier:lo.feeTier,buySpot:lo.token1PerToken0,sellPool:hi.pool,sellFeeTier:hi.feeTier,sellSpot:hi.token1PerToken0,grossSpotSpreadPct:Number(grossPct.toFixed(8)),combinedPoolFeePct:Number(feePct.toFixed(6)),feeAdjustedSpotSpreadPct:Number(feeAdjustedPct.toFixed(8)),classification:feeAdjustedPct>0?"POSITIVE_SPOT_DIVERGENCE":"NO_FEE_ADJUSTED_SPOT_EDGE",executableQuoteConfirmed:false,readOnly:true};
+        spreads.push(row); allSpreads.push(row); comparisons++;
+      }}
+      spreads.sort((a,b)=>b.feeAdjustedSpotSpreadPct-a.feeAdjustedSpotSpreadPct);
+      pairResults.push({pair,pools:states,comparisons:spreads});
+    }
+    chains.push({key:c.key,name:c.name,chainId:c.chainId,status:"SCANNED_AND_PRICED",pairs:pairResults});
+  }
+  allSpreads.sort((a,b)=>b.feeAdjustedSpotSpreadPct-a.feeAdjustedSpotSpreadPct);
+  return {success:true,version:VERSION,classification:"REAL_DEX_SPOT_SPREAD_DIAGNOSTIC_COMPLETE",architecture:"MULTI_CHAIN_UNISWAP_V3_SLOT0_NORMALIZED_SPOT_COMPARISON",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsScanned:chains.filter(x=>x.status==="SCANNED_AND_PRICED").length,poolsDiscovered:discovery.coverage.poolsDiscovered,poolsPriced,pairsCompared,poolPairComparisons:comparisons},topFeeAdjustedSpotDivergences:allSpreads.slice(0,25),chains,importantLimitations:{executableQuoteConfirmed:false,slippageModeled:false,gasUsdModeled:false,flashFundingModeled:false,mevModeled:false,note:"Positive spot divergence is a screening signal only. It is not an executable arbitrage or profit claim. Exact-size quotes and transaction simulation are required before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+}
+app.get("/api/diagnostics/multimarket/dex-spreads",async(req,res)=>{try{res.json(await realDexSpreadDiagnostic4480());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_SPOT_SPREAD_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
+
 app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.47.1_DEX_ADDRESS_NORMALIZATION_FIX",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.48.0_REAL_DEX_SPOT_SPREAD_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7295,7 +7365,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.47.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.48.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
