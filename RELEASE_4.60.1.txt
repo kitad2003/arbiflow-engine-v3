@@ -1,0 +1,20 @@
+ArbiFlow Engine 4.60.1 — Bootstrap Handoff & Integrity Gate
+
+Fixes the 4.60.0 live-deployment condition where discovery found 147 pools / 100 nonzero-liquidity pools but the market-state registry remained empty.
+
+CHANGES
+- Bootstrap chain eligibility now derives from actual discovered pool payloads, not a single discovery status string.
+- Adds explicit pipeline counters:
+  poolsDiscovered, poolsNonzeroLiquidity, chainsReturned, chainsEligible,
+  poolsEligible, snapshotAttempts, snapshotSuccesses, snapshotFailures, registryStored.
+- Adds hard integrity failures for:
+  discovery with no eligible handoff,
+  discovered pools with empty registry,
+  eligible chains with no bootstrap blocks,
+  registry count != snapshot success count.
+- Per-chain snapshot status and failure counts exposed.
+- Existing cross-DEX/candidate diagnostic endpoints preserved.
+- WebSocket/event reconciliation/reorg/tick cache remain intentionally NOT_ACTIVE.
+- Execution remains fail-closed/read-only.
+
+Validation: npm run check PASS.

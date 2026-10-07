@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.60.0";
+const VERSION = "4.60.1";
 
 /*
 =========================================================
@@ -8049,22 +8049,59 @@ function marketStateSummary4600(){
 }
 async function bootstrapMarketState4600(){
  const started=Date.now(), discovery=await discoverUniswapV3Pools4470(), registry=new Map(), chains={}, blocks={};
- const scanned=(discovery.chains||[]).filter(x=>x.status==="SCANNED");
- await mapLimit4501(scanned,3,async ch=>{
-  const rpc=RPC_URLS[ch.key]||""; if(!rpc)return;
-  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
-  const bootstrapBlock=await withTimeout4501(provider.getBlockNumber(),8000,`${ch.key}_BOOTSTRAP_BLOCK`); blocks[ch.key]=bootstrapBlock;
-  const valid=(ch.pools||[]).filter(x=>x.pool&&x.hasLiquidity);
-  const rows=await mapLimit4501(valid,8,async meta=>{try{
-   const pc=new Contract(meta.pool,UNISWAP_V3_POOL_READ_ABI_4470,provider);
-   const [slot0,liq,t0,t1]=await withTimeout4501(Promise.all([pc.slot0({blockTag:bootstrapBlock}),pc.liquidity({blockTag:bootstrapBlock}),pc.token0({blockTag:bootstrapBlock}),pc.token1({blockTag:bootstrapBlock})]),9000,`${ch.key}_BOOTSTRAP_STATE`);
-   return {ok:true,value:{key:`${ch.key}:${String(meta.pool).toLowerCase()}`,chain:ch.key,chainId:ch.chainId,dex:meta.dex,pair:meta.pair,pool:meta.pool,feeTier:meta.feeTier,token0:String(t0),token1:String(t1),sqrtPriceX96:(slot0.sqrtPriceX96??slot0[0]).toString(),tick:Number(slot0.tick??slot0[1]),liquidityRaw:liq.toString(),bootstrapBlock,snapshotBlock:bootstrapBlock,snapshotAt:new Date().toISOString(),source:"BLOCK_TAGGED_RPC_BOOTSTRAP",stateFreshness:"BOOTSTRAP_ONLY",readOnly:true}}; 
-  }catch(e){return {ok:false,error:e?.message||String(e),pool:meta.pool};}});
-  const good=rows.filter(x=>x?.ok).map(x=>x.value); for(const row of good)registry.set(row.key,row);
-  chains[ch.key]={chainId:ch.chainId,bootstrapBlock,discoveredPools:valid.length,snapshottedPools:good.length,snapshotFailures:rows.length-good.length};
+ const discoveredTotal=Number(discovery?.coverage?.poolsDiscovered||0);
+ const nonzeroTotal=Number(discovery?.coverage?.poolsWithNonzeroLiquidity||0);
+ const chainRows=(discovery.chains||[]);
+ // Integrity fix 4.60.1: eligibility is based on actual discovered pool payload,
+ // not a brittle status-string handoff.
+ const eligibleChains=chainRows.filter(ch=>Array.isArray(ch?.pools)&&ch.pools.some(x=>x?.pool&&x?.hasLiquidity));
+ const counters={poolsDiscovered:discoveredTotal,poolsNonzeroLiquidity:nonzeroTotal,chainsReturned:chainRows.length,chainsEligible:eligibleChains.length,poolsEligible:0,snapshotAttempts:0,snapshotSuccesses:0,snapshotFailures:0,registryStored:0};
+ if(discoveredTotal>0 && eligibleChains.length===0){
+   const err=new Error(`BOOTSTRAP_INTEGRITY_DISCOVERY_HANDOFF_EMPTY: discovered=${discoveredTotal} nonzero=${nonzeroTotal} chainRows=${chainRows.length}`);
+   err.code="BOOTSTRAP_INTEGRITY_DISCOVERY_HANDOFF_EMPTY"; throw err;
+ }
+ await mapLimit4501(eligibleChains,3,async ch=>{
+  const rpc=RPC_URLS[ch.key]||"";
+  const valid=(ch.pools||[]).filter(x=>x?.pool&&x?.hasLiquidity);
+  counters.poolsEligible+=valid.length;
+  if(!rpc){chains[ch.key]={chainId:ch.chainId,status:"RPC_NOT_CONFIGURED",discoveredPools:valid.length,snapshottedPools:0,snapshotFailures:valid.length};counters.snapshotFailures+=valid.length;return;}
+  try{
+   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+   const bootstrapBlock=await withTimeout4501(provider.getBlockNumber(),8000,`${ch.key}_BOOTSTRAP_BLOCK`);
+   blocks[ch.key]=bootstrapBlock;
+   counters.snapshotAttempts+=valid.length;
+   const rows=await mapLimit4501(valid,8,async meta=>{try{
+    const pc=new Contract(meta.pool,UNISWAP_V3_POOL_READ_ABI_4470,provider);
+    const [slot0,liq,t0,t1]=await withTimeout4501(Promise.all([
+      pc.slot0({blockTag:bootstrapBlock}),pc.liquidity({blockTag:bootstrapBlock}),
+      pc.token0({blockTag:bootstrapBlock}),pc.token1({blockTag:bootstrapBlock})
+    ]),9000,`${ch.key}_BOOTSTRAP_STATE`);
+    return {ok:true,value:{key:`${ch.key}:${String(meta.pool).toLowerCase()}`,chain:ch.key,chainId:ch.chainId,dex:meta.dex,pair:meta.pair,pool:meta.pool,feeTier:meta.feeTier,token0:String(t0),token1:String(t1),sqrtPriceX96:(slot0.sqrtPriceX96??slot0[0]).toString(),tick:Number(slot0.tick??slot0[1]),liquidityRaw:liq.toString(),bootstrapBlock,snapshotBlock:bootstrapBlock,snapshotAt:new Date().toISOString(),source:"BLOCK_TAGGED_RPC_BOOTSTRAP",stateFreshness:"BOOTSTRAP_ONLY",readOnly:true}};
+   }catch(e){return {ok:false,error:e?.message||String(e),pool:meta.pool};}});
+   const good=rows.filter(x=>x?.ok).map(x=>x.value), failures=rows.length-good.length;
+   counters.snapshotSuccesses+=good.length;counters.snapshotFailures+=failures;
+   for(const row of good)registry.set(row.key,row);
+   chains[ch.key]={chainId:ch.chainId,status:"SNAPSHOT_COMPLETE",bootstrapBlock,discoveredPools:valid.length,snapshotAttempts:rows.length,snapshottedPools:good.length,snapshotFailures:failures};
+  }catch(e){
+   counters.snapshotAttempts+=valid.length;counters.snapshotFailures+=valid.length;
+   chains[ch.key]={chainId:ch.chainId,status:"BOOTSTRAP_BLOCK_OR_CHAIN_FAILED",discoveredPools:valid.length,snapshottedPools:0,snapshotFailures:valid.length,error:e?.message||String(e)};
+  }
  });
+ counters.registryStored=registry.size;
+ if(discoveredTotal>0 && registry.size===0){
+   const err=new Error(`BOOTSTRAP_INTEGRITY_EMPTY_REGISTRY: discovered=${discoveredTotal} eligible=${counters.poolsEligible} attempts=${counters.snapshotAttempts} failures=${counters.snapshotFailures}`);
+   err.code="BOOTSTRAP_INTEGRITY_EMPTY_REGISTRY"; throw err;
+ }
+ if(eligibleChains.length>0 && Object.keys(blocks).length===0){
+   const err=new Error(`BOOTSTRAP_INTEGRITY_NO_BOOTSTRAP_BLOCKS: eligibleChains=${eligibleChains.length}`);
+   err.code="BOOTSTRAP_INTEGRITY_NO_BOOTSTRAP_BLOCKS"; throw err;
+ }
+ if(registry.size!==counters.snapshotSuccesses){
+   const err=new Error(`BOOTSTRAP_INTEGRITY_REGISTRY_COUNT_MISMATCH: successes=${counters.snapshotSuccesses} registry=${registry.size}`);
+   err.code="BOOTSTRAP_INTEGRITY_REGISTRY_COUNT_MISMATCH"; throw err;
+ }
  marketState4600.registry=registry;marketState4600.chains=chains;marketState4600.bootstrapBlockByChain=blocks;marketState4600.lastUpdateAt=new Date().toISOString();
- return {success:true,version:VERSION,classification:"MARKET_STATE_BOOTSTRAP_COMPLETE",architecture:"FACTORY_DISCOVERY_TO_BLOCK_TAGGED_POOL_SNAPSHOT_TO_IN_MEMORY_REGISTRY",elapsedMs:Date.now()-started,discoveryCoverage:discovery.coverage,chains,registryCount:registry.size,synchronization:{bootstrapComplete:true,eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",tickStateCache:"NOT_ACTIVE",executionEligible:false},readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
+ return {success:true,version:VERSION,classification:"MARKET_STATE_BOOTSTRAP_COMPLETE",architecture:"DISCOVERED_POOL_PAYLOAD_TO_BLOCK_TAGGED_SNAPSHOT_TO_IN_MEMORY_REGISTRY_WITH_INTEGRITY_GATES",elapsedMs:Date.now()-started,discoveryCoverage:discovery.coverage,counters,chains,registryCount:registry.size,synchronization:{bootstrapComplete:true,eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",tickStateCache:"NOT_ACTIVE",executionEligible:false},readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
 }
 async function runMarketBootstrap4600(){
  if(marketState4600.status==="RUNNING")return;
