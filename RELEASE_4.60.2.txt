@@ -1,0 +1,22 @@
+ArbiFlow Engine 4.60.2 — Snapshot Diagnostics & Resilience
+
+PURPOSE
+Diagnose and reduce the 4.60.1 snapshot failures, especially Base 0/22, without weakening execution safety.
+
+CHANGES
+- Independent slot0/liquidity/token0/token1 reads per pool.
+- Per-field latency, error class, error message and fallback result.
+- Failure classes: TIMEOUT, HISTORICAL_BLOCK_UNAVAILABLE, CALL_REVERT, RPC_TRANSPORT, DECODE_ERROR, OTHER.
+- Controlled latest-state fallback for failed block-tagged reads.
+- Latest/mixed fallback state is explicitly UNSYNCHRONIZED_LATEST_FALLBACK and executionEligible=false.
+- Block-consistent state labeled BOOTSTRAP_BLOCK_CONSISTENT.
+- Pool snapshot concurrency reduced from 8 to 4.
+- Bootstrap block timeout raised from 8s to 12s.
+- Per-field read timeout is 7s.
+- Counters separate blockTaggedSuccesses from latestFallbackSuccesses.
+- Per-pool diagnostics returned by bootstrap status result.
+- 4.60.1 integrity gates retained.
+- Existing cross-DEX and candidate diagnostics preserved.
+- WebSocket/event reconciliation/reorg/tick cache remain NOT_ACTIVE.
+
+Validation: npm run check PASS.
