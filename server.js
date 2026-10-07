@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.46.0";
+const VERSION = "4.47.0";
 
 /*
 =========================================================
@@ -7236,11 +7236,56 @@ async function multiMarketFoundationDiagnostic4460(){
 }
 
 app.get("/api/diagnostics/multimarket/foundation", async (req,res)=>res.json(await multiMarketFoundationDiagnostic4460()));
+
+/*
+=========================================================
+ARBIFLOW 4.47 REAL DEX POOL DISCOVERY - READ ONLY
+
+First live multi-chain DEX adapter. It reads Uniswap V3 factory
+contracts on configured chains and discovers canonical high-liquidity
+pair pools across supported fee tiers. No quotes, approvals, signatures,
+swaps, broadcasts, or funds movement occur here.
+=========================================================
+*/
+const UNISWAP_V3_DISCOVERY_4470 = {
+  ethereum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",USDC:"0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",USDT:"0xdAC17F958D2ee523a2206206994597C13D831ec7"}},
+  arbitrum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",USDC:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831",USDT:"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"}},
+  optimism:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",USDT:"0x94b008aA00579c1307B0EF2c499aD98a8c58e58e"}},
+  base:{factory:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",USDbC:"0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA"}},
+  polygon:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",USDC:"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",USDT:"0xc2132D05D31c914a87C6611C10748AaCbA4fB58e"}},
+  bnb:{factory:"0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7",tokens:{WBNB:"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",USDC:"0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",USDT:"0x55d398326f99059fF775485246999027B3197955"}}
+};
+const UNISWAP_V3_POOL_READ_ABI_4470=["function liquidity() view returns (uint128)","function token0() view returns (address)","function token1() view returns (address)","function fee() view returns (uint24)"];
+function pairCombos4470(tokens){const e=Object.entries(tokens),out=[];for(let i=0;i<e.length;i++)for(let j=i+1;j<e.length;j++)out.push([e[i],e[j]]);return out;}
+async function discoverUniswapV3Pools4470(){
+ const startedAt=Date.now(),chains=[]; let poolsDiscovered=0,poolsWithLiquidity=0,queries=0;
+ for(const chain of MULTIMARKET_CHAINS_4460){
+  const cfg=UNISWAP_V3_DISCOVERY_4470[chain.key],rpc=RPC_URLS[chain.key]||"";
+  if(!cfg){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"ADAPTER_NOT_YET_CONFIGURED",pools:[]});continue;}
+  if(!rpc){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"RPC_NOT_CONFIGURED",factory:cfg.factory,pools:[]});continue;}
+  try{
+   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false}); const net=await provider.getNetwork();
+   if(Number(net.chainId)!==chain.chainId){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"CHAIN_ID_MISMATCH",actualChainId:Number(net.chainId),factory:cfg.factory,pools:[]});continue;}
+   const code=await provider.getCode(cfg.factory); if(!code||code==="0x"){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"FACTORY_NOT_DEPLOYED",factory:cfg.factory,pools:[]});continue;}
+   const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider),pools=[];
+   for(const [[symA,tokenA],[symB,tokenB]] of pairCombos4470(cfg.tokens)) for(const fee of [100,500,3000,10000]){
+    queries++; try{const pool=await factory.getPool(tokenA,tokenB,fee); if(pool&&pool!=="0x0000000000000000000000000000000000000000"){
+      const pc=new Contract(pool,UNISWAP_V3_POOL_READ_ABI_4470,provider); let liquidity=null; try{liquidity=(await pc.liquidity()).toString();}catch{}
+      pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,tokenA,tokenB,feeTier:fee,pool,liquidityRaw:liquidity,hasLiquidity:liquidity!==null&&BigInt(liquidity)>0n,readOnly:true}); poolsDiscovered++; if(liquidity!==null&&BigInt(liquidity)>0n)poolsWithLiquidity++;
+    }}catch(e){pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,feeTier:fee,status:"POOL_QUERY_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true});}
+   }
+   chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCANNED",factory:cfg.factory,factoryCodeBytes:(code.length-2)/2,tokenUniverse:Object.keys(cfg.tokens),pairUniverse:pairCombos4470(cfg.tokens).map(x=>`${x[0][0]}/${x[1][0]}`),pools});
+  }catch(e){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCAN_FAILED",factory:cfg.factory,error:e?.message||String(e),pools:[]});}
+ }
+ return {success:true,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_COMPLETE",architecture:"MULTI_CHAIN_ONCHAIN_FACTORY_READS",adapter:"UNISWAP_V3_FACTORY",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsWithAdapter:Object.keys(UNISWAP_V3_DISCOVERY_4470).length,chainsScanned:chains.filter(x=>x.status==="SCANNED").length,poolQueries:queries,poolsDiscovered,poolsWithNonzeroLiquidity:poolsWithLiquidity},chains,readOnly:true,quoteExecutionPerformed:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+}
+app.get("/api/diagnostics/multimarket/dex-pools",async(req,res)=>{try{res.json(await discoverUniswapV3Pools4470());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
+
 app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.46.0_MULTI_MARKET_FOUNDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.47.0_MULTI_MARKET_FOUNDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7249,7 +7294,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.46.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.47.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
