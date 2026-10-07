@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.2";
+const VERSION = "4.78.3";
 
 /*
 =========================================================
@@ -9272,7 +9272,7 @@ app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary())
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
 
 
-// === 4.78.2 Independent DEX pool evidence (READ ONLY) ===
+// === 4.78.3 Independent DEX pool evidence (READ ONLY) ===
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
@@ -9287,31 +9287,42 @@ const dexPool4780=new (require("ethers").Interface)([
  "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)"
 ]);
 const dexAddress4780=a=>typeof a==="string"&&/^0x[0-9a-fA-F]{40}$/.test(a)&&!/^0x0{40}$/i.test(a);
-const dexRpcGate4782=new Map();
+// Alchemy throughput is account-wide. Serialize DEX probes across all chains.
+const dexRpcGate4783={tail:Promise.resolve(),nextAt:0,cooldownUntil:0,requests:0,rateLimited:0,retries:0,cacheHits:0};
+const dexImmutableCache4783=new Map();
+const sleep4783=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function dexCall4780(c,to,data){
- const prev=dexRpcGate4782.get(c.chainId)||Promise.resolve();
- let release;
- const next=new Promise(resolve=>release=resolve);
- dexRpcGate4782.set(c.chainId,prev.catch(()=>{}).then(()=>next));
+ const key=`${c.chainId}:${to.toLowerCase()}:${data.toLowerCase()}`;
+ // Factory getPool/getPair and pool token addresses are immutable; do not cache reserves/price/liquidity.
+ const selector=data.slice(0,10).toLowerCase();
+ const immutable=selector===dexFactory4780.getFunction('getPool').selector.toLowerCase()||selector===dexFactory4780.getFunction('getPair').selector.toLowerCase()||selector===dexPool4780.getFunction('token0').selector.toLowerCase()||selector===dexPool4780.getFunction('token1').selector.toLowerCase();
+ if(immutable&&dexImmutableCache4783.has(key)){dexRpcGate4783.cacheHits++;return dexImmutableCache4783.get(key);}
+ const prev=dexRpcGate4783.tail;let release;const next=new Promise(resolve=>release=resolve);
+ dexRpcGate4783.tail=prev.catch(()=>{}).then(()=>next);
  await prev.catch(()=>{});
- try{return await dexCallInner4782(c,to,data);}
- finally{await new Promise(resolve=>setTimeout(resolve,180));release();}
-}
-async function dexCallInner4782(c,to,data){
- for(let attempt=0;attempt<3;attempt++){
-  try{return await dexRpcRequest4782(c,to,data);}
-  catch(e){
-   if(!/RPC_HTTP_429|RPC_HTTP_503|RPC_TIMEOUT/.test(String(e.message))||attempt===2)throw e;
-   await new Promise(resolve=>setTimeout(resolve,600*(attempt+1)));
+ try{
+  for(let attempt=0;attempt<3;attempt++){
+   await sleep4783(Math.max(0,dexRpcGate4783.cooldownUntil-Date.now(),dexRpcGate4783.nextAt-Date.now()));
+   dexRpcGate4783.nextAt=Date.now()+350;
+   try{const result=await dexRpcRequest4783(c,to,data);if(immutable)dexImmutableCache4783.set(key,result);return result;}
+   catch(e){
+    if(!/RPC_HTTP_429|RPC_HTTP_503|RPC_TIMEOUT|RPC_429/.test(String(e.message))||attempt===2)throw e;
+    dexRpcGate4783.retries++;
+    const delay=Math.max(e.retryAfterMs||0,Math.min(16000,2000*(2**attempt)+Math.floor(Math.random()*1000)));
+    dexRpcGate4783.cooldownUntil=Math.max(dexRpcGate4783.cooldownUntil,Date.now()+delay);
+   }
   }
- }
+ }finally{release();}
 }
-async function dexRpcRequest4782(c,to,data){
- const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),5500);
- try{const r=await fetch(c.rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_call",params:[{to,data},"latest"]}),signal:ctl.signal});
- if(!r.ok)throw Error(`RPC_HTTP_${r.status}`);const j=await r.json();if(j.error)throw Error(`RPC_${j.error.code}:${String(j.error.message).slice(0,100)}`);
- if(typeof j.result!=="string"||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error("INVALID_RPC_RESULT");return j.result;
- }finally{clearTimeout(timer);}
+async function dexRpcRequest4783(c,to,data){
+ const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),12000);
+ try{
+  dexRpcGate4783.requests++;
+  const r=await fetch(c.rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_call',params:[{to,data},'latest']}),signal:ctl.signal});
+  if(!r.ok){const e=new Error(`RPC_HTTP_${r.status}`);if(r.status===429){dexRpcGate4783.rateLimited++;const retry=r.headers.get('retry-after');if(retry){const seconds=Number(retry);const date=Date.parse(retry);e.retryAfterMs=Number.isFinite(seconds)?Math.min(60000,seconds*1000):Number.isFinite(date)?Math.max(0,Math.min(60000,date-Date.now())):0;}}throw e;}
+  const j=await r.json();if(j.error){if(j.error.code===429)dexRpcGate4783.rateLimited++;throw Error(`RPC_${j.error.code}:${String(j.error.message).slice(0,100)}`);}
+  if(typeof j.result!=='string'||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error('INVALID_RPC_RESULT');return j.result;
+ }catch(e){if(e.name==='AbortError')throw Error('RPC_TIMEOUT');throw e;}finally{clearTimeout(timer);}
 }
 const VERIFIED_PANCAKE_BASE_FACTORY_4782="0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865";
 const VERIFIED_UNISWAP_V3_FACTORIES_4781=Object.freeze({
@@ -9375,6 +9386,6 @@ async function runDex4780(){if(dex4780.running)return;dex4780.running=true;dex47
   try{return await dexDiscover4780(c);}catch(e){return {name:c.name,chainId:c.chainId,status:"ERROR",lastError:String(e?.message||e),venues:[]};}
  }));for(const row of rows)dex4780.chains[row.chainId]=row;
  }finally{dex4780.running=false;dex4780.lastCompletedAt=new Date().toISOString();}}
-app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
+app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
 app.get("/api/dex-independent/run",(req,res)=>{setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
 setTimeout(()=>runDex4780().catch(()=>{}),15000);

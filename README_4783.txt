@@ -1,0 +1,1 @@
+Alchemy-aware DEX probe throttle across Base/Arbitrum/Optimism; honors Retry-After, global cooldown, immutable pool address/token caching, diagnostics. Does NOT yet centrally throttle legacy heartbeat/gas/candidate subsystems; provider-wide 429 may persist. Read-only. No execution or flash financing.
