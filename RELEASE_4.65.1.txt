@@ -1,0 +1,37 @@
+ArbiFlow Engine 4.65.1 — Same-Run Candidate Handoff Fix
+
+FIX
+4.65.0 could complete with zero exact tests because it depended on whatever
+positive candidates existed after a separate/repeated dynamic discovery run.
+4.65.1 couples discovery and validation into one run.
+
+FLOW
+1. Run fresh 4.64.1 dynamic discovery.
+2. Immediately copy detected positive candidates into a frozen candidateSnapshot.
+3. Collapse duplicate 2-edge economic representations.
+4. Validate that frozen snapshot immediately.
+5. Never rediscover between candidate detection and exact validation.
+
+DIAGNOSTICS
+- phase
+- candidatesDetected
+- candidatesInput
+- candidateSnapshot
+- discoveryStartedAt / discoveryCompletedAt / discoveryLatencyMs
+- validationStartedAt / validationCompletedAt / validationLatencyMs
+- sizeTests / successfulRoundTrips / positiveRoundTrips / quoteFailures
+
+INTERPRETATION
+If phase=NO_POSITIVE_CANDIDATE_AT_DISCOVERY, zero tests is a real current-market
+discovery result. If candidatesDetected>0, candidatesInput and validation
+counters must advance from the frozen snapshot unless an explicit ERROR occurs.
+
+PRESERVED
+Dynamic multi-venue search, 4.64 snapshot graph, simulator, Base live state,
+diagnostics, and safety/fork modules.
+
+SAFETY
+Read-only. No gas/net-profit claim. No approvals, signatures, swaps, broadcast,
+or funds movement. executionEligible=false.
+
+Validation: npm run check PASS.

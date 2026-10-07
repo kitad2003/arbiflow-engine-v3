@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.65.0";
+const VERSION = "4.65.1";
 
 /*
 =========================================================
@@ -8573,14 +8573,12 @@ Candidate-driven sequential quotes: each leg consumes the exact prior output.
 Read-only validation only. No gas/net-profit claim and no execution.
 =========================================================
 */
-let exact4650={status:"IDLE",startedAt:null,completedAt:null,error:null,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],lastLatencyMs:null,executionEligible:false};
+let exact4650={status:"IDLE",phase:"IDLE",startedAt:null,completedAt:null,error:null,discoveryStartedAt:null,discoveryCompletedAt:null,validationStartedAt:null,validationCompletedAt:null,discoveryLatencyMs:null,validationLatencyMs:null,candidatesDetected:0,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],candidateSnapshot:[],lastLatencyMs:null,executionEligible:false};
 
 function candidateKey4650(c){return `${c.hops}|${c.path.join(">")}|${c.venues.join(">")}`;}
 function candidateSizes4650(c){
- const sym=c.path[0],base=MV4641_SIZES[sym]||[0.001,0.005,0.01];
- // Add smaller and larger boundary probes while retaining the 4.64.1 curve sizes.
- const lo=base[0],hi=base[base.length-1],extra=[lo/2,hi*2];
- return [...new Set([...extra,...base].filter(x=>Number.isFinite(x)&&x>0).map(x=>Number(x.toPrecision(10))))].sort((a,b)=>a-b);
+ const sym=c.path[0],base=MV4641_SIZES[sym]||[0.001,0.005,0.01],lo=base[0],hi=base[base.length-1];
+ return [...new Set([lo/2,...base,hi*2].filter(x=>Number.isFinite(x)&&x>0).map(x=>Number(x.toPrecision(10))))].sort((a,b)=>a-b);
 }
 async function exactLeg4650(venue,from,to,amountIn){
  const started=Date.now();
@@ -8594,53 +8592,63 @@ async function exactLeg4650(venue,from,to,amountIn){
 async function validateSize4650(c,size){
  let amount=Number(size),legs=[];
  try{
-  for(let i=0;i<c.hops;i++){
-   const edge=c.edges[i],leg=await exactLeg4650(edge.venue,c.path[i],c.path[i+1],amount);
-   legs.push(leg);amount=leg.amountOut;
-  }
+  for(let i=0;i<c.hops;i++){const edge=c.edges[i],leg=await exactLeg4650(edge.venue,c.path[i],c.path[i+1],amount);legs.push(leg);amount=leg.amountOut;}
   const grossPnl=amount-Number(size),grossReturnPct=grossPnl/Number(size)*100;
   return {ok:true,size:Number(size),startSymbol:c.path[0],finalAmount:amount,grossPnl,grossReturnPct,positive:grossPnl>0,legs,classification:grossPnl>0?"EXACT_CROSS_VENUE_POSITIVE_REQUIRES_ECONOMICS_GATE":"EXACT_CROSS_VENUE_REJECTED"};
- }catch(e){
-  return {ok:false,size:Number(size),startSymbol:c.path[0],failedLeg:legs.length+1,error:e?.message||String(e),legs,classification:"EXACT_CROSS_VENUE_QUOTE_FAILURE"};
- }
+ }catch(e){return {ok:false,size:Number(size),startSymbol:c.path[0],failedLeg:legs.length+1,error:e?.message||String(e),legs,classification:"EXACT_CROSS_VENUE_QUOTE_FAILURE"};}
 }
 function canonicalCandidate4650(c){
- // Opposite rotations/directions may describe the same economic 2-edge cycle.
  if(c.hops!==2)return candidateKey4650(c);
- const legs=c.edges.map(e=>`${e.venue}:${e.from}>${e.to}`).sort();
- return `2|${legs.join("|")}`;
+ return `2|${c.edges.map(e=>`${e.venue}:${e.from}>${e.to}`).sort().join("|")}`;
 }
-async function runExact4650(limit=10){
- if(exact4650.status==="RUNNING")return;
- exact4650={...exact4650,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[]};
- const started=Date.now();
- if(dynamic4641.status!=="COMPLETE")await runDynamic4641();
- const source=[...dynamic4641.candidates].sort((a,b)=>b.probeGrossSpreadPct-a.probeGrossSpreadPct);
- exact4650.candidatesInput=source.length;
+function snapshotCandidates4651(source,limit){
  const selected=[],seen=new Set();
- for(const c of source){const k=canonicalCandidate4650(c);if(seen.has(k))continue;seen.add(k);selected.push(c);if(selected.length>=limit)break;}
+ for(const c of [...source].sort((a,b)=>b.probeGrossSpreadPct-a.probeGrossSpreadPct)){
+  const k=canonicalCandidate4650(c);if(seen.has(k))continue;seen.add(k);
+  selected.push(JSON.parse(JSON.stringify(c)));if(selected.length>=limit)break;
+ }
+ return selected;
+}
+async function validateSnapshot4651(snapshot){
  const results=[];
- for(const c of selected){
+ exact4650.phase="VALIDATING";exact4650.validationStartedAt=new Date().toISOString();const vs=Date.now();
+ for(const c of snapshot){
   const tests=[];
   for(const size of candidateSizes4650(c)){
-   exact4650.sizeTests++;
-   const t=await validateSize4650(c,size);tests.push(t);
+   exact4650.sizeTests++;const t=await validateSize4650(c,size);tests.push(t);
    if(t.ok){exact4650.successfulRoundTrips++;if(t.positive)exact4650.positiveRoundTrips++;}else exact4650.quoteFailures++;
   }
   const viable=tests.filter(x=>x.ok).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),positive=viable.filter(x=>x.positive),best=viable[0]||null;
-  results.push({candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,probeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:tests.length,positiveSizes:positive.length,best,tests,classification:positive.length?"EXACT_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false});
+  results.push({candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:tests.length,positiveSizes:positive.length,best,tests,classification:positive.length?"EXACT_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false});
   exact4650.candidatesValidated++;
  }
- results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
- exact4650={...exact4650,status:"COMPLETE",completedAt:new Date().toISOString(),results,lastLatencyMs:Date.now()-started};
+ exact4650.validationCompletedAt=new Date().toISOString();exact4650.validationLatencyMs=Date.now()-vs;
+ return results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
+}
+async function runExact4650(limit=10){
+ if(exact4650.status==="RUNNING")return;
+ exact4650={...exact4650,status:"RUNNING",phase:"DISCOVERING",startedAt:new Date().toISOString(),completedAt:null,error:null,discoveryStartedAt:new Date().toISOString(),discoveryCompletedAt:null,validationStartedAt:null,validationCompletedAt:null,discoveryLatencyMs:null,validationLatencyMs:null,candidatesDetected:0,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],candidateSnapshot:[]};
+ const totalStart=Date.now(),ds=Date.now();
+ // Always perform one fresh discovery run, then freeze its candidates and validate them immediately.
+ await runDynamic4641();
+ exact4650.discoveryCompletedAt=new Date().toISOString();exact4650.discoveryLatencyMs=Date.now()-ds;
+ const detected=[...dynamic4641.candidates];exact4650.candidatesDetected=detected.length;
+ const snapshot=snapshotCandidates4651(detected,limit);exact4650.candidateSnapshot=snapshot;exact4650.candidatesInput=snapshot.length;
+ if(snapshot.length===0){
+  exact4650.phase="NO_POSITIVE_CANDIDATE_AT_DISCOVERY";
+  exact4650.status="COMPLETE";exact4650.completedAt=new Date().toISOString();exact4650.lastLatencyMs=Date.now()-totalStart;return;
+ }
+ // Critical 4.65.1 handoff: no rediscovery occurs between this snapshot and validation.
+ const results=await validateSnapshot4651(snapshot);
+ exact4650={...exact4650,status:"COMPLETE",phase:"COMPLETE",completedAt:new Date().toISOString(),results,lastLatencyMs:Date.now()-totalStart};
 }
 function exactSummary4650(){
- return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,error:exact4650.error,architecture:"DYNAMIC_MULTI_VENUE_CANDIDATES_TO_SEQUENTIAL_EXACT_OUTPUT_FED_CROSS_VENUE_ROUND_TRIP_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,results:exact4650.results,lastLatencyMs:exact4650.lastLatencyMs,limitations:{candidateSource:"4.64.1_DYNAMIC_POSITIVE_ONLY",exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,gasIncluded:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+ return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,phase:exact4650.phase,error:exact4650.error,architecture:"SAME_RUN_DYNAMIC_DISCOVERY_TO_FROZEN_CANDIDATE_SNAPSHOT_TO_IMMEDIATE_SEQUENTIAL_EXACT_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,discoveryStartedAt:exact4650.discoveryStartedAt,discoveryCompletedAt:exact4650.discoveryCompletedAt,validationStartedAt:exact4650.validationStartedAt,validationCompletedAt:exact4650.validationCompletedAt,discoveryLatencyMs:exact4650.discoveryLatencyMs,validationLatencyMs:exact4650.validationLatencyMs,candidatesDetected:exact4650.candidatesDetected,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,candidateSnapshot:exact4650.candidateSnapshot,results:exact4650.results,lastLatencyMs:exact4650.lastLatencyMs,limitations:{sameRunCandidateHandoff:true,noRediscoveryBetweenDetectionAndValidation:true,exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,gasIncluded:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
 }
 app.get("/api/validator/crossvenue/start",(req,res)=>{
  if(exact4650.status==="RUNNING")return res.json({...exactSummary4650(),statusRoute:"/api/validator/crossvenue/status"});
  const limit=Math.max(1,Math.min(20,Number(req.query.limit)||10));
- setImmediate(async()=>{try{await runExact4650(limit);}catch(e){exact4650.status="ERROR";exact4650.completedAt=new Date().toISOString();exact4650.error=e?.message||String(e);}});
+ setImmediate(async()=>{try{await runExact4650(limit);}catch(e){exact4650.status="ERROR";exact4650.phase="ERROR";exact4650.completedAt=new Date().toISOString();exact4650.error=e?.message||String(e);}});
  res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/validator/crossvenue/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});
 });
 app.get("/api/validator/crossvenue/status",(req,res)=>res.json(exactSummary4650()));
