@@ -1,0 +1,27 @@
+ArbiFlow Engine 4.70.0 — Candidate Discovery Milestone
+
+Purpose
+- Stop quote-grid discovery from being the primary candidate engine.
+- Use continuously maintained local Base pool state for pair-centric discovery.
+- Prioritize same-pair 2-edge dislocations before triangles.
+- Keep RPC/exact quoting for finalist validation only.
+- Preserve the $15 minimum-net policy and all fail-closed execution gates.
+
+New endpoints
+- /api/candidate-engine/start
+- /api/candidate-engine/status
+- /api/candidate-engine/scan
+- /api/candidate-engine/reconcile
+- /api/candidate-engine/stop
+
+Cadence
+- event-triggered affected-pair scan when a tracked Base pool refreshes
+- hot-pair/local safety sweep every 5 seconds by default
+- authoritative full reconciliation every 5 minutes maximum by default
+
+Important truthfulness/safety notes
+- A local spread is NOT reported as executable profit.
+- Local signals require exact size validation, conservative economics, and atomic simulation before execution.
+- Mainnet execution remains disabled/read-only.
+- 4.69 legacy endpoints are preserved for diagnostics/reference, but the 4.70 candidate-engine endpoint does not use quote-grid discovery.
+- Current local live-state registry is still primarily the existing Base Uniswap V3 state foundation. Broader multi-venue local-state adapters remain a subsequent milestone and must not be represented as completed here.

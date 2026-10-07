@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.69.0";
+const VERSION = "4.70.0";
 
 /*
 =========================================================
@@ -8178,6 +8178,7 @@ async function refreshBasePool4610(provider,poolAddress,blockNumber,eventType){
  row.sqrtPriceX96=(slot0.sqrtPriceX96??slot0[0]).toString();row.tick=Number(slot0.tick??slot0[1]);row.liquidityRaw=liq.toString();row.snapshotBlock=blockNumber;row.snapshotAt=new Date().toISOString();row.source="LIVE_BASE_EVENT_RECONCILED";row.stateFreshness="LIVE_BLOCK_CONSISTENT";row.lastEventType=eventType;row.executionEligible=false;
  marketState4600.registry.set(key,row);marketState4600.lastUpdateAt=row.snapshotAt;liveBase4610.poolLastEvent.set(key,{blockNumber,eventType,at:row.snapshotAt});liveBase4610.lastEventAt=row.snapshotAt;liveBase4610.poolsUpdated++;
  if(typeof markGraphDirty4620==="function")markGraphDirty4620(row.pool);
+ if(typeof candidate4700!=="undefined"&&candidate4700.status==="RUNNING"&&typeof sweepCandidate4700==="function")setImmediate(()=>{try{sweepCandidate4700("EVENT");}catch(e){candidate4700.lastError=e?.message||String(e);}});
  return true;
 }
 async function reconcileBaseRange4610(provider,fromBlock,toBlock,addresses){
@@ -8980,16 +8981,88 @@ app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Oppor
 
 /*
 =========================================================
+ArbiFlow 4.70.0 — CANDIDATE DISCOVERY MILESTONE
+Pair-centric local-state candidate discovery. No quote-grid discovery.
+Continuous affected-pair sweeps + hot-pair safety sweeps + <=5 minute
+full reconciliation trigger. Exact RPC quoting remains finalist-only.
+Read-only / fail-closed. Mainnet execution remains disabled.
+=========================================================
+*/
+const CANDIDATE4700_MIN_SPREAD_BPS=Math.max(0,Number(process.env.ARBIFLOW_4700_MIN_SPREAD_BPS||"1"));
+const CANDIDATE4700_HOT_SWEEP_MS=Math.max(1000,Number(process.env.ARBIFLOW_4700_HOT_SWEEP_MS||"5000"));
+const CANDIDATE4700_FULL_RECONCILE_MS=Math.max(60000,Math.min(300000,Number(process.env.ARBIFLOW_4700_FULL_RECONCILE_MS||"300000")));
+const CANDIDATE4700_MAX_AGE_MS=Math.max(250,Number(process.env.ARBIFLOW_4700_MAX_AGE_MS||"2500"));
+let candidate4700={status:"IDLE",startedAt:null,lastSweepAt:null,lastFullReconcileAt:null,lastEventScanAt:null,sweeps:0,eventScans:0,fullReconciles:0,pairsEvaluated:0,localSignals:0,noiseRejected:0,staleDropped:0,candidates:[],hotPairs:[],timer:null,reconcileTimer:null,lastError:null};
+function pairKey4700(a,b){return [String(a),String(b)].sort().join("|");}
+function edgePair4700(e){return pairKey4700(e.from,e.to);}
+function localTwoEdgeCandidates4700(affectedPairs=null){
+ if(graph4620.status!=="READY")buildGraph4620();
+ const edges=[...graph4620.edges.values()], byPair=new Map();
+ for(const e of edges){const k=edgePair4700(e);if(affectedPairs&&affectedPairs.size&&!affectedPairs.has(k))continue;const a=byPair.get(k)||[];a.push(e);byPair.set(k,a);}
+ const out=[],seen=new Set();let evaluated=0;
+ for(const [pair,rows] of byPair){
+  for(const buy of rows){for(const sell of rows){
+   if(buy.from!==sell.to||buy.to!==sell.from)continue;
+   if(String(buy.pool).toLowerCase()===String(sell.pool).toLowerCase())continue;
+   evaluated++;
+   const pools=[String(buy.pool).toLowerCase(),String(sell.pool).toLowerCase()].sort();
+   const key=`${pair}|${pools.join("|")}|${buy.from}`;if(seen.has(key))continue;seen.add(key);
+   const mult=Number(buy.rate)*Number(sell.rate),spreadPct=(mult-1)*100,spreadBps=spreadPct*100;
+   if(!Number.isFinite(spreadBps)||spreadBps<=0)continue;
+   const fromSym=graph4620.nodes.get(buy.from)?.symbol||buy.from,toSym=graph4620.nodes.get(buy.to)?.symbol||buy.to;
+   out.push({hops:2,path:[fromSym,toSym,fromSym],venues:["UNISWAP_V3","UNISWAP_V3"],edges:[{venue:"UNISWAP_V3",from:fromSym,to:toSym,pool:buy.pool,feeTier:buy.feeTier},{venue:"UNISWAP_V3",from:toSym,to:fromSym,pool:sell.pool,feeTier:sell.feeTier}],pools:[buy.pool,sell.pool],feeTiers:[buy.feeTier,sell.feeTier],probeGrossSpreadPct:spreadPct,localSpreadBps:spreadBps,pair,detectedAt:new Date().toISOString(),stateBlocks:[buy.snapshotBlock,sell.snapshotBlock],classification:spreadBps>=CANDIDATE4700_MIN_SPREAD_BPS?"LOCAL_PAIR_SIGNAL_REQUIRES_EXACT_SIZE_ECONOMICS":"LOCAL_NOISE"});
+  }}
+ }
+ out.sort((a,b)=>b.localSpreadBps-a.localSpreadBps);return {evaluated,candidates:out};
+}
+function affectedPairsFromDirty4700(dirtyPools){
+ const s=new Set();for(const pool of dirtyPools||[]){for(const id of graph4620.poolEdges.get(String(pool).toLowerCase())||[]){const e=graph4620.edges.get(id);if(e)s.add(edgePair4700(e));}}return s;
+}
+function sweepCandidate4700(mode="HOT"){
+ const started=Date.now();if(graph4620.status!=="READY")buildGraph4620();
+ const dirty=[...graph4620.dirtyPools];if(dirty.length)cyclesForDirty4620();
+ const affected=mode==="EVENT"?affectedPairsFromDirty4700(dirty):null;
+ const scan=localTwoEdgeCandidates4700(affected&&affected.size?affected:null);candidate4700.pairsEvaluated+=scan.evaluated;
+ const promoted=scan.candidates.filter(x=>x.localSpreadBps>=CANDIDATE4700_MIN_SPREAD_BPS);candidate4700.localSignals+=promoted.length;candidate4700.noiseRejected+=scan.candidates.length-promoted.length;
+ const now=Date.now();candidate4700.candidates=promoted.slice(0,100).map(c=>({...c,ageMs:Math.max(0,now-Date.parse(c.detectedAt)),exactValidationRequired:true,netProfitClaim:false,executionEligible:false}));
+ candidate4700.hotPairs=[...new Set(candidate4700.candidates.slice(0,20).map(x=>x.pair))];candidate4700.sweeps++;candidate4700.lastSweepAt=new Date().toISOString();if(mode==="EVENT"){candidate4700.eventScans++;candidate4700.lastEventScanAt=candidate4700.lastSweepAt;}
+ return {mode,latencyMs:Date.now()-started,evaluated:scan.evaluated,signals:promoted.length};
+}
+async function reconcile4700(){
+ candidate4700.lastFullReconcileAt=new Date().toISOString();candidate4700.fullReconciles++;
+ try{if(marketState4600.status!=="RUNNING")await bootstrapBaseOnly4611();buildGraph4620();sweepCandidate4700("FULL_RECONCILE");}catch(e){candidate4700.lastError=e?.message||String(e);}
+}
+function startCandidate4700(){
+ if(candidate4700.status==="RUNNING")return;
+ candidate4700.status="RUNNING";candidate4700.startedAt=new Date().toISOString();candidate4700.lastError=null;
+ try{sweepCandidate4700("START");}catch(e){candidate4700.lastError=e?.message||String(e);}
+ candidate4700.timer=setInterval(()=>{try{sweepCandidate4700("HOT");}catch(e){candidate4700.lastError=e?.message||String(e);}},CANDIDATE4700_HOT_SWEEP_MS);
+ candidate4700.reconcileTimer=setInterval(()=>{reconcile4700().catch(e=>candidate4700.lastError=e?.message||String(e));},CANDIDATE4700_FULL_RECONCILE_MS);
+}
+function stopCandidate4700(){if(candidate4700.timer)clearInterval(candidate4700.timer);if(candidate4700.reconcileTimer)clearInterval(candidate4700.reconcileTimer);candidate4700.timer=null;candidate4700.reconcileTimer=null;candidate4700.status="STOPPED";}
+function candidateSummary4700(){
+ const now=Date.now(),fresh=candidate4700.candidates.filter(c=>now-Date.parse(c.detectedAt)<=CANDIDATE4700_MAX_AGE_MS);
+ return {success:true,version:VERSION,status:candidate4700.status,architecture:"CONTINUOUS_LOCAL_STATE_TO_PAIR_INDEX_TO_2_EDGE_SAME_PAIR_SIGNAL_TO_FINALIST_ONLY_EXACT_VALIDATION",startedAt:candidate4700.startedAt,lastSweepAt:candidate4700.lastSweepAt,lastEventScanAt:candidate4700.lastEventScanAt,lastFullReconcileAt:candidate4700.lastFullReconcileAt,intervals:{hotPairSweepMs:CANDIDATE4700_HOT_SWEEP_MS,fullReconcileMs:CANDIDATE4700_FULL_RECONCILE_MS,maxCandidateAgeMs:CANDIDATE4700_MAX_AGE_MS},metrics:{sweeps:candidate4700.sweeps,eventScans:candidate4700.eventScans,fullReconciles:candidate4700.fullReconciles,pairsEvaluated:candidate4700.pairsEvaluated,localSignals:candidate4700.localSignals,noiseRejected:candidate4700.noiseRejected,staleDropped:candidate4700.staleDropped},marketState:{bootstrapStatus:marketState4600.status,liveStatus:liveBase4610.status,graphStatus:graph4620.status,poolsIndexed:graph4620.poolEdges.size,graphEdges:graph4620.edges.size},hotPairs:candidate4700.hotPairs,freshLocalSignals:fresh.slice(0,50),localSignalCount:candidate4700.candidates.length,freshSignalCount:fresh.length,profitPolicy:{minimumNetProfitUsd:15,localSignalsAreProfitClaims:false,exactSizeValidationRequired:true,conservativeEconomicsRequired:true,atomicSimulationRequiredBeforeExecution:true},discoveryPolicy:{quoteGridDiscovery:false,pairCentric:true,samePairTwoEdgeFirst:true,trianglesPreservedAsSecondaryDiagnostic:true,rpcQuotesReservedForFinalists:true},lastError:candidate4700.lastError,executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/candidate-engine/start",(req,res)=>{startCandidate4700();res.json({...candidateSummary4700(),statusRoute:"/api/candidate-engine/status"});});
+app.get("/api/candidate-engine/status",(req,res)=>res.json(candidateSummary4700()));
+app.get("/api/candidate-engine/scan",(req,res)=>{try{const run=sweepCandidate4700("MANUAL");res.json({...candidateSummary4700(),lastRun:run});}catch(e){res.status(500).json({success:false,version:VERSION,error:e?.message||String(e),readOnly:true});}});
+app.get("/api/candidate-engine/reconcile",(req,res)=>{setImmediate(()=>reconcile4700());res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/candidate-engine/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/candidate-engine/stop",(req,res)=>{stopCandidate4700();res.json(candidateSummary4700());});
+
+
+/*
+=========================================================
 SERVER
 =========================================================
 */
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.59.3] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.70.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.59.3] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.70.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,
