@@ -1,6 +1,6 @@
 {
   "name": "arbiflow-engine-v3",
-  "version": "4.50.1",
+  "version": "4.50.2",
   "private": true,
   "main": "server.js",
   "type": "commonjs",
