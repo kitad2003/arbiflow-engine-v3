@@ -1,0 +1,26 @@
+ArbiFlow Engine 4.65.2 — Route-Locked Exact Validation
+
+FIX
+4.65.1 correctly froze same-run candidates but exact validation could still
+reselect the best venue route at each size. That allowed Aerodrome STABLE /
+VOLATILE switching and could select a different Uniswap V3 fee tier.
+
+4.65.2 locks every exact-validation leg to the discovered candidate route.
+
+ROUTE LOCKS
+- Aerodrome: exact detected poolType (STABLE or VOLATILE).
+- Uniswap V3: exact detected feeTier.
+- Uniswap V3: factory-resolved pool address must match detected pool address.
+- Every leg reports detected vs quoted route identity and routeLocked=true.
+- Any route identity mismatch fails that size test instead of switching routes.
+- Actual output of each locked leg remains the exact input of the next leg.
+
+FLOW
+Fresh dynamic discovery -> frozen candidate snapshot -> route-locked sequential
+exact validation -> gross-positive survivors only -> next economics gate.
+
+SAFETY
+No gas/net-profit claim. No approvals, signatures, swaps, broadcast, or funds
+movement. executionEligible=false. Atomic simulation remains a later gate.
+
+Validation: npm run check PASS.

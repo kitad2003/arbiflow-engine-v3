@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.65.1 — Live Base Market State
+ArbiFlow Engine 4.65.2 — Live Base Market State
 
 PURPOSE
 Advance from static Base bootstrap snapshots to continuously reconciled Base Uniswap V3 market state.

@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.65.1";
+const VERSION = "4.65.2";
 
 /*
 =========================================================
@@ -8580,22 +8580,31 @@ function candidateSizes4650(c){
  const sym=c.path[0],base=MV4641_SIZES[sym]||[0.001,0.005,0.01],lo=base[0],hi=base[base.length-1];
  return [...new Set([lo/2,...base,hi*2].filter(x=>Number.isFinite(x)&&x>0).map(x=>Number(x.toPrecision(10))))].sort((a,b)=>a-b);
 }
-async function exactLeg4650(venue,from,to,amountIn){
- const started=Date.now();
- const q=venue==="UNISWAP_V3"
-  ?await withTimeout4501(uniswapV3BestQuote({sellToken:from,buyToken:to,sellAmount:amountIn}),10000,"EXACT_UV3_TIMEOUT")
-  :await withTimeout4501(aerodromeBestQuote({sellToken:from,buyToken:to,sellAmount:amountIn}),10000,"EXACT_AERODROME_TIMEOUT");
- const best=q.best;
+async function exactLeg4650(edge,from,to,amountIn){
+ const started=Date.now();let best;
+ if(edge.venue==="UNISWAP_V3"){
+  if(!Number.isFinite(Number(edge.feeTier)))throw new Error("ROUTE_LOCK_MISSING_UNISWAP_FEE_TIER");
+  best=await withTimeout4501(uniswapV3QuoteOne({sellToken:from,buyToken:to,sellAmount:amountIn,fee:Number(edge.feeTier)}),10000,"LOCKED_UV3_TIMEOUT");
+  if(edge.pool&&String(best.pool).toLowerCase()!==String(edge.pool).toLowerCase())throw new Error(`ROUTE_LOCK_UNISWAP_POOL_MISMATCH:${edge.pool}:${best.pool}`);
+ }else if(edge.venue==="AERODROME"){
+  if(!["STABLE","VOLATILE"].includes(String(edge.poolType)))throw new Error("ROUTE_LOCK_MISSING_AERODROME_POOL_TYPE");
+  best=await withTimeout4501(aerodromeQuoteOne({sellToken:from,buyToken:to,sellAmount:amountIn,stable:String(edge.poolType)==="STABLE"}),10000,"LOCKED_AERODROME_TIMEOUT");
+  if(String(best.poolType)!==String(edge.poolType))throw new Error(`ROUTE_LOCK_AERODROME_TYPE_MISMATCH:${edge.poolType}:${best.poolType}`);
+ }else throw new Error(`ROUTE_LOCK_UNSUPPORTED_VENUE:${edge.venue}`);
  if(!best||!Number.isFinite(Number(best.buyAmount))||Number(best.buyAmount)<=0)throw new Error("ZERO_OR_INVALID_EXACT_OUTPUT");
- return {venue,from,to,amountIn:Number(amountIn),amountOut:Number(best.buyAmount),feeTier:best.feeTier??null,pool:best.pool??null,poolType:best.poolType??null,router:best.router??null,factory:best.factory??null,latencyMs:Date.now()-started};
+ return {venue:edge.venue,from,to,amountIn:Number(amountIn),amountOut:Number(best.buyAmount),
+  detectedFeeTier:edge.feeTier??null,quotedFeeTier:best.feeTier??null,
+  detectedPool:edge.pool??null,quotedPool:best.pool??null,
+  detectedPoolType:edge.poolType??null,quotedPoolType:best.poolType??null,
+  routeLocked:true,router:best.router??null,factory:best.factory??null,latencyMs:Date.now()-started};
 }
 async function validateSize4650(c,size){
  let amount=Number(size),legs=[];
  try{
-  for(let i=0;i<c.hops;i++){const edge=c.edges[i],leg=await exactLeg4650(edge.venue,c.path[i],c.path[i+1],amount);legs.push(leg);amount=leg.amountOut;}
+  for(let i=0;i<c.hops;i++){const edge=c.edges[i],leg=await exactLeg4650(edge,c.path[i],c.path[i+1],amount);legs.push(leg);amount=leg.amountOut;}
   const grossPnl=amount-Number(size),grossReturnPct=grossPnl/Number(size)*100;
-  return {ok:true,size:Number(size),startSymbol:c.path[0],finalAmount:amount,grossPnl,grossReturnPct,positive:grossPnl>0,legs,classification:grossPnl>0?"EXACT_CROSS_VENUE_POSITIVE_REQUIRES_ECONOMICS_GATE":"EXACT_CROSS_VENUE_REJECTED"};
- }catch(e){return {ok:false,size:Number(size),startSymbol:c.path[0],failedLeg:legs.length+1,error:e?.message||String(e),legs,classification:"EXACT_CROSS_VENUE_QUOTE_FAILURE"};}
+  return {ok:true,size:Number(size),startSymbol:c.path[0],finalAmount:amount,grossPnl,grossReturnPct,positive:grossPnl>0,routeLocked:true,legs,classification:grossPnl>0?"ROUTE_LOCKED_EXACT_POSITIVE_REQUIRES_ECONOMICS_GATE":"ROUTE_LOCKED_EXACT_REJECTED"};
+ }catch(e){return {ok:false,size:Number(size),startSymbol:c.path[0],failedLeg:legs.length+1,error:e?.message||String(e),routeLocked:true,legs,classification:"ROUTE_LOCKED_EXACT_QUOTE_FAILURE"};}
 }
 function canonicalCandidate4650(c){
  if(c.hops!==2)return candidateKey4650(c);
@@ -8619,7 +8628,7 @@ async function validateSnapshot4651(snapshot){
    if(t.ok){exact4650.successfulRoundTrips++;if(t.positive)exact4650.positiveRoundTrips++;}else exact4650.quoteFailures++;
   }
   const viable=tests.filter(x=>x.ok).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),positive=viable.filter(x=>x.positive),best=viable[0]||null;
-  results.push({candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:tests.length,positiveSizes:positive.length,best,tests,classification:positive.length?"EXACT_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false});
+  results.push({candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,detectedProbeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:tests.length,positiveSizes:positive.length,best,tests,classification:positive.length?"ROUTE_LOCKED_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false});
   exact4650.candidatesValidated++;
  }
  exact4650.validationCompletedAt=new Date().toISOString();exact4650.validationLatencyMs=Date.now()-vs;
@@ -8643,7 +8652,7 @@ async function runExact4650(limit=10){
  exact4650={...exact4650,status:"COMPLETE",phase:"COMPLETE",completedAt:new Date().toISOString(),results,lastLatencyMs:Date.now()-totalStart};
 }
 function exactSummary4650(){
- return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,phase:exact4650.phase,error:exact4650.error,architecture:"SAME_RUN_DYNAMIC_DISCOVERY_TO_FROZEN_CANDIDATE_SNAPSHOT_TO_IMMEDIATE_SEQUENTIAL_EXACT_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,discoveryStartedAt:exact4650.discoveryStartedAt,discoveryCompletedAt:exact4650.discoveryCompletedAt,validationStartedAt:exact4650.validationStartedAt,validationCompletedAt:exact4650.validationCompletedAt,discoveryLatencyMs:exact4650.discoveryLatencyMs,validationLatencyMs:exact4650.validationLatencyMs,candidatesDetected:exact4650.candidatesDetected,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,candidateSnapshot:exact4650.candidateSnapshot,results:exact4650.results,lastLatencyMs:exact4650.lastLatencyMs,limitations:{sameRunCandidateHandoff:true,noRediscoveryBetweenDetectionAndValidation:true,exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,gasIncluded:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+ return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,phase:exact4650.phase,error:exact4650.error,architecture:"SAME_RUN_DISCOVERY_TO_FROZEN_CANDIDATE_TO_ROUTE_LOCKED_SEQUENTIAL_EXACT_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,discoveryStartedAt:exact4650.discoveryStartedAt,discoveryCompletedAt:exact4650.discoveryCompletedAt,validationStartedAt:exact4650.validationStartedAt,validationCompletedAt:exact4650.validationCompletedAt,discoveryLatencyMs:exact4650.discoveryLatencyMs,validationLatencyMs:exact4650.validationLatencyMs,candidatesDetected:exact4650.candidatesDetected,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,candidateSnapshot:exact4650.candidateSnapshot,results:exact4650.results,lastLatencyMs:exact4650.lastLatencyMs,limitations:{sameRunCandidateHandoff:true,noRediscoveryBetweenDetectionAndValidation:true,routeLockedValidation:true,aerodromePoolTypeLocked:true,uniswapFeeTierLocked:true,uniswapPoolIdentityVerified:true,exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,gasIncluded:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
 }
 app.get("/api/validator/crossvenue/start",(req,res)=>{
  if(exact4650.status==="RUNNING")return res.json({...exactSummary4650(),statusRoute:"/api/validator/crossvenue/status"});
