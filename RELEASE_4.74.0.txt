@@ -1,0 +1,10 @@
+ArbiFlow Engine 4.74.0 — CEX Reference Activation & Telemetry
+
+- Auto-start Global Discrepancy/reference workers on process startup; no manual /api/global/start required after deploy.
+- Preserve /api/global/start as idempotent control endpoint.
+- Add Bitstamp public ETH/USD ticker reference adapter using documented public REST API.
+- Report runtime CEX feed states from actual heartbeat telemetry, not registry position.
+- Add configured/live/stale/error feed counts, messages received, feed errors, poll count, consensus updates and last poll timestamp to /api/global-coverage/status.
+- Expose per-feed age, update/error counters, last error, poll interval and stale threshold.
+- Preserve Base bounded discovery, 1inch, financing, gas fail-closed qualification, and all read-only safety gates.
+- No mainnet execution.

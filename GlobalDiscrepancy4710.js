@@ -2,7 +2,7 @@
 
 const { JsonRpcProvider, Contract, formatUnits, parseUnits, getAddress } = require("ethers");
 
-const VERSION="4.73.1";
+const VERSION="4.74.0";
 const BASE_CHAIN_ID=8453;
 const BASE_WETH="0x4200000000000000000000000000000000000006";
 const BASE_USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
@@ -30,7 +30,7 @@ const registry={
 
 const S=global.__arbiflow4710||{
  status:"IDLE",startedAt:null,lastReferencePollAt:null,lastReconcileAt:null,lastBaseBlock:null,lastBaseBlockAt:null,lastError:null,timer:null,reconcileTimer:null,
- feeds:{coinbase:{status:"IDLE"},binance:{status:"IDLE"},kraken:{status:"IDLE"}},reference:{ETHUSD:null,USDCUSD:null},aggregator:{status:ONEINCH_KEY?"CONFIGURED":"UNCONFIGURED",lastQuoteAt:null,lastError:null},
+ feeds:{coinbase:{status:"IDLE"},binance:{status:"IDLE"},kraken:{status:"IDLE"},bitstamp:{status:"IDLE"}},reference:{ETHUSD:null,USDCUSD:null},aggregator:{status:ONEINCH_KEY?"CONFIGURED":"UNCONFIGURED",lastQuoteAt:null,lastError:null},
  financing:{status:"IDLE",lastCheckedAt:null,morpho:null,aave:null},candidates:[],qualified:[],rejections:{},
  metrics:{referencePolls:0,referenceUpdates:0,baseStateUpdates:0,pairEvaluations:0,rawDiscrepancies:0,spreadGatePassed:0,depthPassed:0,sizingPassed:0,prequalified:0,firmQuotesRequested:0,firmQuotesPassed:0,financingChecks:0,financingPassed:0,simulations:0,simulationPassed:0,riskPassed:0,qualified:0,expired:0,invalidated:0}
 };
@@ -48,7 +48,8 @@ async function pollReferences(){
  const jobs=[
   ["coinbase",async()=>{const j=await fetchJson("https://api.exchange.coinbase.com/products/ETH-USD/ticker");return {bid:Number(j.bid),ask:Number(j.ask)};}],
   ["binance",async()=>{const j=await fetchJson("https://api.binance.com/api/v3/ticker/bookTicker?symbol=ETHUSDT");return {bid:Number(j.bidPrice),ask:Number(j.askPrice)};}],
-  ["kraken",async()=>{const j=await fetchJson("https://api.kraken.com/0/public/Ticker?pair=ETHUSD");const x=Object.values(j.result||{})[0];return {bid:Number(x?.b?.[0]),ask:Number(x?.a?.[0])};}]
+  ["kraken",async()=>{const j=await fetchJson("https://api.kraken.com/0/public/Ticker?pair=ETHUSD");const x=Object.values(j.result||{})[0];return {bid:Number(x?.b?.[0]),ask:Number(x?.a?.[0])};}],
+  ["bitstamp",async()=>{const j=await fetchJson("https://www.bitstamp.net/api/v2/ticker/ethusd/");return {bid:Number(j.bid),ask:Number(j.ask)};}]
  ];
  await Promise.all(jobs.map(async([n,fn])=>{try{const d=await fn();if(!(d.bid>0&&d.ask>0))throw new Error("INVALID_BOOK");setFeed(n,true,d);}catch(e){setFeed(n,false,null,e.message);}}));
  const live=Object.values(S.feeds).filter(f=>f.status==="LIVE"&&age(f.lastMessageAt)<=MAX_REFERENCE_AGE_MS&&f.data?.bid>0&&f.data?.ask>0);
@@ -88,7 +89,8 @@ async function reconcile(){S.lastReconcileAt=now();await Promise.allSettled([ref
 async function tick(){try{await Promise.allSettled([pollReferences(),refreshBase()]);await evaluateEthUsdc();}catch(e){S.lastError=e.message;}}
 function start(){if(S.status==="RUNNING")return;S.status="RUNNING";S.startedAt=now();tick();reconcile();S.timer=setInterval(tick,POLL_MS);S.reconcileTimer=setInterval(reconcile,FULL_RECONCILE_MS);}
 function stop(){if(S.timer)clearInterval(S.timer);if(S.reconcileTimer)clearInterval(S.reconcileTimer);S.timer=null;S.reconcileTimer=null;S.status="STOPPED";}
-function feedHealth(){const out={};for(const [k,v] of Object.entries(S.feeds)){const a=age(v.lastMessageAt);out[k]={...v,ageMs:a,status:v.status==="LIVE"&&a!=null&&a>MAX_REFERENCE_AGE_MS?"STALE":v.status};}return out;}
+function feedHealth(){const out={};for(const [k,v] of Object.entries(S.feeds)){const a=age(v.lastMessageAt);const effective=v.status==="LIVE"&&a!=null&&a>MAX_REFERENCE_AGE_MS?"STALE":v.status;out[k]={...v,ageMs:a,status:effective,configured:true,pollIntervalMs:POLL_MS,staleAfterMs:MAX_REFERENCE_AGE_MS};}return out;}
+function referenceTelemetry(){const feeds=feedHealth();const values=Object.values(feeds);return {configured:values.length,live:values.filter(x=>x.status==="LIVE").length,stale:values.filter(x=>x.status==="STALE").length,error:values.filter(x=>x.status==="ERROR").length,totalUpdates:values.reduce((n,x)=>n+(x.updates||0),0),totalErrors:values.reduce((n,x)=>n+(x.errors||0),0),polls:S.metrics.referencePolls,consensusUpdates:S.metrics.referenceUpdates,lastPollAt:S.lastReferencePollAt,consensus:S.reference.ETHUSD};}
 function readiness(){const feeds=feedHealth();const liveFeeds=Object.values(feeds).filter(x=>x.status==="LIVE").length;const baseLive=age(S.lastBaseBlockAt)!=null&&age(S.lastBaseBlockAt)<30000;const agg=ONEINCH_KEY?S.aggregator.status:"UNCONFIGURED";const financing=S.financing.status;const gates={reference:liveFeeds>=2?"PASS":"FAIL",assetRegistry:"PASS",baseMarket:baseLive?"PASS":"FAIL",aggregator:agg==="LIVE"?"PASS":(agg==="CONFIGURED"?"PENDING":"FAIL"),candidateEngine:S.status==="RUNNING"?"PASS":"FAIL",financing:financing==="LIVE"?"PASS":"FAIL",validator:"READ_ONLY_NOT_EXECUTION_READY"};return {gates,tradingReadiness:Object.values(gates).every(x=>x==="PASS")?"READY":"NOT_READY"};}
 function common(){const r=readiness();return {success:true,version:VERSION,process:S.status,tradingReadiness:r.tradingReadiness,gates:r.gates,readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};}
 
@@ -99,7 +101,7 @@ function register(app){
  app.get("/api/reference/status",(req,res)=>res.json({...common(),feeds:feedHealth(),consensus:S.reference}));
  app.get("/api/assets/status",(req,res)=>res.json({...common(),registry,identityPolicy:"CHAIN_ID_PLUS_ADDRESS; symbols are display metadata only",equivalencePolicy:"WRAPPED_NATIVE_DIRECT_ONLY_IN_4.71.0"}));
  app.get("/api/market/base/status",(req,res)=>res.json({...common(),chainId:BASE_CHAIN_ID,blockNumber:S.lastBaseBlock,lastBlockAt:S.lastBaseBlockAt,blockAgeMs:age(S.lastBaseBlockAt),stateVersion:`base:${S.lastBaseBlock||"unknown"}`}));
- app.get("/api/coverage/status",(req,res)=>res.json({...common(),referenceFeeds:{configured:3,live:Object.values(feedHealth()).filter(x=>x.status==="LIVE").length},chains:{configured:1,live:age(S.lastBaseBlockAt)!=null&&age(S.lastBaseBlockAt)<30000?1:0},aggregator:{name:"1inch",chainId:BASE_CHAIN_ID,configured:Boolean(ONEINCH_KEY),requiredEnvironmentVariable:"ONEINCH_API_KEY",credentialEmbedded:false,...S.aggregator},directCandidateEngine4700Preserved:true}));
+ app.get("/api/coverage/status",(req,res)=>res.json({...common(),referenceFeeds:referenceTelemetry(),chains:{configured:1,live:age(S.lastBaseBlockAt)!=null&&age(S.lastBaseBlockAt)<30000?1:0},aggregator:{name:"1inch",chainId:BASE_CHAIN_ID,configured:Boolean(ONEINCH_KEY),requiredEnvironmentVariable:"ONEINCH_API_KEY",credentialEmbedded:false,...S.aggregator},directCandidateEngine4700Preserved:true}));
  app.get("/api/candidates/status",(req,res)=>res.json({...common(),metrics:S.metrics,rejections:S.rejections,candidateCount:S.candidates.length,qualifiedCount:S.qualified.length,candidates:S.candidates.slice(0,20)}));
  app.get("/api/candidates/qualified",(req,res)=>res.json({...common(),policy:{minimumExecutableSpreadPct:MIN_SPREAD_PCT,minimumNetProfitUsd:MIN_NET_USD,maxRisk:"MEDIUM",firmValidationRequired:true,simulationRequired:true},count:S.qualified.length,candidates:S.qualified}));
  app.get("/api/financing/status",async(req,res)=>{if(req.query.refresh==="1")await refreshFinancing();res.json({...common(),financing:S.financing,policy:{walletDoesNotCapDiscovery:true,optimalSizeBeforeFinancing:true,morphoZeroFeeModeled:true,aavePremiumReadLive:true}});});
@@ -107,4 +109,4 @@ function register(app){
  app.get("/api/global/reconcile",async(req,res)=>{await reconcile();res.json({...common(),lastReconcileAt:S.lastReconcileAt});});
 }
 
-module.exports={register,start,stop,_state:S,_test:{readiness,registry}};
+module.exports={register,start,stop,_state:S,_test:{readiness,registry},feedHealth,referenceTelemetry};

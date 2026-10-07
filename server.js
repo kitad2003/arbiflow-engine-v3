@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.73.1";
+const VERSION = "4.74.0";
 
 /*
 =========================================================
@@ -9110,6 +9110,8 @@ validator health surfaces. Read-only; no mainnet execution.
 */
 const globalDiscrepancy4710 = require("./GlobalDiscrepancy4710");
 globalDiscrepancy4710.register(app);
+// 4.74: reference/CEX telemetry is a core background service and must survive process restarts without a manual HTTP kick.
+globalDiscrepancy4710.start();
 // 4.72 broad discovery starts independently; failures cannot block the web process.
 startBroadDiscovery4720();
 
@@ -9139,7 +9141,7 @@ app.listen(
 const COVERAGE4730 = {
   target: { majorCexFeeds: 15, dexLiquiditySources: 500, tier1Chains: 15 },
   cexAdapters: [
-    "BINANCE","COINBASE","KRAKEN","OKX","BYBIT","BITSTAMP","GEMINI","CRYPTO_COM","BITFINEX","GATE_IO","KUCOIN","MEXC","HTX","BITGET","BULLISH"
+    "BINANCE","COINBASE","KRAKEN","BITSTAMP","OKX","BYBIT","GEMINI","CRYPTO_COM","BITFINEX","GATE_IO","KUCOIN","MEXC","HTX","BITGET","BULLISH"
   ],
   chains: [
     {name:"Base",chainId:8453,state:"LIVE_DISCOVERY"},
@@ -9165,11 +9167,11 @@ const COVERAGE4730 = {
 function coverage4730Summary(){
   const liveChains=COVERAGE4730.chains.filter(x=>x.state==="LIVE_DISCOVERY").length;
   const readyChains=COVERAGE4730.chains.filter(x=>x.state.includes("READY")).length;
-  const gs=globalDiscrepancy4710._state || {};
-  const feeds=gs.feeds || {};
-  const configuredCexFeeds=Object.keys(feeds).length;
-  const liveCexFeeds=Object.values(feeds).filter(f=>f && f.status==="LIVE").length;
-  return {success:true,version:VERSION,architecture:"GLOBAL_COVERAGE_LAYER_MEASURED_NOT_MARKETING_CLAIMS",target:COVERAGE4730.target,measured:{liveDiscoveryChains:liveChains,adapterReadyChains:readyChains,directDexAdapters:COVERAGE4730.liquidityArchitecture.directBaseAdapters.length,aggregatorAdapters:COVERAGE4730.liquidityArchitecture.aggregatorAdapters.length,configuredCexFeeds,liveCexFeeds},cexAdapters:COVERAGE4730.cexAdapters.map((name,i)=>({name,state:i<3?"LEGACY_REFERENCE_SLOT":"REGISTERED_NOT_LIVE"})),chains:COVERAGE4730.chains,liquidityArchitecture:COVERAGE4730.liquidityArchitecture,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+  const feeds=globalDiscrepancy4710.feedHealth ? globalDiscrepancy4710.feedHealth() : (globalDiscrepancy4710._state?.feeds||{});
+  const rt=globalDiscrepancy4710.referenceTelemetry ? globalDiscrepancy4710.referenceTelemetry() : {};
+  const adapterState=name=>{const f=feeds[name.toLowerCase()]; if(!f)return "REGISTERED_NOT_LIVE"; return f.status==="LIVE"?"LIVE":f.status==="STALE"?"STALE":f.status==="ERROR"?"ERROR":"CONFIGURED_NOT_LIVE";};
+  return {success:true,version:VERSION,architecture:"GLOBAL_COVERAGE_LAYER_MEASURED_NOT_MARKETING_CLAIMS",target:COVERAGE4730.target,measured:{liveDiscoveryChains:liveChains,adapterReadyChains:readyChains,directDexAdapters:COVERAGE4730.liquidityArchitecture.directBaseAdapters.length,aggregatorAdapters:COVERAGE4730.liquidityArchitecture.aggregatorAdapters.length,configuredCexFeeds:rt.configured||Object.keys(feeds).length,liveCexFeeds:rt.live||0,staleCexFeeds:rt.stale||0,errorCexFeeds:rt.error||0,cexMessagesReceived:rt.totalUpdates||0,cexFeedErrors:rt.totalErrors||0,referencePolls:rt.polls||0,referenceUpdates:rt.consensusUpdates||0,lastReferencePollAt:rt.lastPollAt||null},cexAdapters:COVERAGE4730.cexAdapters.map(name=>({name,state:adapterState(name),telemetry:feeds[name.toLowerCase()]||null})),chains:COVERAGE4730.chains,liquidityArchitecture:COVERAGE4730.liquidityArchitecture,referenceConsensus:rt.consensus||null,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
+
 app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary()));
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
