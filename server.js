@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.59.4";
+const VERSION = "4.60.0";
 
 /*
 =========================================================
@@ -8029,6 +8029,52 @@ app.get("/api/opportunities/graph/start",(req,res)=>{if(opportunityGraphState459
 app.get("/api/opportunities/graph/status",(req,res)=>{const st=opportunityGraphState4590;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
 
+
+
+/* ArbiFlow 4.60.0 — production-searcher foundation.
+   Additive to all 4.59.4 diagnostics. Builds a block-tagged in-memory V3 pool
+   registry/state snapshot from existing factory discovery. This is the state
+   foundation only: event replay, WebSocket subscriptions, reorg rollback and
+   tick traversal are intentionally marked NOT_ACTIVE until implemented. */
+let marketState4600={status:"IDLE",startedAt:null,completedAt:null,error:null,registry:new Map(),chains:{},bootstrapBlockByChain:{},lastUpdateAt:null};
+
+function marketStateSummary4600(){
+ const pools=[...marketState4600.registry.values()], now=Date.now();
+ const ages=pools.map(x=>Math.max(0,now-Date.parse(x.snapshotAt))).filter(Number.isFinite);
+ return {success:marketState4600.status!=="ERROR",version:VERSION,status:marketState4600.status,startedAt:marketState4600.startedAt,completedAt:marketState4600.completedAt,error:marketState4600.error,
+  architecture:"POOL_REGISTRY_TO_BLOCK_TAGGED_BOOTSTRAP_TO_IN_MEMORY_STATE",
+  registry:{poolCount:pools.length,chains:Object.keys(marketState4600.chains),nonzeroLiquidityPools:pools.filter(x=>BigInt(x.liquidityRaw||"0")>0n).length,oldestStateAgeMs:ages.length?Math.max(...ages):null,newestStateAgeMs:ages.length?Math.min(...ages):null},
+  synchronization:{bootstrapBlockByChain:marketState4600.bootstrapBlockByChain,eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",tickStateCache:"NOT_ACTIVE",executionEligible:false},
+  lastUpdateAt:marketState4600.lastUpdateAt,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+async function bootstrapMarketState4600(){
+ const started=Date.now(), discovery=await discoverUniswapV3Pools4470(), registry=new Map(), chains={}, blocks={};
+ const scanned=(discovery.chains||[]).filter(x=>x.status==="SCANNED");
+ await mapLimit4501(scanned,3,async ch=>{
+  const rpc=RPC_URLS[ch.key]||""; if(!rpc)return;
+  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+  const bootstrapBlock=await withTimeout4501(provider.getBlockNumber(),8000,`${ch.key}_BOOTSTRAP_BLOCK`); blocks[ch.key]=bootstrapBlock;
+  const valid=(ch.pools||[]).filter(x=>x.pool&&x.hasLiquidity);
+  const rows=await mapLimit4501(valid,8,async meta=>{try{
+   const pc=new Contract(meta.pool,UNISWAP_V3_POOL_READ_ABI_4470,provider);
+   const [slot0,liq,t0,t1]=await withTimeout4501(Promise.all([pc.slot0({blockTag:bootstrapBlock}),pc.liquidity({blockTag:bootstrapBlock}),pc.token0({blockTag:bootstrapBlock}),pc.token1({blockTag:bootstrapBlock})]),9000,`${ch.key}_BOOTSTRAP_STATE`);
+   return {ok:true,value:{key:`${ch.key}:${String(meta.pool).toLowerCase()}`,chain:ch.key,chainId:ch.chainId,dex:meta.dex,pair:meta.pair,pool:meta.pool,feeTier:meta.feeTier,token0:String(t0),token1:String(t1),sqrtPriceX96:(slot0.sqrtPriceX96??slot0[0]).toString(),tick:Number(slot0.tick??slot0[1]),liquidityRaw:liq.toString(),bootstrapBlock,snapshotBlock:bootstrapBlock,snapshotAt:new Date().toISOString(),source:"BLOCK_TAGGED_RPC_BOOTSTRAP",stateFreshness:"BOOTSTRAP_ONLY",readOnly:true}}; 
+  }catch(e){return {ok:false,error:e?.message||String(e),pool:meta.pool};}});
+  const good=rows.filter(x=>x?.ok).map(x=>x.value); for(const row of good)registry.set(row.key,row);
+  chains[ch.key]={chainId:ch.chainId,bootstrapBlock,discoveredPools:valid.length,snapshottedPools:good.length,snapshotFailures:rows.length-good.length};
+ });
+ marketState4600.registry=registry;marketState4600.chains=chains;marketState4600.bootstrapBlockByChain=blocks;marketState4600.lastUpdateAt=new Date().toISOString();
+ return {success:true,version:VERSION,classification:"MARKET_STATE_BOOTSTRAP_COMPLETE",architecture:"FACTORY_DISCOVERY_TO_BLOCK_TAGGED_POOL_SNAPSHOT_TO_IN_MEMORY_REGISTRY",elapsedMs:Date.now()-started,discoveryCoverage:discovery.coverage,chains,registryCount:registry.size,synchronization:{bootstrapComplete:true,eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",tickStateCache:"NOT_ACTIVE",executionEligible:false},readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
+}
+async function runMarketBootstrap4600(){
+ if(marketState4600.status==="RUNNING")return;
+ marketState4600={...marketState4600,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,registry:new Map(),chains:{},bootstrapBlockByChain:{},lastUpdateAt:null};
+ try{const result=await bootstrapMarketState4600();marketState4600={...marketState4600,status:"COMPLETE",completedAt:new Date().toISOString(),result};}
+ catch(e){marketState4600={...marketState4600,status:"ERROR",completedAt:new Date().toISOString(),error:e?.message||String(e)};}
+}
+app.get("/api/market-state/bootstrap/start",(req,res)=>{const running=marketState4600.status==="RUNNING";if(!running)setImmediate(()=>runMarketBootstrap4600());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/market-state/bootstrap/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/market-state/bootstrap/status",(req,res)=>{const summary=marketStateSummary4600();res.json({...summary,result:marketState4600.result||null});});
+app.get("/api/market-state/registry",(req,res)=>{const chain=String(req.query.chain||"").toLowerCase(),limit=Math.max(1,Math.min(500,Number(req.query.limit||100)));let rows=[...marketState4600.registry.values()];if(chain)rows=rows.filter(x=>x.chain===chain);res.json({success:true,version:VERSION,status:marketState4600.status,count:rows.length,returned:Math.min(rows.length,limit),pools:rows.slice(0,limit),synchronization:{eventReconciliation:"NOT_ACTIVE",websocketSubscriptions:"NOT_ACTIVE",reorgRollback:"NOT_ACTIVE",executionEligible:false},readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.

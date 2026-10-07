@@ -1,0 +1,29 @@
+ArbiFlow Engine 4.60.0 — Market State Foundation
+
+This is an additive architectural foundation release. Existing 4.59.4 diagnostic scanners remain available.
+
+NEW:
+- In-process pool registry
+- Reuses real on-chain V3 factory discovery
+- Per-chain bootstrap block capture
+- Block-tagged pool state snapshots
+- Cached token0/token1, fee, sqrtPriceX96, tick and current liquidity
+- Pool/state freshness metadata
+- Per-chain discovery/snapshot failure accounting
+- Registry inspection endpoint
+
+ENDPOINTS:
+GET /api/market-state/bootstrap/start
+GET /api/market-state/bootstrap/status
+GET /api/market-state/registry?chain=base&limit=100
+
+INTENTIONALLY NOT CLAIMED IN THIS RELEASE:
+- WebSocket subscriptions
+- Event catch-up/reconciliation
+- Reorg rollback
+- V3 initialized tick cache/tick traversal
+- Local arbitrage cycle detection
+- Live execution eligibility
+
+All execution remains fail-closed/read-only.
+Validation: npm run check PASS.
