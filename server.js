@@ -28,8 +28,8 @@ const ZEROX_API_KEY = process.env.ZEROX_API_KEY || "";
 
 const RPC_URLS = {
   ethereum: process.env.ETHEREUM_RPC_URL || "",
-  arbitrum: process.env.ARBITRUM_RPC_URL || "",
-  optimism: process.env.OPTIMISM_RPC_URL || "",
+  arbitrum: process.env.ARBITRUM_RPC_URL || "https://arb1.arbitrum.io/rpc",
+  optimism: process.env.OPTIMISM_RPC_URL || "https://mainnet.optimism.io",
   base: process.env.BASE_RPC_URL || "",
   polygon: process.env.POLYGON_RPC_URL || "",
   bnb: process.env.BNB_RPC_URL || process.env.BSC_RPC_URL || "",
@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.74.0";
+const VERSION = "4.75.0";
 
 /*
 =========================================================
@@ -9137,6 +9137,25 @@ app.listen(
   }
 );
 
+
+
+// === ArbiFlow 4.75.0 Base + Arbitrum + Optimism measured activation ===
+const MC4750_CHAINS = [
+  {key:"base",name:"Base",chainId:8453,rpc:RPC_URLS.base,rpcSource:process.env.BASE_RPC_URL?"ENV":"MISSING",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913"}},
+  {key:"arbitrum",name:"Arbitrum",chainId:42161,rpc:RPC_URLS.arbitrum,rpcSource:process.env.ARBITRUM_RPC_URL?"ENV":"PUBLIC_FALLBACK",tokens:{WETH:"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",USDC:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831"}},
+  {key:"optimism",name:"Optimism",chainId:10,rpc:RPC_URLS.optimism,rpcSource:process.env.OPTIMISM_RPC_URL?"ENV":"PUBLIC_FALLBACK",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"}}
+];
+const mc4750={startedAt:new Date().toISOString(),pollIntervalMs:5000,polls:0,chains:{},timer:null};
+for(const c of MC4750_CHAINS)mc4750.chains[c.key]={name:c.name,chainId:c.chainId,status:"STARTING",rpcSource:c.rpcSource,lastAttemptAt:null,lastBlockAt:null,latestBlock:null,previousBlock:null,blockAdvanced:false,rpcLatencyMs:null,rpcErrors:0,lastError:null,aggregator:{name:"1INCH",configured:Boolean(process.env.ONEINCH_API_KEY),status:process.env.ONEINCH_API_KEY?"CONFIGURED_NOT_PROBED":"UNCONFIGURED",lastProbeAt:null,lastError:null}};
+async function pollChain4750(c){const st=mc4750.chains[c.key];st.lastAttemptAt=new Date().toISOString();const t=Date.now();if(!c.rpc){st.status="RPC_NOT_CONFIGURED";st.rpcErrors++;st.lastError="RPC_NOT_CONFIGURED";return;}try{const provider=new JsonRpcProvider(c.rpc,undefined,{staticNetwork:false});const [net,bn]=await withTimeout4501(Promise.all([provider.getNetwork(),provider.getBlockNumber()]),4500,`${c.key}_HEARTBEAT`);const actual=Number(net.chainId);st.rpcLatencyMs=Date.now()-t;st.actualChainId=actual;if(actual!==c.chainId){st.status="CHAIN_ID_MISMATCH";st.lastError=`EXPECTED_${c.chainId}_GOT_${actual}`;return;}st.previousBlock=st.latestBlock;st.latestBlock=Number(bn);st.blockAdvanced=st.previousBlock==null?true:st.latestBlock>st.previousBlock;st.lastBlockAt=new Date().toISOString();st.status="LIVE";st.lastError=null;}catch(e){st.status="ERROR";st.rpcErrors++;st.lastError=e?.message||String(e);}}
+async function probeOneInch4750(c){const st=mc4750.chains[c.key].aggregator,key=process.env.ONEINCH_API_KEY||"";if(!key){st.status="UNCONFIGURED";return;}const amount="10000000000000000";const u=new URL(`https://api.1inch.dev/swap/v6.1/${c.chainId}/quote`);u.searchParams.set("src",c.tokens.WETH);u.searchParams.set("dst",c.tokens.USDC);u.searchParams.set("amount",amount);const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),4500);st.lastProbeAt=new Date().toISOString();try{const r=await fetch(u,{headers:{Authorization:`Bearer ${key}`},signal:ctl.signal});const body=await r.text();if(!r.ok)throw new Error(`HTTP_${r.status}:${body.slice(0,100)}`);const j=JSON.parse(body);st.status=j?.dstAmount?"LIVE":"INVALID_RESPONSE";st.lastError=null;st.lastDstAmount=j?.dstAmount||null;}catch(e){st.status="ERROR";st.lastError=e?.name==="AbortError"?"TIMEOUT_4500MS":(e?.message||String(e));}finally{clearTimeout(timer);}}
+async function pollMultiChain4750(){mc4750.polls++;await Promise.all(MC4750_CHAINS.map(pollChain4750));if(mc4750.polls===1||mc4750.polls%12===0)await Promise.all(MC4750_CHAINS.map(probeOneInch4750));}
+function multiChain4750Summary(){const rows=MC4750_CHAINS.map(c=>({...mc4750.chains[c.key],rpcConfigured:Boolean(c.rpc),tokenMappings:Object.keys(c.tokens)}));return {success:true,version:VERSION,architecture:"BASE_ARBITRUM_OPTIMISM_INDEPENDENT_HEARTBEATS_AND_AGGREGATOR_PROBES",startedAt:mc4750.startedAt,pollIntervalMs:mc4750.pollIntervalMs,polls:mc4750.polls,measured:{chainsTargeted:rows.length,chainsLive:rows.filter(x=>x.status==="LIVE").length,chainsError:rows.filter(x=>x.status==="ERROR"||x.status==="CHAIN_ID_MISMATCH").length,aggregatorsLive:rows.filter(x=>x.aggregator.status==="LIVE").length},chains:rows,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};}
+function startMultiChain4750(){if(mc4750.timer)return;pollMultiChain4750().catch(()=>{});mc4750.timer=setInterval(()=>pollMultiChain4750().catch(()=>{}),mc4750.pollIntervalMs);}
+app.get("/api/multichain/status",(req,res)=>res.json(multiChain4750Summary()));
+app.get("/api/multichain/probe",async(req,res)=>{await pollMultiChain4750();res.json(multiChain4750Summary());});
+startMultiChain4750();
+
 // === ArbiFlow 4.73.1 Global Coverage Architecture Layer ===
 const COVERAGE4730 = {
   target: { majorCexFeeds: 15, dexLiquiditySources: 500, tier1Chains: 15 },
@@ -9146,8 +9165,8 @@ const COVERAGE4730 = {
   chains: [
     {name:"Base",chainId:8453,state:"LIVE_DISCOVERY"},
     {name:"Ethereum",chainId:1,state:"ADAPTER_READY_NOT_CONFIGURED"},
-    {name:"Arbitrum",chainId:42161,state:"ADAPTER_READY_NOT_CONFIGURED"},
-    {name:"Optimism",chainId:10,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Arbitrum",chainId:42161,state:"LIVE_ACTIVATION_MEASURED"},
+    {name:"Optimism",chainId:10,state:"LIVE_ACTIVATION_MEASURED"},
     {name:"BNB Chain",chainId:56,state:"ADAPTER_READY_NOT_CONFIGURED"},
     {name:"Polygon",chainId:137,state:"ADAPTER_READY_NOT_CONFIGURED"},
     {name:"Avalanche",chainId:43114,state:"ADAPTER_READY_NOT_CONFIGURED"},

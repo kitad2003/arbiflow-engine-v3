@@ -1,0 +1,10 @@
+ArbiFlow 4.75.0 — Base + Arbitrum + Optimism Measured Activation
+
+- Preserves 4.74.0 CEX reference activation.
+- Activates independent RPC heartbeats for Base, Arbitrum, and Optimism.
+- Arbitrum/Optimism use environment RPC URLs when present, public read-only fallbacks otherwise.
+- Adds bounded 1inch WETH/USDC reachability probes per activated chain.
+- Adds /api/multichain/status and /api/multichain/probe.
+- Reports chain ID, latest block, advancement, latency, errors, and aggregator status independently.
+- No signatures, approvals, swaps, broadcasts, or funds movement.
+- Mainnet execution remains disabled.
