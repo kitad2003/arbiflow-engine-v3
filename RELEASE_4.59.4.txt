@@ -1,6 +1,6 @@
-ArbiFlow Engine 4.64.0 — Cross-DEX Opportunity Graph
+ArbiFlow Engine 4.64.1 — Cross-DEX Opportunity Graph
 
-Additive release. 4.64.0 normalized multichain graph and candidate scanner remain intact.
+Additive release. 4.64.1 normalized multichain graph and candidate scanner remain intact.
 
 New verified cross-DEX lane:
 - Base

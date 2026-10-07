@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.64.0";
+const VERSION = "4.64.1";
 
 /*
 =========================================================
@@ -8488,6 +8488,82 @@ function multiVenueSummary4640(includeEdges=false){
 app.get("/api/multivenue/base/start",(req,res)=>{if(multivenue4640.status==="RUNNING")return res.json({...multiVenueSummary4640(false),statusRoute:"/api/multivenue/base/status"});setImmediate(async()=>{try{await runMultiVenue4640();}catch(e){multivenue4640.status="ERROR";multivenue4640.completedAt=new Date().toISOString();multivenue4640.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/multivenue/base/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/multivenue/base/status",(req,res)=>res.json(multiVenueSummary4640(false)));
 app.get("/api/multivenue/base/edges",(req,res)=>res.json(multiVenueSummary4640(true)));
+
+
+/*
+=========================================================
+ArbiFlow 4.64.1 — DYNAMIC MULTI-VENUE SEARCH
+Multi-size venue curves, deformation filtering, positive candidates and
+near-positive watchlist. Read-only; no execution.
+=========================================================
+*/
+const MV4641_SIZES={
+ WETH:[0.0001,0.00025,0.0005,0.001,0.0025],
+ cbETH:[0.0001,0.00025,0.0005,0.001,0.0025],
+ cbBTC:[0.000005,0.00001,0.000025,0.00005,0.0001],
+ USDC:[1,2.5,5,10,25],
+ USDbC:[1,2.5,5,10,25]
+};
+let dynamic4641={status:"IDLE",startedAt:null,completedAt:null,error:null,curves:[],usableEdges:[],rejectedEdges:[],candidates:[],watchlist:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,lastLatencyMs:null,executionEligible:false};
+
+async function quoteVenue4641(venue,from,to,size){
+ return venue==="UNISWAP_V3"?quoteUv3Edge4640(from,to,size):quoteAeroEdge4640(from,to,size);
+}
+function curveQuality4641(samples){
+ const good=samples.filter(Boolean).sort((a,b)=>a.probeInput-b.probeInput);if(good.length<3)return {usable:false,reason:"INSUFFICIENT_SIZE_SAMPLES"};
+ const rates=good.map(x=>x.rate).filter(x=>Number.isFinite(x)&&x>0);if(rates.length<3)return {usable:false,reason:"INVALID_RATE_SAMPLES"};
+ const lo=Math.min(...rates),hi=Math.max(...rates),median=[...rates].sort((a,b)=>a-b)[Math.floor(rates.length/2)],deformationPct=median>0?(hi-lo)/median*100:Infinity;
+ // Severe shape deformation is usually thin liquidity or unit-granularity saturation.
+ const usable=Number.isFinite(deformationPct)&&deformationPct<=15;
+ return {usable,reason:usable?"USABLE":"LIQUIDITY_CURVE_DEFORMED",deformationPct,rateMin:lo,rateMax:hi,rateMedian:median,samples:good.length};
+}
+function detectAndRank4641(edges){
+ const byFrom=new Map();for(const e of edges){if(!byFrom.has(e.from))byFrom.set(e.from,[]);byFrom.get(e.from).push(e);}
+ const all=[],seen=new Set(),push=(hops,path,legs)=>{
+  if(hops===2&&legs[0].venue===legs[1].venue)return;
+  if(hops===3&&new Set(legs.map(x=>x.venue)).size<2)return;
+  const key=hops+"|"+legs.map(x=>`${x.venue}:${x.from}>${x.to}`).join("|");if(seen.has(key))return;seen.add(key);
+  const mult=legs.reduce((m,x)=>m*x.rate,1),spread=(mult-1)*100;
+  all.push({hops,path,venues:legs.map(x=>x.venue),edges:legs,probeGrossMultiplier:mult,probeGrossSpreadPct:spread,classification:spread>0?"DYNAMIC_MULTI_VENUE_CANDIDATE_REQUIRES_EXACT_VALIDATION":"DYNAMIC_MULTI_VENUE_WATCHLIST",executionEligible:false});
+ };
+ for(const a of edges)for(const b of byFrom.get(a.to)||[])if(b.to===a.from)push(2,[a.from,a.to,a.from],[a,b]);
+ for(const a of edges)for(const b of byFrom.get(a.to)||[])for(const c of byFrom.get(b.to)||[])if(c.to===a.from)push(3,[a.from,a.to,b.to,a.from],[a,b,c]);
+ all.sort((a,b)=>b.probeGrossSpreadPct-a.probeGrossSpreadPct);
+ return {candidates:all.filter(x=>x.probeGrossSpreadPct>0).slice(0,100),watchlist:all.filter(x=>x.probeGrossSpreadPct<=0&&x.probeGrossSpreadPct>=-2).slice(0,50)};
+}
+async function runDynamic4641(){
+ if(dynamic4641.status==="RUNNING")return;
+ if(!RPC_URLS.base)throw new Error("BASE_RPC_NOT_CONFIGURED");
+ dynamic4641={...dynamic4641,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,curves:[],usableEdges:[],rejectedEdges:[],candidates:[],watchlist:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0};
+ const started=Date.now(),curveJobs=[];
+ for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME"])curveJobs.push({from,to,venue});}
+ const curves=await mapLimit4501(curveJobs,3,async j=>{
+  const samples=[];
+  for(const size of MV4641_SIZES[j.from]){
+   dynamic4641.quotesAttempted++;
+   const q=await quoteVenue4641(j.venue,j.from,j.to,size);
+   if(q){dynamic4641.quotesSucceeded++;samples.push(q);}else{dynamic4641.quoteFailures++;samples.push(null);}
+  }
+  const quality=curveQuality4641(samples),good=samples.filter(Boolean);
+  // Use the middle probe for graph ranking, after the whole size curve passes quality.
+  const representative=good.length?good[Math.floor(good.length/2)]:null;
+  return {...j,quality,samples:good,representative};
+ });
+ const usableEdges=[],rejectedEdges=[];
+ for(const c of curves){
+  if(c.quality.usable&&c.representative)usableEdges.push({...c.representative,curveDeformationPct:c.quality.deformationPct,curveSamples:c.quality.samples,dynamicQualified:true});
+  else rejectedEdges.push({venue:c.venue,from:c.from,to:c.to,quality:c.quality,sampleCount:c.samples.length});
+ }
+ const ranked=detectAndRank4641(usableEdges);
+ dynamic4641={...dynamic4641,status:"COMPLETE",completedAt:new Date().toISOString(),curves,usableEdges,rejectedEdges,candidates:ranked.candidates,watchlist:ranked.watchlist,lastLatencyMs:Date.now()-started};
+}
+function dynamicSummary4641(details=false){
+ const venueEdges={};for(const e of dynamic4641.usableEdges)venueEdges[e.venue]=(venueEdges[e.venue]||0)+1;
+ return {success:dynamic4641.status!=="ERROR",version:VERSION,status:dynamic4641.status,error:dynamic4641.error,architecture:"BASE_MULTI_VENUE_MULTI_SIZE_CURVES_TO_LIQUIDITY_SHAPE_FILTER_TO_2_AND_3_EDGE_DYNAMIC_RANKING",startedAt:dynamic4641.startedAt,completedAt:dynamic4641.completedAt,quotesAttempted:dynamic4641.quotesAttempted,quotesSucceeded:dynamic4641.quotesSucceeded,quoteFailures:dynamic4641.quoteFailures,curvesTested:dynamic4641.curves.length,usableEdges:dynamic4641.usableEdges.length,rejectedEdges:dynamic4641.rejectedEdges.length,usableEdgesByVenue:venueEdges,positiveCandidates:dynamic4641.candidates.length,watchlistCount:dynamic4641.watchlist.length,candidates:dynamic4641.candidates,watchlist:dynamic4641.watchlist,rejections:dynamic4641.rejectedEdges,lastLatencyMs:dynamic4641.lastLatencyMs,...(details?{curves:dynamic4641.curves,edges:dynamic4641.usableEdges}:{}),limitations:{continuousBackgroundLoop:false,eventTriggeredIncrementalRefresh:"NEXT_GATE_AFTER_VALIDATION",curveDeformationThresholdPct:15,watchlistFloorPct:-2,exactCandidateRoundTripValidation:"REQUIRED",gasIncluded:false,flashLoanFeeIncluded:false,netProfitClaim:false},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/multivenue/dynamic/start",(req,res)=>{if(dynamic4641.status==="RUNNING")return res.json({...dynamicSummary4641(false),statusRoute:"/api/multivenue/dynamic/status"});setImmediate(async()=>{try{await runDynamic4641();}catch(e){dynamic4641.status="ERROR";dynamic4641.completedAt=new Date().toISOString();dynamic4641.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/multivenue/dynamic/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/multivenue/dynamic/status",(req,res)=>res.json(dynamicSummary4641(false)));
+app.get("/api/multivenue/dynamic/curves",(req,res)=>res.json(dynamicSummary4641(true)));
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.

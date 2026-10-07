@@ -1,0 +1,36 @@
+ArbiFlow Engine 4.64.1 — Dynamic Multi-Venue Search
+
+NEW
+- Five executable probe sizes per starting token for every Uniswap V3 and
+  Aerodrome directed pair.
+- Builds a size/rate curve for each venue edge.
+- Rejects curves with insufficient samples, invalid rates, or >15% rate
+  deformation across the tested size range.
+- Builds the search graph only from curve-qualified representative edges.
+- Searches cross-venue 2-edge and 3-edge cycles.
+- Positive cycles are separated from a near-positive watchlist.
+- Watchlist retains cycles from 0% down to -2% gross probe spread so the
+  engine can identify routes worth rechecking when state changes.
+- Detailed curve/rejection endpoint for diagnosis.
+
+ENDPOINTS
+GET /api/multivenue/dynamic/start
+GET /api/multivenue/dynamic/status
+GET /api/multivenue/dynamic/curves
+
+IMPORTANT
+This release validates the dynamic ranking/filtering layer. It does not
+yet run an endless timer/event loop. Event-triggered incremental refresh
+is intentionally the next gate after live curve validation.
+
+PRESERVED
+4.64.0 multi-venue snapshot endpoints and all earlier live state, graph,
+simulator, diagnostics, and safety/fork modules.
+
+SAFETY
+Exact sequential candidate validation remains required.
+Gas/flash-loan economics are not applied.
+No approvals, signatures, swaps, broadcasts, or funds movement.
+executionEligible=false.
+
+Validation: npm run check PASS.
