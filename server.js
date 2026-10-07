@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.56.2";
+const VERSION = "4.57.0";
 
 /*
 =========================================================
@@ -7599,7 +7599,7 @@ USDC probe sizes. No approvals, signatures, swaps, loans or broadcasts.
 */
 
 
-/* ARBIFLOW 4.56.2 - SUSHISWAP V3 BASE DIRECT READ-ONLY ADAPTER */
+/* ARBIFLOW 4.57.0 - SUSHISWAP V3 BASE DIRECT READ-ONLY ADAPTER */
 const SUSHISWAP_V3_BASE = {
   factory: "0xc35DADB65012eC5796536bD9864eD8773aBc74C4",
   quoter: "0xb1E835Dc2785b52265711e17fCCb0fd018226a6e",
@@ -7682,7 +7682,7 @@ async function multiDexCrossVenueDiagnostic4520(){
       for(const buyVenue of venues)for(const sellVenue of venues){
         if(buyVenue===sellVenue) continue;
         const sushiInvolved=buyVenue==="SUSHISWAP_V3"||sellVenue==="SUSHISWAP_V3";
-        if(sushiInvolved && (asset==="cbBTC"||asset==="cbETH")) continue; // 4.56.2 known unsupported Base coverage gaps validated by 4.56.2
+        if(sushiInvolved && (asset==="cbBTC"||asset==="cbETH")) continue; // 4.57.0 known unsupported Base coverage gaps validated by 4.57.0
         jobs.push({asset,sizeUsd,buyVenue,sellVenue});
       }
     }
@@ -7710,7 +7710,7 @@ async function multiDexCrossVenueDiagnostic4520(){
     assetCoverage[a]={jobs:touched.length,quoted:touched.filter(x=>x.exactReadOnlyQuotes).length,failed:touched.filter(x=>!x.exactReadOnlyQuotes).length};
     assetCoverage[a].successPct=round(assetCoverage[a].jobs?assetCoverage[a].quoted/assetCoverage[a].jobs*100:0,2);
   }
-  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"FOUR_VENUE_BASE_EXACT_READ_ONLY_CROSS_DEX_GRAPH_WITH_ROUTE_COVERAGE",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth},{id:"PANCAKESWAP_V3",chain:"Base",health:pancakeHealth},{id:"SUSHISWAP_V3",chain:"Base",health:sushiHealth}],coverage:{chains:1,venueAdapters:4,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,nominalRouteDirections:12,knownUnsupportedJobsSkipped:60,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,failedRoundTrips:failed.length,positiveBeforeGas:positive.length},knownCoverageGaps:[{venue:"SUSHISWAP_V3",asset:"cbBTC",skippedJobs:30,reason:"NO_QUOTE_VALIDATED_4.56.2"},{venue:"SUSHISWAP_V3",asset:"cbETH",skippedJobs:30,reason:"NO_POOL_VALIDATED_4.56.2"}],routeCoverage:{failureClasses,venueCoverage,assetCoverage,failedRoutes:failed},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+  return {success:true,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_COMPLETE",architecture:"FOUR_VENUE_BASE_EXACT_READ_ONLY_CROSS_DEX_GRAPH_WITH_ROUTE_COVERAGE",adapters:[{id:"UNISWAP_V3",chain:"Base",health:uniHealth},{id:"AERODROME",chain:"Base",health:aeroHealth},{id:"PANCAKESWAP_V3",chain:"Base",health:pancakeHealth},{id:"SUSHISWAP_V3",chain:"Base",health:sushiHealth}],coverage:{chains:1,venueAdapters:4,assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520,nominalRouteDirections:12,knownUnsupportedJobsSkipped:60,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,failedRoundTrips:failed.length,positiveBeforeGas:positive.length},knownCoverageGaps:[{venue:"SUSHISWAP_V3",asset:"cbBTC",skippedJobs:30,reason:"NO_QUOTE_VALIDATED_4.57.0"},{venue:"SUSHISWAP_V3",asset:"cbETH",skippedJobs:30,reason:"NO_POOL_VALIDATED_4.57.0"}],routeCoverage:{failureClasses,venueCoverage,assetCoverage,failedRoutes:failed},topPositiveBeforeGas:positive.slice(0,10),results,importantLimitations:{gasIncluded:false,flashFundingIncluded:false,mevIncluded:false,transactionSimulationPerformed:false,executionEligibility:false,note:"This is the first cross-DEX adapter/graph diagnostic. Positive before-gas round trips are screening observations only and must pass gas, funding, slippage/depth and simulation gates before any execution decision."},readOnly:true,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,flashLoanRequested:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/cross-dex-base",async(req,res)=>{try{res.json(await multiDexCrossVenueDiagnostic4520());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"MULTI_DEX_CROSS_VENUE_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7794,7 +7794,63 @@ async function crossDexEconomicDiagnostic4531(){
 }
 app.get("/api/diagnostics/multimarket/cross-dex-economic",async(req,res)=>{try{res.json(await crossDexEconomicDiagnostic4531());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"CROSS_DEX_ECONOMIC_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.56.2_KNOWN_COVERAGE_GAPS",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+
+/*
+=========================================================
+ARBIFLOW 4.57 ARBITRUM LIVE EXACT QUOTE EXPANSION - READ ONLY
+
+First additive chain beyond the validated Base four-venue graph.
+Uses the existing Arbitrum RPC/token registry plus the already-configured
+Uniswap V3 factory/quoter to verify exact-size USDC round trips for the
+Arbitrum asset universe. No approvals, signatures, swaps, flash-loan
+requests, broadcasts, or funds movement occur here.
+=========================================================
+*/
+const ARBITRUM_ASSETS_4570=["WETH","WBTC","cbBTC","ARB","USDT"];
+const ARBITRUM_SIZES_USD_4570=[100,250,500,1000,2500];
+async function arbitrumExactQuoteExpansion4570(){
+ const startedAt=Date.now(),chainKey="arbitrum",cfg=UNISWAP_V3_DISCOVERY_4470[chainKey],rpc=RPC_URLS[chainKey]||"";
+ const base={success:true,version:VERSION,classification:"ARBITRUM_EXACT_QUOTE_EXPANSION_COMPLETE",architecture:"ADDITIVE_ARBITRUM_UNISWAP_V3_EXACT_READ_ONLY_ROUND_TRIPS",chain:"Arbitrum",chainId:42161,venue:"UNISWAP_V3",readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+ if(!rpc)return {...base,success:false,status:"RPC_NOT_CONFIGURED",rpcEnv:"ARBITRUM_RPC_URL",coverage:{assets:ARBITRUM_ASSETS_4570,probeSizesUsd:ARBITRUM_SIZES_USD_4570,jobsAttempted:0,exactRoundTripsQuoted:0,failedRoundTrips:0},results:[],elapsedMs:Date.now()-startedAt};
+ const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+ try{
+  const net=await withTimeout4501(provider.getNetwork(),8000,"ARBITRUM_NETWORK");
+  if(Number(net.chainId)!==42161)return {...base,success:false,status:"CHAIN_ID_MISMATCH",reportedChainId:Number(net.chainId),results:[],elapsedMs:Date.now()-startedAt};
+  const quoter=UNISWAP_V3_QUOTER_V1_4490.arbitrum, factory=cfg.factory;
+  const [qc,fc]=await Promise.all([provider.getCode(quoter),provider.getCode(factory)]);
+  const jobs=[];for(const asset of ARBITRUM_ASSETS_4570)for(const sizeUsd of ARBITRUM_SIZES_USD_4570)jobs.push({asset,sizeUsd});
+  const results=await mapLimit4501(jobs,3,async j=>{
+   try{
+    const stable=cfg.tokens.USDC,token=cfg.tokens[j.asset];
+    const dStable=6,dToken=Number(await new Contract(token,ERC20_META_ABI_4480,provider).decimals());
+    const amountIn=BigInt(Math.round(j.sizeUsd*1e6));
+    let best=null;
+    for(const buyFee of [100,500,3000,10000]){
+     try{
+      const acquired=await quoteV3Single4490(provider,quoter,stable,token,buyFee,amountIn,chainKey);
+      if(acquired<=0n)continue;
+      for(const sellFee of [100,500,3000,10000]){
+       try{
+        const finalRaw=await quoteV3Single4490(provider,quoter,token,stable,sellFee,acquired,chainKey);
+        const finalUsd=Number(formatUnits(finalRaw,dStable)), pnl=finalUsd-j.sizeUsd,ret=finalUsd/j.sizeUsd*100;
+        const row={asset:j.asset,inputUsd:j.sizeUsd,buyFeeTier:buyFee,sellFeeTier:sellFee,intermediateAmount:Number(formatUnits(acquired,dToken)),finalUsd:Number(finalUsd.toFixed(6)),roundTripPnlBeforeGasUsd:Number(pnl.toFixed(6)),roundTripRetentionPct:Number(ret.toFixed(6)),exactReadOnlyQuotes:true};
+        if(!best||row.finalUsd>best.finalUsd)best=row;
+       }catch{}
+      }
+     }catch{}
+    }
+    if(!best)return {asset:j.asset,inputUsd:j.sizeUsd,status:"NO_EXACT_ROUND_TRIP_QUOTE",exactReadOnlyQuotes:false};
+    return {...best,depthGate:{minimumRoundTripRetentionPct:90,passed:best.roundTripRetentionPct>=90},positiveBeforeGas:best.roundTripPnlBeforeGasUsd>0,mainnetBroadcast:false,fundsMoved:false};
+   }catch(e){return {asset:j.asset,inputUsd:j.sizeUsd,status:"QUOTE_ERROR",error:e?.shortMessage||e?.message||String(e),exactReadOnlyQuotes:false};}
+  });
+  const quoted=results.filter(x=>x.exactReadOnlyQuotes),failed=results.filter(x=>!x.exactReadOnlyQuotes);
+  const byAsset={};for(const a of ARBITRUM_ASSETS_4570){const r=results.filter(x=>x.asset===a);byAsset[a]={jobs:r.length,quoted:r.filter(x=>x.exactReadOnlyQuotes).length,failed:r.filter(x=>!x.exactReadOnlyQuotes).length};}
+  return {...base,status:"SCANNED",adapterHealth:{rpcConfigured:true,reportedChainId:Number(net.chainId),chainIdMatches:true,quoter,quoterReadable:qc&&qc!=="0x",factory,factoryReadable:fc&&fc!=="0x"},coverage:{assets:ARBITRUM_ASSETS_4570,probeSizesUsd:ARBITRUM_SIZES_USD_4570,jobsAttempted:jobs.length,exactRoundTripsQuoted:quoted.length,failedRoundTrips:failed.length,positiveBeforeGas:quoted.filter(x=>x.positiveBeforeGas).length},routeCoverage:{byAsset,failedRoutes:failed},fundingArchitecture:{baseMorphoAavePreserved:true,arbitrumFlashFunding:"NOT_YET_CONFIGURED_READ_ONLY_DISCOVERY_STAGE"},results,elapsedMs:Date.now()-startedAt};
+ }catch(e){return {...base,success:false,status:"SCAN_FAILED",error:e?.message||String(e),results:[],elapsedMs:Date.now()-startedAt};}
+}
+app.get("/api/diagnostics/multimarket/arbitrum-exact-quotes",async(req,res)=>{try{res.json(await arbitrumExactQuoteExpansion4570());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"ARBITRUM_EXACT_QUOTE_EXPANSION_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
+
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.57.0_ARBITRUM_EXACT_QUOTE_EXPANSION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
