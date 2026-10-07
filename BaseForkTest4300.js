@@ -149,7 +149,7 @@ async function main() {
 
   const report = {
     success: true,
-    version: "4.49.1",
+    version: "4.49.2",
     architecture: "DIRECT_BASE_RPC_PROTOCOL_READS_PLUS_EPHEMERAL_EXECUTOR_FORK",
     compilePerformed: true,
     directBaseRpcReadPassed: true,
@@ -240,7 +240,7 @@ async function main() {
 }
 
 main().catch((e) => {
-  const report = { success: false, version: "4.49.1", error: String(e?.stack || e), mainnetBroadcast: false, fundsMoved: false, generatedAt: new Date().toISOString() };
+  const report = { success: false, version: "4.49.2", error: String(e?.stack || e), mainnetBroadcast: false, fundsMoved: false, generatedAt: new Date().toISOString() };
   try { fs.writeFileSync("fork-report-4300.json", JSON.stringify(report, null, 2)); } catch {}
   console.error(e);
   process.exitCode = 1;
