@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.68.0 — Base Multi-Venue Graph Foundation
+ArbiFlow Engine 4.69.0 — Base Multi-Venue Graph Foundation
 
 ARCHITECTURE
 Base RPC -> independent Uniswap V3 and Aerodrome adapters -> normalized

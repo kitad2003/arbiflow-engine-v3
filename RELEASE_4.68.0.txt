@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.68.0 — Asset USD Valuation + Adaptive Economic Sizing
+ArbiFlow Engine 4.69.0 — Asset USD Valuation + Adaptive Economic Sizing
 
 PRESERVED
 - 4.67 streaming edge cache, affected-cycle emission, immediate frozen candidate validation.

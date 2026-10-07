@@ -1,0 +1,28 @@
+ArbiFlow Engine 4.69.0 — Market Coverage Expansion
+
+NEW
+- Aerodrome Slipstream added as a third direct Base venue using official Aerodrome deployment addresses.
+- Slipstream Quoter: 0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0
+- Slipstream Pool Factory: 0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A
+- Discovery probes supported Slipstream tick spacings and selects the best live route.
+- Exact validation locks every Slipstream leg to the detected tick spacing and pool address.
+- DAI added as a sixth Base discovery asset/stable anchor.
+- Streaming discovery now evaluates Uniswap V3, Aerodrome classic, and Aerodrome Slipstream.
+
+PRESERVED
+- Immediate streaming candidate handoff.
+- Route-locked exact sequential validation.
+- Adaptive economic sizing.
+- WETH/cbETH/cbBTC USD valuation.
+- Conservative gas pre-screen.
+- $15 minimum net-profit requirement.
+- Existing endpoints and legacy functionality.
+- Read-only/no mainnet execution/no funds movement.
+
+IMPORTANT
+This remains discovery and economics screening only.
+No atomic executor route has been enabled for Slipstream.
+No mainnet broadcast is enabled.
+A candidate must still survive economics, actual executor gas estimation, and final atomic simulation before execution can be considered.
+
+Verification: npm run check PASS and 4.69 regression/safety assertions PASS.

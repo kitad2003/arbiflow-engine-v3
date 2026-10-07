@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.68.0";
+const VERSION = "4.69.0";
 
 /*
 =========================================================
@@ -71,6 +71,21 @@ const AERODROME_BASE = {
     "0x420DD381b31aEf6683db6B902084cB0FFECe40Da"
 };
 
+
+
+/* 4.69.0: Aerodrome Slipstream concentrated-liquidity discovery, read only.
+   Addresses verified against Aerodrome official security/deployment documentation. */
+const AERODROME_SLIPSTREAM_BASE={
+ quoter:"0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0",
+ factory:"0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A"
+};
+const AERODROME_SLIPSTREAM_QUOTER_ABI=[
+ "function quoteExactInputSingle(address tokenIn,address tokenOut,int24 tickSpacing,uint256 amountIn,uint160 sqrtPriceLimitX96) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"
+];
+const AERODROME_SLIPSTREAM_FACTORY_ABI=[
+ "function getPool(address tokenA,address tokenB,int24 tickSpacing) view returns (address pool)"
+];
+const SLIPSTREAM_TICK_SPACINGS_4690=[1,10,50,100,200];
 const AERODROME_ROUTER_ABI = [
   "function defaultFactory() view returns (address)",
   "function getAmountsOut(uint256 amountIn, tuple(address from,address to,bool stable,address factory)[] routes) view returns (uint256[] amounts)"
@@ -8428,8 +8443,35 @@ Uniswap V3 + Aerodrome normalized quote edges, with cross-venue
 2-edge and 3-edge candidate detection. Read-only discovery only.
 =========================================================
 */
-const MV4640_TOKENS=["WETH","cbBTC","cbETH","USDC","USDbC"];
-const MV4640_PROBES={WETH:0.001,cbETH:0.001,cbBTC:0.00005,USDC:5,USDbC:5};
+
+async function aerodromeSlipstreamQuoteOne4690({sellToken,buyToken,sellAmount,tickSpacing}){
+ const provider=getBaseProvider(),cfg=NETWORKS.base,tin=cfg.tokens[sellToken],tout=cfg.tokens[buyToken];
+ if(!tin||!tout)throw new Error("SLIPSTREAM_TOKEN_NOT_CONFIGURED");
+ const factory=new ethers.Contract(AERODROME_SLIPSTREAM_BASE.factory,AERODROME_SLIPSTREAM_FACTORY_ABI,provider);
+ const pool=await factory.getPool(tin.address,tout.address,tickSpacing);
+ if(!pool||String(pool).toLowerCase()===ethers.ZeroAddress.toLowerCase())throw new Error("SLIPSTREAM_POOL_NOT_FOUND");
+ const quoter=new ethers.Contract(AERODROME_SLIPSTREAM_BASE.quoter,AERODROME_SLIPSTREAM_QUOTER_ABI,provider);
+ const rawIn=ethers.parseUnits(String(sellAmount),tin.decimals);
+ const out=await quoter.quoteExactInputSingle.staticCall(tin.address,tout.address,tickSpacing,rawIn,0);
+ const rawOut=out[0]??out.amountOut;
+ return {provider:"Aerodrome Slipstream",pool,tickSpacing,buyAmount:Number(ethers.formatUnits(rawOut,tout.decimals)),rawBuyAmount:rawOut.toString(),factory:AERODROME_SLIPSTREAM_BASE.factory,quoter:AERODROME_SLIPSTREAM_BASE.quoter,quoteTimestamp:Date.now(),readOnly:true};
+}
+async function aerodromeSlipstreamBestQuote4690({sellToken,buyToken,sellAmount}){
+ const quotes=[];
+ for(const tickSpacing of SLIPSTREAM_TICK_SPACINGS_4690){
+  try{quotes.push(await withTimeout4501(aerodromeSlipstreamQuoteOne4690({sellToken,buyToken,sellAmount,tickSpacing}),7000,"SLIPSTREAM_QUOTE_TIMEOUT"));}catch(_){}
+ }
+ if(!quotes.length)throw new Error("NO_SLIPSTREAM_QUOTE");
+ quotes.sort((a,b)=>b.buyAmount-a.buyAmount);return {best:quotes[0],quotes};
+}
+async function quoteSlipstreamEdge4690(from,to,probe){
+ try{
+  const q=await aerodromeSlipstreamBestQuote4690({sellToken:from,buyToken:to,sellAmount:probe}),best=q.best;
+  return {venue:"AERODROME_SLIPSTREAM",from,to,probeInput:probe,probeOutput:best.buyAmount,rate:normalizedRate4640(probe,best.buyAmount),tickSpacing:best.tickSpacing,pool:best.pool,factory:best.factory,quoter:best.quoter,liquidityModel:"AERODROME_SLIPSTREAM_CONCENTRATED",quoteTimestamp:best.quoteTimestamp,readOnly:true};
+ }catch(_){return null;}
+}
+const MV4640_TOKENS=["WETH","cbBTC","cbETH","USDC","USDbC","DAI"];
+const MV4640_PROBES={WETH:0.001,cbETH:0.001,cbBTC:0.00005,USDC:5,USDbC:5,DAI:5};
 let multivenue4640={status:"IDLE",startedAt:null,completedAt:null,error:null,edges:[],candidates:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,lastLatencyMs:null,executionEligible:false};
 
 function normalizedRate4640(amountIn,amountOut){const a=Number(amountIn),b=Number(amountOut);return Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0?b/a:0;}
@@ -8502,12 +8544,15 @@ const MV4641_SIZES={
  cbETH:[0.0001,0.00025,0.0005,0.001,0.0025],
  cbBTC:[0.000005,0.00001,0.000025,0.00005,0.0001],
  USDC:[1,2.5,5,10,25],
- USDbC:[1,2.5,5,10,25]
+ USDbC:[1,2.5,5,10,25],
+ DAI:[1,2.5,5,10,25]
 };
 let dynamic4641={status:"IDLE",startedAt:null,completedAt:null,error:null,curves:[],usableEdges:[],rejectedEdges:[],candidates:[],watchlist:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,curvesTotal:0,curvesCompleted:0,currentJobs:[],elapsedMs:0,lastProgressAt:null,lastLatencyMs:null,executionEligible:false};
 
 async function quoteVenue4641(venue,from,to,size){
- return venue==="UNISWAP_V3"?quoteUv3Edge4640(from,to,size):quoteAeroEdge4640(from,to,size);
+ if(venue==="UNISWAP_V3")return quoteUv3Edge4640(from,to,size);
+ if(venue==="AERODROME_SLIPSTREAM")return quoteSlipstreamEdge4690(from,to,size);
+ return quoteAeroEdge4640(from,to,size);
 }
 function curveQuality4641(samples){
  const good=samples.filter(Boolean).sort((a,b)=>a.probeInput-b.probeInput);if(good.length<3)return {usable:false,reason:"INSUFFICIENT_SIZE_SAMPLES"};
@@ -8536,7 +8581,7 @@ async function runDynamic4641(){
  if(!RPC_URLS.base)throw new Error("BASE_RPC_NOT_CONFIGURED");
  dynamic4641={...dynamic4641,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,curves:[],usableEdges:[],rejectedEdges:[],candidates:[],watchlist:[],quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,curvesTotal:0,curvesCompleted:0,currentJobs:[],elapsedMs:0,lastProgressAt:new Date().toISOString()};
  const started=Date.now(),curveJobs=[];
- for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME"])curveJobs.push({from,to,venue});}
+ for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME","AERODROME_SLIPSTREAM"])curveJobs.push({from,to,venue});}
  dynamic4641.curvesTotal=curveJobs.length;
  const curves=await mapLimit4501(curveJobs,3,async j=>{
   const jobKey=`${j.venue}:${j.from}>${j.to}`;dynamic4641.currentJobs=[...dynamic4641.currentJobs,jobKey].slice(-3);
@@ -8592,7 +8637,7 @@ async function runStreamingDiscovery4670(onCandidate){
  if(stream4670.status==="RUNNING")return;
  if(!RPC_URLS.base)throw new Error("BASE_RPC_NOT_CONFIGURED");
  const started=Date.now(),jobs=[];
- for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME"])jobs.push({from,to,venue});}
+ for(const from of MV4640_TOKENS)for(const to of MV4640_TOKENS){if(from===to)continue;for(const venue of ["UNISWAP_V3","AERODROME","AERODROME_SLIPSTREAM"])jobs.push({from,to,venue});}
  stream4670={status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,curvesTotal:jobs.length,curvesCompleted:0,quotesAttempted:0,quotesSucceeded:0,quoteFailures:0,usableEdges:0,rejectedCurves:0,candidatesEmitted:0,duplicateCandidatesSuppressed:0,firstCandidateAt:null,firstCandidateLatencyMs:null,currentJobs:[],lastProgressAt:new Date().toISOString(),elapsedMs:0,edgeCache:new Map(),emittedKeys:new Set(),emittedCandidates:[],validationQueueDepth:0};
  await mapLimit4501(jobs,3,async j=>{
   const jobKey=`${j.venue}:${j.from}>${j.to}`;stream4670.currentJobs=[...stream4670.currentJobs,jobKey].slice(-3);
@@ -8652,12 +8697,17 @@ async function exactLeg4650(edge,from,to,amountIn){
   if(!["STABLE","VOLATILE"].includes(String(edge.poolType)))throw new Error("ROUTE_LOCK_MISSING_AERODROME_POOL_TYPE");
   best=await withTimeout4501(aerodromeQuoteOne({sellToken:from,buyToken:to,sellAmount:amountIn,stable:String(edge.poolType)==="STABLE"}),10000,"LOCKED_AERODROME_TIMEOUT");
   if(String(best.poolType)!==String(edge.poolType))throw new Error(`ROUTE_LOCK_AERODROME_TYPE_MISMATCH:${edge.poolType}:${best.poolType}`);
+ }else if(edge.venue==="AERODROME_SLIPSTREAM"){
+  if(!Number.isFinite(Number(edge.tickSpacing)))throw new Error("ROUTE_LOCK_MISSING_SLIPSTREAM_TICK_SPACING");
+  best=await withTimeout4501(aerodromeSlipstreamQuoteOne4690({sellToken:from,buyToken:to,sellAmount:amountIn,tickSpacing:Number(edge.tickSpacing)}),10000,"LOCKED_SLIPSTREAM_TIMEOUT");
+  if(edge.pool&&String(best.pool).toLowerCase()!==String(edge.pool).toLowerCase())throw new Error(`ROUTE_LOCK_SLIPSTREAM_POOL_MISMATCH:${edge.pool}:${best.pool}`);
  }else throw new Error(`ROUTE_LOCK_UNSUPPORTED_VENUE:${edge.venue}`);
  if(!best||!Number.isFinite(Number(best.buyAmount))||Number(best.buyAmount)<=0)throw new Error("ZERO_OR_INVALID_EXACT_OUTPUT");
  return {venue:edge.venue,from,to,amountIn:Number(amountIn),amountOut:Number(best.buyAmount),
   detectedFeeTier:edge.feeTier??null,quotedFeeTier:best.feeTier??null,
   detectedPool:edge.pool??null,quotedPool:best.pool??null,
   detectedPoolType:edge.poolType??null,quotedPoolType:best.poolType??null,
+  detectedTickSpacing:edge.tickSpacing??null,quotedTickSpacing:best.tickSpacing??null,
   routeLocked:true,router:best.router??null,factory:best.factory??null,latencyMs:Date.now()-started};
 }
 async function validateSize4650(c,size){
@@ -8687,7 +8737,7 @@ async function economicsContext4660(){
  const provider=getBaseProvider();
  const fee=await provider.getFeeData();
  const gasPriceWei=fee.maxFeePerGas??fee.gasPrice??0n;
- const assetUsd={USDC:1,USDbC:1,WETH:null,cbETH:null,cbBTC:null};
+ const assetUsd={USDC:1,USDbC:1,DAI:1,WETH:null,cbETH:null,cbBTC:null};
  async function directUsd(sym,amount){
   try{const q=await uniswapV3BestQuote({sellToken:sym,buyToken:"USDC",sellAmount:amount});return Number(q.best.buyAmount)/amount;}catch(_){}
   try{const q=await aerodromeBestQuote({sellToken:sym,buyToken:"USDC",sellAmount:amount});return Number(q.best.buyAmount)/amount;}catch(_){}

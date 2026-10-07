@@ -1,9 +1,9 @@
-ArbiFlow Engine 4.68.0 — Same-Run Candidate Handoff Fix
+ArbiFlow Engine 4.69.0 — Same-Run Candidate Handoff Fix
 
 FIX
 4.65.0 could complete with zero exact tests because it depended on whatever
 positive candidates existed after a separate/repeated dynamic discovery run.
-4.68.0 couples discovery and validation into one run.
+4.69.0 couples discovery and validation into one run.
 
 FLOW
 1. Run fresh 4.64.1 dynamic discovery.

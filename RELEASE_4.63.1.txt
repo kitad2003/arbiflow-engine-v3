@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.68.0 — Candidate Quality + Micro-Size Search
+ArbiFlow Engine 4.69.0 — Candidate Quality + Micro-Size Search
 
 WHY
 4.63.0 successfully rejected all 5 tested candidates, but its minimum WETH/cbETH
