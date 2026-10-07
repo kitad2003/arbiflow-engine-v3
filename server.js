@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.58.0";
+const VERSION = "4.58.1";
 
 /*
 =========================================================
@@ -7886,7 +7886,7 @@ async function exactV3FeeRoute4580(provider,chainKey,quoter,cfg,baseSym,assetSym
    intermediateAmount:Number(formatUnits(acquired,Number(ad))),finalUsd:round(finalUsd,6),
    grossPnlUsd:round(pnl,6),grossReturnPct:round(pnl/sizeUsd*100,6),retentionPct:round(finalUsd/sizeUsd*100,6)};
 }
-async function multiChainOpportunityBoard4580(){
+async function multiChainOpportunityWorker4581(){
  const startedAt=Date.now(),all=[],chainCoverage=[],failures={NO_POOL:0,QUOTER_REVERT:0,TIMEOUT:0,RPC_ERROR:0,NO_QUOTE:0};
  for(const chainKey of OPPORTUNITY_CHAINS_4580){
   const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey],rpc=RPC_URLS[chainKey]||"",quoter=UNISWAP_V3_QUOTER_V1_4490[chainKey];
@@ -7948,9 +7948,19 @@ async function multiChainOpportunityBoard4580(){
    note:"This release materially broadens discovery across every currently connected V3-family chain, but fee-tier dislocations are screening candidates. No trade is executable until strategy-specific funding and transaction simulation pass."},
   readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
-app.get("/api/opportunities/multichain",async(req,res)=>{try{res.json(await multiChainOpportunityBoard4580());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"MULTI_CHAIN_OPPORTUNITY_BOARD_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.0_MULTI_CHAIN_OPPORTUNITY_BOARD",multiChainOpportunityRoute:"/api/opportunities/multichain",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+let opportunityScanState4581={status:"IDLE",version:VERSION,startedAt:null,completedAt:null,error:null,result:null};
+async function runOpportunityScan4581(){
+ if(opportunityScanState4581.status==="RUNNING")return;
+ opportunityScanState4581={status:"RUNNING",version:VERSION,startedAt:new Date().toISOString(),completedAt:null,error:null,result:opportunityScanState4581.result};
+ try{const result=await multiChainOpportunityWorker4581();opportunityScanState4581={status:"COMPLETE",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:null,result};}
+ catch(e){opportunityScanState4581={status:"ERROR",version:VERSION,startedAt:opportunityScanState4581.startedAt,completedAt:new Date().toISOString(),error:e?.message||String(e),result:opportunityScanState4581.result};}
+}
+app.get("/api/opportunities/multichain/start",(req,res)=>{const running=opportunityScanState4581.status==="RUNNING";if(!running)setImmediate(()=>runOpportunityScan4581());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/opportunities/multichain/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/opportunities/multichain/status",(req,res)=>{const st=opportunityScanState4581;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+app.get("/api/opportunities/multichain",(req,res)=>{const st=opportunityScanState4581;res.json({success:true,version:VERSION,status:st.status,instruction:st.status==="IDLE"?"Open /api/opportunities/multichain/start once, then /api/opportunities/multichain/status.":"Use /api/opportunities/multichain/status for progress/results.",startRoute:"/api/opportunities/multichain/start",statusRoute:"/api/opportunities/multichain/status",result:st.status==="COMPLETE"?st.result:null,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
+
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.1_ASYNC_MULTI_CHAIN_OPPORTUNITY_BOARD",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
