@@ -1,0 +1,11 @@
+ArbiFlow Engine 4.59.3 — Price Normalization & Quote Diagnostics
+
+- Fixes V3 graph pricing to account for pool token0/token1 orientation.
+- Applies ERC-20 decimal normalization before comparing pool prices.
+- Expresses graph prices consistently as base-token units per asset.
+- Records locally preferred buy/sell fee-tier direction.
+- Preserves 4.59.2 local fee pruning and representative-size exact validation.
+- Classifies exact quote failures (TIMEOUT, RPC_ERROR, QUOTER_REVERT, NO_QUOTE).
+- Adds preferredDirectionJobs and nonPreferredDirectionJobs diagnostics.
+- Keeps execution fail-closed: read-only, no mainnet broadcast, no funds moved.
+- npm run check: PASS.
