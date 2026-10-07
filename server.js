@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.72.1";
+const VERSION = "4.73.0";
 
 /*
 =========================================================
@@ -7851,7 +7851,7 @@ async function runBroadDiscovery4720(){
  }catch(e){discovery4720.lastError=e?.message||String(e);discovery4720.status="DEGRADED";discovery4720.phase="FAILED";reject4720("DISCOVERY_RUN_FAILED");return {started:true,completed:false,error:discovery4720.lastError};}finally{discovery4720.running=false;}
 }
 function startBroadDiscovery4720(){if(discovery4720.timer)return false;discovery4720.status="RUNNING";discovery4720.startedAt=discovery4720.startedAt||new Date().toISOString();setImmediate(()=>runBroadDiscovery4720());discovery4720.timer=setInterval(()=>runBroadDiscovery4720(),DISCOVERY4720_INTERVAL_MS);return true;}
-function broadSummary4720(){const eligible=discovery4720.candidates.filter(x=>x.status==="SIMULATION_ELIGIBLE");return {success:true,version:VERSION,status:discovery4720.status,phase:discovery4720.phase,architecture:"STAGED_BOUNDED_CONCURRENT_BASE_DISCOVERY_WITH_PER_QUOTE_TIMEOUT_AND_FAILURE_ISOLATION",intervalMs:DISCOVERY4720_INTERVAL_MS,worker:{concurrency:DISCOVERY4721_CONCURRENCY,quoteTimeoutMs:DISCOVERY4721_QUOTE_TIMEOUT_MS,screenProbeUsd:DISCOVERY4721_PROBE_USD},coverage:{chain:"Base",chainId:8453,venues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520},policy:{minimumExecutableSpreadPct:DISCOVERY4720_MIN_SPREAD_PCT,minimumNetProfitUsd:DISCOVERY4720_MIN_NET_USD,simulationRequired:true},metrics:{runs:discovery4720.runs,jobsPlanned:discovery4720.jobsPlanned,jobsCompleted:discovery4720.jobsCompleted,jobsEvaluated:discovery4720.jobsEvaluated,exactQuotes:discovery4720.exactQuotes,quoteFailures:discovery4720.quoteFailures,quoteTimeouts:discovery4720.quoteTimeouts,positiveBeforeGas:discovery4720.positiveBeforeGas,spreadGatePassed:discovery4720.spreadGatePassed,depthPassed:discovery4720.depthPassed,netGatePassed:discovery4720.netGatePassed,simulationEligible:discovery4720.simulationEligible},currentRun:discovery4720.currentRun,rejections:discovery4720.rejections,lastRunAt:discovery4720.lastRunAt,lastProgressAt:discovery4720.lastProgressAt,lastCompletedAt:discovery4720.lastCompletedAt,lastError:discovery4720.lastError,candidateCount:discovery4720.candidates.length,simulationEligibleCount:eligible.length,candidates:discovery4720.candidates.slice(0,30),simulationEligible:eligible.slice(0,20),readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};}
+function broadSummary4720(){const eligible=discovery4720.candidates.filter(x=>x.status==="SIMULATION_ELIGIBLE");return {success:true,version:VERSION,status:discovery4720.status,phase:discovery4720.phase,architecture:"STAGED_BOUNDED_CONCURRENT_BASE_DISCOVERY_WITH_PER_QUOTE_TIMEOUT_AND_FAILURE_ISOLATION",intervalMs:DISCOVERY4720_INTERVAL_MS,worker:{concurrency:DISCOVERY4721_CONCURRENCY,quoteTimeoutMs:DISCOVERY4721_QUOTE_TIMEOUT_MS,screenProbeUsd:DISCOVERY4721_PROBE_USD},coverage:{chain:"Base",chainId:8453,venues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],assets:CROSS_DEX_ASSETS_4520,probeSizesUsd:CROSS_DEX_PROBE_SIZES_4520},policy:{minimumExecutableSpreadPct:DISCOVERY4720_MIN_SPREAD_PCT,minimumNetProfitUsd:DISCOVERY4720_MIN_NET_USD,simulationRequired:true,gasRequiredForQualification:true,unknownGasPolicy:"FAIL_CLOSED"},metrics:{runs:discovery4720.runs,jobsPlanned:discovery4720.jobsPlanned,jobsCompleted:discovery4720.jobsCompleted,jobsEvaluated:discovery4720.jobsEvaluated,exactQuotes:discovery4720.exactQuotes,quoteFailures:discovery4720.quoteFailures,quoteTimeouts:discovery4720.quoteTimeouts,positiveBeforeGas:discovery4720.positiveBeforeGas,spreadGatePassed:discovery4720.spreadGatePassed,depthPassed:discovery4720.depthPassed,netGatePassed:discovery4720.netGatePassed,simulationEligible:discovery4720.simulationEligible},currentRun:discovery4720.currentRun,rejections:discovery4720.rejections,lastRunAt:discovery4720.lastRunAt,lastProgressAt:discovery4720.lastProgressAt,lastCompletedAt:discovery4720.lastCompletedAt,lastError:discovery4720.lastError,candidateCount:discovery4720.candidates.length,simulationEligibleCount:eligible.length,candidates:discovery4720.candidates.slice(0,30),simulationEligible:eligible.slice(0,20),readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};}
 app.get("/api/discovery/start",(req,res)=>{const started=startBroadDiscovery4720();res.json({...broadSummary4720(),startResult:started?"STARTED_BACKGROUND":"ALREADY_RUNNING",statusRoute:"/api/discovery/status"});});
 app.get("/api/discovery/status",(req,res)=>res.json(broadSummary4720()));
 app.get("/api/discovery/scan",(req,res)=>{setImmediate(()=>runBroadDiscovery4720());res.json({...broadSummary4720(),scanResult:"STARTED_BACKGROUND"});});
@@ -9133,3 +9133,39 @@ app.listen(
     );
   }
 );
+
+// === ArbiFlow 4.73.0 Global Coverage Architecture Layer ===
+const COVERAGE4730 = {
+  target: { majorCexFeeds: 15, dexLiquiditySources: 500, tier1Chains: 15 },
+  cexAdapters: [
+    "BINANCE","COINBASE","KRAKEN","OKX","BYBIT","BITSTAMP","GEMINI","CRYPTO_COM","BITFINEX","GATE_IO","KUCOIN","MEXC","HTX","BITGET","BULLISH"
+  ],
+  chains: [
+    {name:"Base",chainId:8453,state:"LIVE_DISCOVERY"},
+    {name:"Ethereum",chainId:1,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Arbitrum",chainId:42161,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Optimism",chainId:10,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"BNB Chain",chainId:56,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Polygon",chainId:137,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Avalanche",chainId:43114,state:"ADAPTER_READY_NOT_CONFIGURED"},
+    {name:"Linea",chainId:59144,state:"PLANNED"},{name:"Scroll",chainId:534352,state:"PLANNED"},
+    {name:"Blast",chainId:81457,state:"PLANNED"},{name:"Gnosis",chainId:100,state:"PLANNED"},
+    {name:"Mantle",chainId:5000,state:"PLANNED"},{name:"Sonic",chainId:146,state:"PLANNED"},
+    {name:"Unichain",chainId:130,state:"PLANNED"},{name:"zkSync Era",chainId:324,state:"PLANNED"}
+  ],
+  liquidityArchitecture: {
+    directBaseAdapters:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],
+    aggregatorAdapters:["1INCH"],
+    discoveryModes:["FACTORY_EVENT_DISCOVERY","PROTOCOL_FAMILY_ADAPTERS","AGGREGATOR_LIQUIDITY","DIRECT_HOT_VENUE_ADAPTERS"],
+    claimedLiveDexSources: null,
+    note:"500+ is a target coverage capability, never reported as live until measured from provider/source telemetry."
+  }
+};
+function coverage4730Summary(){
+  const liveChains=COVERAGE4730.chains.filter(x=>x.state==="LIVE_DISCOVERY").length;
+  const readyChains=COVERAGE4730.chains.filter(x=>x.state.includes("READY")).length;
+  const ref=(typeof global4710!=="undefined"&&global4710&&global4710.reference)?global4710.reference:null;
+  return {success:true,version:VERSION,architecture:"GLOBAL_COVERAGE_LAYER_MEASURED_NOT_MARKETING_CLAIMS",target:COVERAGE4730.target,measured:{liveDiscoveryChains:liveChains,adapterReadyChains:readyChains,directDexAdapters:COVERAGE4730.liquidityArchitecture.directBaseAdapters.length,aggregatorAdapters:COVERAGE4730.liquidityArchitecture.aggregatorAdapters.length,configuredCexFeeds:(globalState4710?.referenceFeeds?.configured??3),liveCexFeeds:(globalState4710?.referenceFeeds?.live??2)},cexAdapters:COVERAGE4730.cexAdapters.map((name,i)=>({name,state:i<3?"LEGACY_REFERENCE_SLOT":"REGISTERED_NOT_LIVE"})),chains:COVERAGE4730.chains,liquidityArchitecture:COVERAGE4730.liquidityArchitecture,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary()));
+app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));

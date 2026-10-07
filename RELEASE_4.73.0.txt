@@ -1,0 +1,14 @@
+ArbiFlow Engine 4.73.0 — Global Coverage Architecture Layer
+
+Purpose
+- Preserve the deployed 4.72.1 bounded Base discovery engine.
+- Introduce explicit target architecture for 15 major CEX feeds, 500+ DEX/liquidity sources, and 15 Tier-1 chains.
+- Separate target/registered/adapter-ready/live coverage so the API never presents roadmap counts as live market coverage.
+- Add /api/global-coverage/status and /api/global-coverage/targets.
+- Lock gas policy to FAIL_CLOSED for qualification when gas is unknown.
+
+Important
+- This release does NOT claim 15 CEX feeds, 500+ DEX sources, or 15 chains are live.
+- Base remains the only LIVE_DISCOVERY chain in this milestone.
+- Existing 4.72.1 discovery, 1inch, financing, candidate, and safety paths are preserved.
+- Mainnet execution remains disabled.
