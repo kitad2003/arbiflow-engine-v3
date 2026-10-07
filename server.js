@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.49.2";
+const VERSION = "4.50.0";
 
 /*
 =========================================================
@@ -7248,12 +7248,12 @@ swaps, broadcasts, or funds movement occur here.
 =========================================================
 */
 const UNISWAP_V3_DISCOVERY_4470 = {
-  ethereum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",USDC:"0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",USDT:"0xdAC17F958D2ee523a2206206994597C13D831ec7"}},
-  arbitrum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",USDC:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831",USDT:"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"}},
-  optimism:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",USDT:"0x94b008aA00579c1307B0EF2c499aD98a8c58e58e"}},
-  base:{factory:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",tokens:{WETH:"0x4200000000000000000000000000000000000006",USDC:"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",USDbC:"0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA"}},
-  polygon:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",USDC:"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",USDT:"0xc2132D05D31c914a87C6611C10748AaCbA4fB58e"}},
-  bnb:{factory:"0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7",tokens:{WBNB:"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",USDC:"0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",USDT:"0x55d398326f99059fF775485246999027B3197955"}}
+  ethereum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",WBTC:"0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",cbBTC:"0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",LINK:"0x514910771AF9Ca656af840dff83E8264EcF986CA",USDC:"0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",USDT:"0xdAC17F958D2ee523a2206206994597C13D831ec7"}},
+  arbitrum:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",WBTC:"0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",cbBTC:"0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",ARB:"0x912CE59144191C1204E64559FE8253a0e49E6548",USDC:"0xaf88d065e77c8cC2239327C5EDb3A432268e5831",USDT:"0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"}},
+  optimism:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x4200000000000000000000000000000000000006",WBTC:"0x68f180fcCe6836688e9084f035309E29bf0A2095",cbETH:"0xadDb6A0412DE1BA0F936DCaeb8Aaa24578dcF3B2",OP:"0x4200000000000000000000000000000000000042",USDC:"0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",USDT:"0x94b008aA00579c1307B0EF2c499aD98a8c58e58e"}},
+  base:{factory:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",tokens:{WETH:"0x4200000000000000000000000000000000000006",cbBTC:"0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",cbETH:"0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",USDC:"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",USDbC:"0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA"}},
+  polygon:{factory:"0x1F98431c8aD98523631AE4a59f267346ea31F984",tokens:{WETH:"0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",WBTC:"0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",WPOL:"0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",cbETH:"0x4b4327dB1600B8B1440163F667e199CEf35385f5",USDC:"0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",USDT:"0xc2132D05D31c914a87C6611C10748AaCbA4fB58e"}},
+  bnb:{factory:"0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7",tokens:{WBNB:"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",BTCB:"0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",ETH:"0x2170Ed0880ac9A755fd29B2688956BD959F933F8",USDC:"0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",USDT:"0x55d398326f99059fF775485246999027B3197955"}}
 };
 const UNISWAP_V3_POOL_READ_ABI_4470=["function liquidity() view returns (uint128)","function token0() view returns (address)","function token1() view returns (address)","function fee() view returns (uint24)"];
 function pairCombos4470(tokens){const e=Object.entries(tokens),out=[];for(let i=0;i<e.length;i++)for(let j=i+1;j<e.length;j++)out.push([e[i],e[j]]);return out;}
@@ -7278,7 +7278,7 @@ async function discoverUniswapV3Pools4470(){
    chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCANNED",factory:cfg.factory,factoryCodeBytes:(code.length-2)/2,tokenUniverse:Object.keys(cfg.tokens),pairUniverse:pairCombos4470(cfg.tokens).map(x=>`${x[0][0]}/${x[1][0]}`),pools});
   }catch(e){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCAN_FAILED",factory:cfg.factory,error:e?.message||String(e),pools:[]});}
  }
- return {success:true,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_COMPLETE",architecture:"MULTI_CHAIN_ONCHAIN_FACTORY_READS",adapter:"UNISWAP_V3_FACTORY",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsWithAdapter:Object.keys(UNISWAP_V3_DISCOVERY_4470).length,chainsScanned:chains.filter(x=>x.status==="SCANNED").length,poolQueries:queries,poolsDiscovered,poolsWithNonzeroLiquidity:poolsWithLiquidity},chains,readOnly:true,quoteExecutionPerformed:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+ return {success:true,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_COMPLETE",architecture:"MULTI_CHAIN_ONCHAIN_FACTORY_READS",adapter:"UNISWAP_V3_FACTORY",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsWithAdapter:Object.keys(UNISWAP_V3_DISCOVERY_4470).length,chainsScanned:chains.filter(x=>x.status==="SCANNED").length,tokensConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+Object.keys(x.tokens).length,0),pairUniverseConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+pairCombos4470(x.tokens).length,0),poolQueries:queries,poolsDiscovered,poolsWithNonzeroLiquidity:poolsWithLiquidity},chains,readOnly:true,quoteExecutionPerformed:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/dex-pools",async(req,res)=>{try{res.json(await discoverUniswapV3Pools4470());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7471,7 +7471,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.49.2_DISCOVERY_TELEMETRY_DEPTH_GATED_EXACT_SIZE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.50.0_EXPANDED_ONCHAIN_PAIR_UNIVERSE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7480,7 +7480,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.49.2] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.50.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 

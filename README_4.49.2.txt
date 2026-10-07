@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.49.2 — Depth-Gated Exact Size + Flash Funding Diagnostic
+ArbiFlow Engine 4.50.0 — Depth-Gated Exact Size + Flash Funding Diagnostic
 
 Preserves Morpho and Aave flash-loan architecture.
 Fixes exact-quote token address normalization.
