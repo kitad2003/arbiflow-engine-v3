@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.77.1";
+const VERSION = "4.77.2";
 
 /*
 =========================================================
@@ -5154,7 +5154,7 @@ async function runAggregatorIntelligenceBot(){
 async function runLargeOpportunityBot(triangleBot){
   const startedAt=Date.now(); const positive=(triangleBot.candidates||[]).sort((a,b)=>Number(b.grossPnl)-Number(a.grossPnl)); if(!positive.length)return{bot:"OPTIMIZER_BOT",status:"NO_POSITIVE_SEED",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",minimumNetProfitUsd:BASE_DIRECT_MIN_NET_PROFIT_USD,flashOptimization:null,elapsedMs:Date.now()-startedAt};
   const seed=positive[0];
-  try{const [aave,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);const sizes=buildAdaptiveFlashSizes(aave.availableLiquidity),results=[];for(const amount of sizes)try{const t=await quoteMarket42Triangle(amount,seed.route,seed.venues);const premiumUsd=Number(amount)*Number(aave.flashLoanPremiumBps)/10000,net=t.grossPnl-premiumUsd-gasModel.modeledGasUsd,required=flashRequiredNetProfitUsd(Number(amount));results.push({...t,flashLoanAmount:Number(amount),flashPremiumUsd:round(premiumUsd,6),modeledGasUsd:gasModel.modeledGasUsd,estimatedNetProfitUsd:round(net,6),requiredNetProfitUsd:round(required,6),qualifies:net>=required});}catch(error){results.push({flashLoanAmount:Number(amount),qualifies:false,error:error.message});}const flashOptimization={seedRoute:seed.route,sizesTested:sizes.length,results,candidates:results.filter(x=>x.qualifies).sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd)};return{bot:"LARGE_OPPORTUNITY_BOT",status:"COMPLETE",seed,flashLiquidityUsd:aave.availableLiquidity,flashOptimization,elapsedMs:Date.now()-startedAt};}catch(error){return{bot:"OPTIMIZER_BOT",status:"ERROR",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
+  try{const [aave,gasModel]=await Promise.all([getAaveBaseFlashState("USDC"),getBaseFlashModeledGasCostUsd()]);const sizes=buildAdaptiveFlashSizes(aave.availableLiquidity),results=[];for(const amount of sizes)try{const t=await quoteMarket42Triangle(amount,seed.route,seed.venues);const premiumUsd=Number(amount)*Number(aave.flashLoanPremiumBps)/10000,net=t.grossPnl-premiumUsd-gasModel.modeledGasUsd,required=flashRequiredNetProfitUsd(Number(amount));results.push({...t,flashLoanAmount:Number(amount),flashPremiumUsd:round(premiumUsd,6),modeledGasUsd:gasModel.modeledGasUsd,estimatedNetProfitUsd:round(net,6),requiredNetProfitUsd:round(required,6),qualifies:net>=required});}catch(error){results.push({flashLoanAmount:Number(amount),qualifies:false,error:error.message});}const flashOptimization={seedRoute:seed.route,sizesTested:sizes.length,results,candidates:results.filter(x=>x.qualifies).sort((a,b)=>(b.estimatedNetProfitUsd??-Infinity)-(a.estimatedNetProfitUsd??-Infinity))};return{bot:"LARGE_OPPORTUNITY_BOT",status:"COMPLETE",seed,flashLiquidityUsd:aave.availableLiquidity,flashOptimization,elapsedMs:Date.now()-startedAt};}catch(error){return{bot:"OPTIMIZER_BOT",status:"ERROR",strategy:"ADAPTIVE_NET_PROFIT_OPTIMIZATION",flashOptimization:null,errors:[{error:error.message}],elapsedMs:Date.now()-startedAt};}
 }
 
 async function scanBaseBotNetwork(){
@@ -9170,9 +9170,30 @@ const QUOTE477={nextAt:0,blockedUntil:0,requests:0,rateLimited:0};
 let quoteQueue477=Promise.resolve();
 async function permit477(){const t=quoteQueue477.then(async()=>{const wait=Math.max(0,QUOTE477.nextAt-Date.now(),QUOTE477.blockedUntil-Date.now());if(wait)await new Promise(r=>setTimeout(r,wait));QUOTE477.nextAt=Date.now()+1500;QUOTE477.requests++;});quoteQueue477=t.catch(()=>{});await t;}
 async function quote1inch4760(c,src,dst,amount){const st=DISC4760.chains[c.key],key=process.env.ONEINCH_API_KEY||"";st.quoteRequests++;if(!key)throw new Error("ONEINCH_API_KEY_MISSING");const u=new URL(`https://api.1inch.dev/swap/v6.1/${c.chainId}/quote`);u.searchParams.set("src",src);u.searchParams.set("dst",dst);u.searchParams.set("amount",String(amount));await permit477();const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),4500);try{const r=await fetch(u,{headers:{Authorization:`Bearer ${key}`},signal:ctl.signal});const body=await r.text();if(r.status===429){QUOTE477.rateLimited++;const sec=Number(r.headers.get("retry-after"));QUOTE477.blockedUntil=Date.now()+(Number.isFinite(sec)&&sec>0?Math.min(60000,sec*1000):10000);}if(!r.ok)throw new Error(`HTTP_${r.status}:${body.slice(0,120)}`);const j=JSON.parse(body);if(!j?.dstAmount)throw new Error("NO_DST_AMOUNT");st.quoteSuccesses++;return BigInt(j.dstAmount);}catch(e){st.quoteFailures++;if(e?.name==="AbortError"||String(e?.message||e).includes("TIMEOUT"))st.quoteTimeouts++;throw e;}finally{clearTimeout(timer);}}
-async function gas4760(c,ethUsd){const st=DISC4760.chains[c.key];try{const provider=new JsonRpcProvider(c.rpc,undefined,{staticNetwork:false});const f=await timeout4760(provider.getFeeData(),4000,`${c.key}_GAS`);const gp=f.gasPrice||f.maxFeePerGas;if(!gp)throw new Error("GAS_PRICE_UNAVAILABLE");const usd=Number(formatUnits(gp*500000n,18))*ethUsd;if(!Number.isFinite(usd)||usd<=0)throw new Error("GAS_USD_INVALID");st.gasEstimates++;return usd;}catch(e){st.gasFailures++;throw e;}}
+async function gas4760(c,ethUsd){
+ const st=DISC4760.chains[c.key];
+ const provider=new JsonRpcProvider(c.rpc,undefined,{staticNetwork:false});
+ let lastError=null;
+ for(let attempt=0;attempt<2;attempt++){
+  try{
+   const f=await timeout4760(provider.getFeeData(),attempt===0?4000:6500,`${c.key}_GAS`);
+   const gp=f.gasPrice||f.maxFeePerGas;
+   if(!gp||gp<=0n)throw new Error("GAS_PRICE_UNAVAILABLE");
+   // Screening estimate only. Exact route gas and L1 data fees remain unverified.
+   const usd=Number(formatUnits(gp*500000n,18))*ethUsd;
+   if(!Number.isFinite(usd)||usd<=0)throw new Error("GAS_USD_INVALID");
+   st.gasEstimates++;return usd;
+  }catch(e){lastError=e;if(attempt===0)await new Promise(r=>setTimeout(r,250));}
+ }
+ st.gasFailures++;throw new Error(`GAS_UNAVAILABLE_AFTER_RETRY:${lastError?.message||lastError}`);
+}
 async function discoverChain4760(c,ref){const st=DISC4760.chains[c.key];st.status="RUNNING";st.lastRunAt=new Date().toISOString();st.lastError=null;const out=[];try{
-  if(mc4750.chains[c.key]?.status!=="LIVE")throw new Error("CHAIN_NOT_LIVE"); if(!process.env.ONEINCH_API_KEY)throw new Error("ONEINCH_API_KEY_MISSING"); // A stale/rate-limited background probe is not proof that live discovery quotes cannot work.
+  const health=mc4750.chains[c.key];
+  // A single missed 5s heartbeat is not an outage. Only block if the RPC has never been verified.
+  if(!health?.lastBlockAt || health.actualChainId!==c.chainId)throw new Error("CHAIN_NOT_VERIFIED");
+  const blockAgeMs=Date.now()-Date.parse(health.lastBlockAt);
+  if(!Number.isFinite(blockAgeMs)||blockAgeMs>60000)throw new Error("CHAIN_BLOCK_STALE");
+ if(!process.env.ONEINCH_API_KEY)throw new Error("ONEINCH_API_KEY_MISSING"); // A stale/rate-limited background probe is not proof that live discovery quotes cannot work.
   const probes=[500]; // Screening size only, NOT a capital or loan ceiling.
   for(const usd of probes){st.observations++;let wethOut,usdcBack;{
     const usdcIn=parseUnits(String(usd),6); wethOut=await quote1inch4760(c,c.tokens.USDC,c.tokens.WETH,usdcIn);
@@ -9180,14 +9201,16 @@ async function discoverChain4760(c,ref){const st=DISC4760.chains[c.key];st.statu
     const buyPx=usd/wethUnits; const deviationPct=((buyPx-ref.mid)/ref.mid)*100;
     if(Math.abs(deviationPct)>=DISC4760.policy.referenceTriggerAbsPct)st.referenceDiscrepancies++;else continue;
     usdcBack=await quote1inch4760(c,c.tokens.WETH,c.tokens.USDC,wethOut); const backUsd=Number(formatUnits(usdcBack,6)); const executableSpreadPct=((backUsd-usd)/usd)*100; const gross=backUsd-usd;
-    const gasUsd=await gas4760(c,ref.mid); const estimatedNet=gross-gasUsd; const depthPass=backUsd/usd>=0.90; if(depthPass)st.depthPassed++;
+    let gasUsd=null,gasError=null;
+    try{gasUsd=await gas4760(c,ref.mid);}catch(e){gasError=e?.message||String(e);}
+    const estimatedNet=gasUsd===null?null:gross-gasUsd; const depthPass=backUsd/usd>=0.90; if(depthPass)st.depthPassed++;
     if(executableSpreadPct>0)st.positiveExecutableSpreads++; st.optimalSizes++;
     let financingStatus=c.key==="base"?"BASE_PROVIDER_AVAILABLE_NOT_RESERVED":"NOT_YET_ACTIVATED_ON_CHAIN"; // Provider availability is not verified financing.
-    let rejection=null; if(executableSpreadPct<DISC4760.policy.minimumExecutableSpreadPct)rejection="EXECUTABLE_SPREAD_TOO_LOW"; else if(!depthPass)rejection="INSUFFICIENT_DEPTH"; else if(estimatedNet<DISC4760.policy.minimumNetProfitUsd)rejection="NET_PROFIT_TOO_LOW"; else rejection="FINANCING_AND_SIMULATION_NOT_VERIFIED";
-    if(estimatedNet>=DISC4760.policy.minimumNetProfitUsd)st.netProfitPasses++;
+    let rejection=null; if(executableSpreadPct<DISC4760.policy.minimumExecutableSpreadPct)rejection="EXECUTABLE_SPREAD_TOO_LOW"; else if(!depthPass)rejection="INSUFFICIENT_DEPTH"; else if(gasUsd===null)rejection="GAS_UNAVAILABLE"; else if(estimatedNet<DISC4760.policy.minimumNetProfitUsd)rejection="NET_PROFIT_TOO_LOW"; else rejection="FINANCING_AND_SIMULATION_NOT_VERIFIED";
+    if(estimatedNet!==null&&estimatedNet>=DISC4760.policy.minimumNetProfitUsd)st.netProfitPasses++;
     if(!rejection){st.simulationEligible++;} // intentionally unreachable until simulation implementation promotes explicitly
-    out.push({candidateId:`${c.key.toUpperCase()}:WETH-USDC:1INCH-ROUNDTRIP:${usd}`,opportunityType:"REFERENCE_DIRECTED_ONCHAIN_ROUNDTRIP_SCREEN",canonicalPair:"WETH/USDC",chainId:c.chainId,notionalUsd:usd,referenceMidUsd:ref.mid,onchainBuyPriceUsd:buyPx,referenceDeviationPct:deviationPct,roundTripUsd:backUsd,executableSpreadPct,grossProfitUsd:gross,modeledGasUsd:gasUsd,estimatedNetProfitUsd:estimatedNet,depthPassed:depthPass,financingStatus,simulationStatus:"NOT_RUN",riskLevel:"UNASSESSED",status:"REJECTED",rejectionReason:rejection,executionEligible:false,detectedAt:new Date().toISOString()});
-  }} st.candidates=out.sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd).slice(0,20); st.status="COMPLETE";
+    out.push({candidateId:`${c.key.toUpperCase()}:WETH-USDC:1INCH-ROUNDTRIP:${usd}`,opportunityType:"REFERENCE_DIRECTED_ONCHAIN_ROUNDTRIP_SCREEN",canonicalPair:"WETH/USDC",chainId:c.chainId,notionalUsd:usd,referenceMidUsd:ref.mid,onchainBuyPriceUsd:buyPx,referenceDeviationPct:deviationPct,roundTripUsd:backUsd,executableSpreadPct,grossProfitUsd:gross,modeledGasUsd:gasUsd,gasError,estimatedNetProfitUsd:estimatedNet,depthPassed:depthPass,financingStatus,simulationStatus:"NOT_RUN",riskLevel:"UNASSESSED",status:"REJECTED",rejectionReason:rejection,executionEligible:false,detectedAt:new Date().toISOString()});
+  }} st.candidates=out.sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd).slice(0,20); st.status=out.some(x=>x.gasError)?"COMPLETE_WITH_GAS_FAILURES":"COMPLETE";
  }catch(e){st.status="ERROR";st.lastError=e?.message||String(e);}finally{st.lastCompletedAt=new Date().toISOString();}}
 async function run4760(){if(DISC4760.running)return;DISC4760.running=true;DISC4760.runs++;DISC4760.lastRunAt=new Date().toISOString();try{const ref=globalDiscrepancy4710._state?.reference?.ETHUSD;if(!ref||ref.status!=="LIVE"||!Number.isFinite(ref.mid))throw new Error("REFERENCE_CONSENSUS_NOT_LIVE");await Promise.all(MC4750_CHAINS.map(c=>discoverChain4760(c,ref)));}catch(e){for(const st of Object.values(DISC4760.chains))if(st.status==="IDLE")st.lastError=e?.message||String(e);}finally{DISC4760.running=false;DISC4760.lastCompletedAt=new Date().toISOString();}}
 function summary4760(){const chains=Object.values(DISC4760.chains).map(x=>({...x,candidates:x.candidates.slice(0,10)}));const sum=k=>chains.reduce((n,x)=>n+(x[k]||0),0);return {success:true,version:VERSION,architecture:"CEX_CONSENSUS_TO_THREE_CHAIN_REFERENCE_TRIGGER_TO_EXACT_1INCH_ROUNDTRIP_TO_GAS_TO_FAIL_CLOSED_QUALIFICATION",status:DISC4760.running?"RUNNING":"IDLE_WAIT",startedAt:DISC4760.startedAt,intervalMs:DISC4760.intervalMs,runs:DISC4760.runs,lastRunAt:DISC4760.lastRunAt,lastCompletedAt:DISC4760.lastCompletedAt,policy:DISC4760.policy,quoteScheduler:QUOTE477,limitations:["SINGLE_AGGREGATOR_SCREEN_ONLY","INDEPENDENT_DEX_COMPARISON_NOT_YET_IMPLEMENTED","FLASH_FINANCING_NOT_VERIFIED","ATOMIC_SIMULATION_NOT_RUN"],metrics:{observations:sum("observations"),referenceDiscrepancies:sum("referenceDiscrepancies"),quoteRequests:sum("quoteRequests"),quoteSuccesses:sum("quoteSuccesses"),quoteFailures:sum("quoteFailures"),quoteTimeouts:sum("quoteTimeouts"),positiveExecutableSpreads:sum("positiveExecutableSpreads"),depthPassed:sum("depthPassed"),optimalSizes:sum("optimalSizes"),gasEstimates:sum("gasEstimates"),gasFailures:sum("gasFailures"),financingPasses:sum("financingPasses"),netProfitPasses:sum("netProfitPasses"),simulationEligible:sum("simulationEligible"),qualified:sum("qualified")},chains,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};}
