@@ -1,0 +1,23 @@
+ArbiFlow Engine 4.66.0 — Economics Screen + Discovery Progress
+
+ADDITIVE CHANGES
+- Preserves 4.65.2 same-run frozen candidate handoff and route locking.
+- Adds Base provider fee-data sampling.
+- Adds WETH/USD reference via existing Base Uniswap V3 quote adapter.
+- Applies a conservative 450,000 gas-unit screening assumption ONLY as a pre-filter.
+- Locked minimum net-profit screen: $15.
+- Does NOT call the conservative screen an executor gas estimate or final net profit.
+- Only candidates clearing the screen may advance to atomic executor gas estimation/simulation.
+- Adds dynamic discovery progress telemetry: curves total/completed, current jobs,
+  quotes attempted/succeeded/failed, elapsed time, and last progress timestamp.
+
+SAFETY
+- executionEligible=false
+- mainnetBroadcast=false
+- fundsMovedOnMainnet=false
+- no approvals/signatures/swaps
+- flash-loan fee not included yet
+- final net profit not claimed
+- atomic executor gas estimation/simulation remains the next gate for a survivor.
+
+Validation: npm run check PASS.

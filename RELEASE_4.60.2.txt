@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.65.2 — Snapshot Diagnostics & Resilience
+ArbiFlow Engine 4.66.0 — Snapshot Diagnostics & Resilience
 
 PURPOSE
 Diagnose and reduce the 4.60.1 snapshot failures, especially Base 0/22, without weakening execution safety.

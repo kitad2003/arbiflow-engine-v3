@@ -1,4 +1,4 @@
-ArbiFlow Engine 4.65.2 — Bootstrap Handoff & Integrity Gate
+ArbiFlow Engine 4.66.0 — Bootstrap Handoff & Integrity Gate
 
 Fixes the 4.60.0 live-deployment condition where discovery found 147 pools / 100 nonzero-liquidity pools but the market-state registry remained empty.
 
