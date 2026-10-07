@@ -1,0 +1,44 @@
+ArbiFlow Engine 4.65.0 — Exact Cross-Venue Round-Trip Validator
+
+PURPOSE
+Validate 4.64.1 positive multi-venue candidates by sequentially quoting every
+leg with the exact output of the previous leg. This removes the independent
+probe-size approximation from candidate discovery.
+
+NEW
+- Candidate-driven exact validation from 4.64.1 positive candidates.
+- Sequential output chaining across Uniswap V3 and Aerodrome.
+- Seven starting sizes per candidate: 4.64.1 curve sizes plus smaller/larger
+  boundary probes.
+- Exact gross P&L and gross return percentage for each completed round trip.
+- Explicit quote-failure/failed-leg reporting.
+- Opposite representations of the same 2-edge economic cycle are collapsed.
+- Positive survivors are labeled:
+  EXACT_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION
+- Non-survivors are rejected rather than reported as opportunities.
+
+ENDPOINTS
+GET /api/validator/crossvenue/start?limit=10
+GET /api/validator/crossvenue/status
+
+PRESERVED
+4.64.1 dynamic multi-size search and watchlist
+4.64.0 multi-venue snapshot graph
+4.63.x simulator
+4.61 live Base state
+all older diagnostics and fork safety modules
+
+NEXT GATE
+Only if positiveRoundTrips > 0:
+- estimate actual atomic executor gas
+- apply financing/flash fee only when financing is used
+- atomic fork/transaction simulation
+- minimum-net-profit and safety margin gate
+
+SAFETY
+No approvals, signatures, swaps, broadcast, or funds movement.
+Gas and flash-loan fees are intentionally not yet deducted.
+No net-profit claim.
+executionEligible=false.
+
+Validation: npm run check PASS.

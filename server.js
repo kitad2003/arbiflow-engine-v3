@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.64.1";
+const VERSION = "4.65.0";
 
 /*
 =========================================================
@@ -8564,6 +8564,86 @@ function dynamicSummary4641(details=false){
 app.get("/api/multivenue/dynamic/start",(req,res)=>{if(dynamic4641.status==="RUNNING")return res.json({...dynamicSummary4641(false),statusRoute:"/api/multivenue/dynamic/status"});setImmediate(async()=>{try{await runDynamic4641();}catch(e){dynamic4641.status="ERROR";dynamic4641.completedAt=new Date().toISOString();dynamic4641.error=e?.message||String(e);}});res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/multivenue/dynamic/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/multivenue/dynamic/status",(req,res)=>res.json(dynamicSummary4641(false)));
 app.get("/api/multivenue/dynamic/curves",(req,res)=>res.json(dynamicSummary4641(true)));
+
+
+/*
+=========================================================
+ArbiFlow 4.65.0 — EXACT CROSS-VENUE ROUND-TRIP VALIDATOR
+Candidate-driven sequential quotes: each leg consumes the exact prior output.
+Read-only validation only. No gas/net-profit claim and no execution.
+=========================================================
+*/
+let exact4650={status:"IDLE",startedAt:null,completedAt:null,error:null,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[],lastLatencyMs:null,executionEligible:false};
+
+function candidateKey4650(c){return `${c.hops}|${c.path.join(">")}|${c.venues.join(">")}`;}
+function candidateSizes4650(c){
+ const sym=c.path[0],base=MV4641_SIZES[sym]||[0.001,0.005,0.01];
+ // Add smaller and larger boundary probes while retaining the 4.64.1 curve sizes.
+ const lo=base[0],hi=base[base.length-1],extra=[lo/2,hi*2];
+ return [...new Set([...extra,...base].filter(x=>Number.isFinite(x)&&x>0).map(x=>Number(x.toPrecision(10))))].sort((a,b)=>a-b);
+}
+async function exactLeg4650(venue,from,to,amountIn){
+ const started=Date.now();
+ const q=venue==="UNISWAP_V3"
+  ?await withTimeout4501(uniswapV3BestQuote({sellToken:from,buyToken:to,sellAmount:amountIn}),10000,"EXACT_UV3_TIMEOUT")
+  :await withTimeout4501(aerodromeBestQuote({sellToken:from,buyToken:to,sellAmount:amountIn}),10000,"EXACT_AERODROME_TIMEOUT");
+ const best=q.best;
+ if(!best||!Number.isFinite(Number(best.buyAmount))||Number(best.buyAmount)<=0)throw new Error("ZERO_OR_INVALID_EXACT_OUTPUT");
+ return {venue,from,to,amountIn:Number(amountIn),amountOut:Number(best.buyAmount),feeTier:best.feeTier??null,pool:best.pool??null,poolType:best.poolType??null,router:best.router??null,factory:best.factory??null,latencyMs:Date.now()-started};
+}
+async function validateSize4650(c,size){
+ let amount=Number(size),legs=[];
+ try{
+  for(let i=0;i<c.hops;i++){
+   const edge=c.edges[i],leg=await exactLeg4650(edge.venue,c.path[i],c.path[i+1],amount);
+   legs.push(leg);amount=leg.amountOut;
+  }
+  const grossPnl=amount-Number(size),grossReturnPct=grossPnl/Number(size)*100;
+  return {ok:true,size:Number(size),startSymbol:c.path[0],finalAmount:amount,grossPnl,grossReturnPct,positive:grossPnl>0,legs,classification:grossPnl>0?"EXACT_CROSS_VENUE_POSITIVE_REQUIRES_ECONOMICS_GATE":"EXACT_CROSS_VENUE_REJECTED"};
+ }catch(e){
+  return {ok:false,size:Number(size),startSymbol:c.path[0],failedLeg:legs.length+1,error:e?.message||String(e),legs,classification:"EXACT_CROSS_VENUE_QUOTE_FAILURE"};
+ }
+}
+function canonicalCandidate4650(c){
+ // Opposite rotations/directions may describe the same economic 2-edge cycle.
+ if(c.hops!==2)return candidateKey4650(c);
+ const legs=c.edges.map(e=>`${e.venue}:${e.from}>${e.to}`).sort();
+ return `2|${legs.join("|")}`;
+}
+async function runExact4650(limit=10){
+ if(exact4650.status==="RUNNING")return;
+ exact4650={...exact4650,status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,candidatesInput:0,candidatesValidated:0,sizeTests:0,successfulRoundTrips:0,positiveRoundTrips:0,quoteFailures:0,results:[]};
+ const started=Date.now();
+ if(dynamic4641.status!=="COMPLETE")await runDynamic4641();
+ const source=[...dynamic4641.candidates].sort((a,b)=>b.probeGrossSpreadPct-a.probeGrossSpreadPct);
+ exact4650.candidatesInput=source.length;
+ const selected=[],seen=new Set();
+ for(const c of source){const k=canonicalCandidate4650(c);if(seen.has(k))continue;seen.add(k);selected.push(c);if(selected.length>=limit)break;}
+ const results=[];
+ for(const c of selected){
+  const tests=[];
+  for(const size of candidateSizes4650(c)){
+   exact4650.sizeTests++;
+   const t=await validateSize4650(c,size);tests.push(t);
+   if(t.ok){exact4650.successfulRoundTrips++;if(t.positive)exact4650.positiveRoundTrips++;}else exact4650.quoteFailures++;
+  }
+  const viable=tests.filter(x=>x.ok).sort((a,b)=>b.grossReturnPct-a.grossReturnPct),positive=viable.filter(x=>x.positive),best=viable[0]||null;
+  results.push({candidateKey:candidateKey4650(c),hops:c.hops,path:c.path,venues:c.venues,probeGrossSpreadPct:c.probeGrossSpreadPct,sizesTested:tests.length,positiveSizes:positive.length,best,tests,classification:positive.length?"EXACT_POSITIVE_SURVIVOR_REQUIRES_GAS_AND_ATOMIC_SIMULATION":"REJECTED_BY_EXACT_CROSS_VENUE_ROUND_TRIP",executionEligible:false});
+  exact4650.candidatesValidated++;
+ }
+ results.sort((a,b)=>(b.best?.grossReturnPct??-Infinity)-(a.best?.grossReturnPct??-Infinity));
+ exact4650={...exact4650,status:"COMPLETE",completedAt:new Date().toISOString(),results,lastLatencyMs:Date.now()-started};
+}
+function exactSummary4650(){
+ return {success:exact4650.status!=="ERROR",version:VERSION,status:exact4650.status,error:exact4650.error,architecture:"DYNAMIC_MULTI_VENUE_CANDIDATES_TO_SEQUENTIAL_EXACT_OUTPUT_FED_CROSS_VENUE_ROUND_TRIP_VALIDATION",startedAt:exact4650.startedAt,completedAt:exact4650.completedAt,candidatesInput:exact4650.candidatesInput,candidatesValidated:exact4650.candidatesValidated,sizeTests:exact4650.sizeTests,successfulRoundTrips:exact4650.successfulRoundTrips,positiveRoundTrips:exact4650.positiveRoundTrips,quoteFailures:exact4650.quoteFailures,results:exact4650.results,lastLatencyMs:exact4650.lastLatencyMs,limitations:{candidateSource:"4.64.1_DYNAMIC_POSITIVE_ONLY",exactIntermediateAmountChaining:true,multiSizeValidation:true,duplicateTwoEdgeEconomicCyclesCollapsed:true,gasIncluded:false,atomicExecutorGasEstimated:false,flashLoanFeeIncluded:false,netProfitClaim:false,atomicForkSimulation:"NEXT_GATE_ONLY_IF_POSITIVE_SURVIVOR"},executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false};
+}
+app.get("/api/validator/crossvenue/start",(req,res)=>{
+ if(exact4650.status==="RUNNING")return res.json({...exactSummary4650(),statusRoute:"/api/validator/crossvenue/status"});
+ const limit=Math.max(1,Math.min(20,Number(req.query.limit)||10));
+ setImmediate(async()=>{try{await runExact4650(limit);}catch(e){exact4650.status="ERROR";exact4650.completedAt=new Date().toISOString();exact4650.error=e?.message||String(e);}});
+ res.json({success:true,version:VERSION,status:"STARTED",statusRoute:"/api/validator/crossvenue/status",executionEligible:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});
+});
+app.get("/api/validator/crossvenue/status",(req,res)=>res.json(exactSummary4650()));
 
 /* ArbiFlow 4.59.4 — additive cross-DEX opportunity graph.
    First verified cross-venue lane: Uniswap V3 <-> Aerodrome on Base.
