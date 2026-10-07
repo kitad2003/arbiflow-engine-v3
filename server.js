@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.48.0";
+const VERSION = "4.49.0";
 
 /*
 =========================================================
@@ -7352,11 +7352,94 @@ async function realDexSpreadDiagnostic4480(){
 }
 app.get("/api/diagnostics/multimarket/dex-spreads",async(req,res)=>{try{res.json(await realDexSpreadDiagnostic4480());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_SPOT_SPREAD_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
+
+
+/*
+=========================================================
+ARBIFLOW 4.49 EXACT-SIZE ROUND-TRIP QUOTE + FUNDING DIAGNOSTIC
+READ ONLY
+
+Uses Uniswap V3 Quoter contracts to test actual round-trip output at
+multiple sizes. The existing Morpho/Aave funding architecture is retained.
+No flash loan is requested and no swap, approval, signature, or broadcast
+occurs. Gas is explicitly modeled rather than represented as an exact
+transaction simulation.
+=========================================================
+*/
+const UNISWAP_V3_QUOTER_V1_4490 = {
+  ethereum:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+  arbitrum:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+  optimism:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+  base:"0x222ca98f00ed15b1fae10b61c277703a194cf5d2",
+  polygon:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+};
+const QUOTER_V1_ABI_4490=["function quoteExactInputSingle(address tokenIn,address tokenOut,uint24 fee,uint256 amountIn,uint160 sqrtPriceLimitX96) returns (uint256 amountOut)"];
+const ERC20_META_BALANCE_ABI_4490=["function decimals() view returns(uint8)","function balanceOf(address) view returns(uint256)"];
+const DEFAULT_SIZES_USD_4490=[100,250,500,1000,2500,5000,10000,25000,50000];
+const ROUND_TRIP_GAS_UNITS_4490=260000n;
+function tokenAddress4490(chainKey,symbol){return UNISWAP_V3_DISCOVERY_4470[chainKey]?.tokens?.[symbol]||null;}
+async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amountIn){
+ const q=new Contract(quoterAddress,QUOTER_V1_ABI_4490,provider);
+ const out=await q.quoteExactInputSingle.staticCall(String(tokenIn).toLowerCase(),String(tokenOut).toLowerCase(),Number(fee),amountIn,0);
+ return BigInt(out.toString());
+}
+function stableLike4490(sym){return ["USDC","USDT","USDbC"].includes(sym);}
+async function baseFunding4490(provider,asset,decimals){
+ try{
+  const token=new Contract(asset,ERC20_READ_ABI,provider), pool=new Contract(AAVE_V3_BASE.pool,AAVE_POOL_ABI,provider), dp=new Contract(AAVE_V3_BASE.protocolDataProvider,AAVE_DATA_PROVIDER_ABI,provider);
+  const [morphoRaw,premiumRaw,reserve]=await Promise.all([token.balanceOf(MORPHO_BLUE_4210),pool.FLASHLOAN_PREMIUM_TOTAL(),dp.getReserveTokensAddresses(asset)]);
+  const aToken=reserve.aTokenAddress||reserve[0]; let aaveRaw=0n;
+  if(aToken&&String(aToken).toLowerCase()!=="0x0000000000000000000000000000000000000000")aaveRaw=await token.balanceOf(aToken);
+  return {mode:"FLASH_LIQUIDITY_READ_ONLY",morpho:{availableRaw:morphoRaw.toString(),availableTokenUnits:Number(formatUnits(morphoRaw,decimals)),feeBps:0},aave:{availableRaw:aaveRaw.toString(),availableTokenUnits:Number(formatUnits(aaveRaw,decimals)),premiumBps:Number(premiumRaw)},flashLoanRequested:false};
+ }catch(e){return {mode:"FLASH_LIQUIDITY_READ_FAILED",error:e?.shortMessage||e?.message||String(e),flashLoanRequested:false};}
+}
+async function exactTradeSizeDiagnostic4490(){
+ const startedAt=Date.now(), spread=await realDexSpreadDiagnostic4480(), results=[];
+ const positive=(spread.topFeeAdjustedSpotDivergences||[]).filter(x=>x.classification==="POSITIVE_SPOT_DIVERGENCE");
+ for(const edge of positive){
+  const cfg=UNISWAP_V3_DISCOVERY_4470[edge.chainKey],rpc=RPC_URLS[edge.chainKey]||"",quoter=UNISWAP_V3_QUOTER_V1_4490[edge.chainKey];
+  if(!cfg||!rpc||!quoter){results.push({...edge,classification:"EXACT_QUOTE_ADAPTER_NOT_CONFIGURED",exactQuoteConfirmed:false});continue;}
+  const [assetA,assetB]=String(edge.pair).split("/"); const tokenA=tokenAddress4490(edge.chainKey,assetA),tokenB=tokenAddress4490(edge.chainKey,assetB);
+  if(!tokenA||!tokenB){results.push({...edge,classification:"PAIR_TOKEN_MAPPING_MISSING",exactQuoteConfirmed:false});continue;}
+  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+  try{
+   const code=await provider.getCode(quoter); if(!code||code==="0x"){results.push({...edge,classification:"QUOTER_NOT_DEPLOYED",quoter,exactQuoteConfirmed:false});continue;}
+   const dB=Number(await new Contract(tokenB,ERC20_META_BALANCE_ABI_4490,provider).decimals());
+   const feeData=await provider.getFeeData(); const gasPrice=feeData.gasPrice||feeData.maxFeePerGas||0n;
+   // Convert native gas to USD from the chain's WETH/stable spot when available.
+   let nativeUsd=null;
+   for(const c of spread.chains||[])if(c.key===edge.chainKey)for(const pr of c.pairs||[])if(pr.pair===`WETH/${assetB}`){const pp=(pr.pools||[]).find(x=>x.token1PerToken0&&x.token1PerToken0>10);if(pp){nativeUsd=Number(pp.token1PerToken0);break;}}
+   const gasNative=Number(formatUnits(gasPrice*ROUND_TRIP_GAS_UNITS_4490,18)); const modeledGasUsd=nativeUsd?gasNative*nativeUsd:null;
+   const sizes=[];
+   for(const usd of DEFAULT_SIZES_USD_4490){
+    if(!stableLike4490(assetB))continue;
+    try{
+     const amountIn=parseUnits(String(usd),dB);
+     const acquiredA=await quoteV3Single4490(provider,quoter,tokenB,tokenA,edge.buyFeeTier,amountIn);
+     const finalB=await quoteV3Single4490(provider,quoter,tokenA,tokenB,edge.sellFeeTier,acquiredA);
+     const finalUnits=Number(formatUnits(finalB,dB)),grossNet=finalUnits-usd,gasUsd=modeledGasUsd??0,netOwn=grossNet-gasUsd;
+     let funding={ownCapital:{requiredUsd:usd,estimatedNetProfitUsd:Number(netOwn.toFixed(6)),qualifies:netOwn>=15}};
+     if(edge.chainKey==="base"){
+      const f=await baseFunding4490(provider,tokenB,dB), morphoCap=Number(f.morpho?.availableTokenUnits||0),aaveCap=Number(f.aave?.availableTokenUnits||0),aaveBps=Number(f.aave?.premiumBps||5);
+      const morphoNet=grossNet-gasUsd, aavePremium=usd*aaveBps/10000, aaveNet=grossNet-gasUsd-aavePremium;
+      funding={...funding,morphoFlash:{availableUsdApprox:morphoCap,feeBps:0,sizeSupported:morphoCap>=usd,estimatedNetProfitUsd:Number(morphoNet.toFixed(6)),qualifies:morphoCap>=usd&&morphoNet>=15},aaveFlash:{availableUsdApprox:aaveCap,premiumBps:aaveBps,sizeSupported:aaveCap>=usd,estimatedPremiumUsd:Number(aavePremium.toFixed(6)),estimatedNetProfitUsd:Number(aaveNet.toFixed(6)),qualifies:aaveCap>=usd&&aaveNet>=15}};
+     }else funding={...funding,flashFunding:{status:"PRESERVED_NOT_YET_CONFIGURED_FOR_THIS_CHAIN",note:"Flash-loan architecture is retained. This build only reads validated Morpho/Aave funding capacity on Base."}};
+     sizes.push({inputAsset:assetB,inputUsdApprox:usd,amountInRaw:amountIn.toString(),intermediateAsset:assetA,intermediateAmountRaw:acquiredA.toString(),finalAsset:assetB,finalAmount:finalUnits,roundTripPnlBeforeGasUsd:Number(grossNet.toFixed(6)),modeledRoundTripGasUnits:Number(ROUND_TRIP_GAS_UNITS_4490),modeledGasUsd:modeledGasUsd===null?null:Number(modeledGasUsd.toFixed(6)),estimatedNetOwnCapitalUsd:modeledGasUsd===null?null:Number(netOwn.toFixed(6)),funding,exactDexQuoteConfirmed:true,transactionSimulationConfirmed:false});
+    }catch(e){sizes.push({inputUsdApprox:usd,exactDexQuoteConfirmed:false,error:e?.shortMessage||e?.message||String(e)});}
+   }
+   const valid=sizes.filter(x=>x.exactDexQuoteConfirmed&&x.estimatedNetOwnCapitalUsd!==null); const best=valid.sort((a,b)=>b.estimatedNetOwnCapitalUsd-a.estimatedNetOwnCapitalUsd)[0]||null;
+   results.push({...edge,quoter,quoteMethod:"UNISWAP_V3_QUOTER_EXACT_INPUT_ROUND_TRIP",sizes,bestOwnCapitalSize:best,classification:best&&best.estimatedNetOwnCapitalUsd>=15?"ESTIMATED_NET_POSITIVE_AFTER_MODELED_GAS":"NO_ESTIMATED_NET_PROFIT_AFTER_MODELED_GAS",exactQuoteConfirmed:valid.length>0,readOnly:true});
+  }catch(e){results.push({...edge,classification:"EXACT_SIZE_DIAGNOSTIC_FAILED",error:e?.shortMessage||e?.message||String(e),exactQuoteConfirmed:false,readOnly:true});}
+ }
+ return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"EXACT_UNISWAP_V3_ROUND_TRIP_QUOTES_PLUS_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+}
+app.get("/api/diagnostics/multimarket/exact-size-funding",async(req,res)=>{try{res.json(await exactTradeSizeDiagnostic4490());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
+
 app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.48.0_REAL_DEX_SPOT_SPREAD_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.49.0_EXACT_TRADE_SIZE_AND_FLASH_FUNDING_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7365,7 +7448,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.48.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.49.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
