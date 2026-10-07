@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.77.3";
+const VERSION = "4.78.0";
 
 /*
 =========================================================
@@ -9270,3 +9270,81 @@ function coverage4730Summary(){
 
 app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary()));
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
+
+
+// === 4.78.0 Independent DEX pool evidence (READ ONLY) ===
+// Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
+// This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
+const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
+const dexFactory4780=new (require("ethers").Interface)([
+ "function getPair(address,address) view returns (address)",
+ "function getPool(address,address,uint24) view returns (address)"
+]);
+const dexPool4780=new (require("ethers").Interface)([
+ "function token0() view returns (address)","function token1() view returns (address)",
+ "function getReserves() view returns (uint112,uint112,uint32)",
+ "function liquidity() view returns (uint128)",
+ "function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)"
+]);
+const dexAddress4780=a=>typeof a==="string"&&/^0x[0-9a-fA-F]{40}$/.test(a)&&!/^0x0{40}$/i.test(a);
+async function dexCall4780(c,to,data){
+ const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),5500);
+ try{const r=await fetch(c.rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_call",params:[{to,data},"latest"]}),signal:ctl.signal});
+ if(!r.ok)throw Error(`RPC_HTTP_${r.status}`);const j=await r.json();if(j.error)throw Error(`RPC_${j.error.code}:${String(j.error.message).slice(0,100)}`);
+ if(typeof j.result!=="string"||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error("INVALID_RPC_RESULT");return j.result;
+ }finally{clearTimeout(timer);}
+}
+function dexVenues4780(c){
+ // Configure factories explicitly in Render, e.g. DEX_BASE_UNISWAP_V3_FACTORY.
+ const prefix=`DEX_${c.key.toUpperCase()}_`;
+ return [
+ {name:"UNISWAP_V3",kind:"V3",factory:process.env[prefix+"UNISWAP_V3_FACTORY"],fee:500},
+ {name:"UNISWAP_V3_3000",kind:"V3",factory:process.env[prefix+"UNISWAP_V3_FACTORY"],fee:3000},
+ {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"]},
+ {name:"PANCAKESWAP_V3",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:500},
+ {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:3000}
+ ];
+}
+async function dexDiscover4780(c){
+ const result={name:c.name,chainId:c.chainId,status:"RUNNING",venues:[],independentPools:0,independentFactories:0,executableQuotes:0,qualified:0,lastError:null};
+ const verified=new Set();
+ for(const venue of dexVenues4780(c)){
+  const v={name:venue.name,kind:venue.kind,feeTier:venue.fee??null,status:"NOT_CONFIGURED",factory:venue.factory||null,pool:null,liquidityEvidence:null,error:null};
+  result.venues.push(v);
+  if(!venue.factory)continue;
+  if(!dexAddress4780(venue.factory)){v.status="INVALID_FACTORY_ADDRESS";continue;}
+  try{
+   const method=venue.kind==="V3"?"getPool":"getPair";
+   const args=venue.kind==="V3"?[c.tokens.WETH,c.tokens.USDC,venue.fee]:[c.tokens.WETH,c.tokens.USDC];
+   const raw=await dexCall4780(c,venue.factory,dexFactory4780.encodeFunctionData(method,args));
+   const pool=dexFactory4780.decodeFunctionResult(method,raw)[0];
+   if(!dexAddress4780(pool)){v.status="NO_POOL";continue;}
+   v.pool=pool;
+   const [t0raw,t1raw]=await Promise.all([dexCall4780(c,pool,dexPool4780.encodeFunctionData("token0")),dexCall4780(c,pool,dexPool4780.encodeFunctionData("token1"))]);
+   const t0=dexPool4780.decodeFunctionResult("token0",t0raw)[0].toLowerCase(),t1=dexPool4780.decodeFunctionResult("token1",t1raw)[0].toLowerCase();
+   if(!([t0,t1].includes(c.tokens.WETH.toLowerCase())&&[t0,t1].includes(c.tokens.USDC.toLowerCase()))){v.status="TOKEN_MISMATCH";continue;}
+   if(venue.kind==="V2"){
+    const raw=await dexCall4780(c,pool,dexPool4780.encodeFunctionData("getReserves"));const rr=dexPool4780.decodeFunctionResult("getReserves",raw);
+    v.liquidityEvidence={kind:"V2_RESERVES",reserve0:rr[0].toString(),reserve1:rr[1].toString(),nonzero:rr[0]>0n&&rr[1]>0n};
+   }else{
+    const [lraw,sraw]=await Promise.all([dexCall4780(c,pool,dexPool4780.encodeFunctionData("liquidity")),dexCall4780(c,pool,dexPool4780.encodeFunctionData("slot0"))]);
+    const liq=dexPool4780.decodeFunctionResult("liquidity",lraw)[0],slot=dexPool4780.decodeFunctionResult("slot0",sraw);
+    v.liquidityEvidence={kind:"V3_ACTIVE_LIQUIDITY",activeLiquidity:liq.toString(),sqrtPriceX96:slot[0].toString(),nonzero:liq>0n&&slot[0]>0n};
+   }
+   v.status=v.liquidityEvidence.nonzero?"POOL_LIVE":"POOL_EMPTY";
+   if(v.status==="POOL_LIVE"){verified.add(venue.factory.toLowerCase());result.independentPools++;}
+  }catch(e){v.status="PROBE_ERROR";v.error=e?.name==="AbortError"?"RPC_TIMEOUT":String(e?.message||e).slice(0,180);}
+ }
+ result.independentFactories=verified.size;
+ result.status=result.independentPools>=2&&result.independentFactories>=2?"MULTI_VENUE_POOLS_VERIFIED":"INSUFFICIENT_INDEPENDENT_VENUES";
+ return result;
+}
+async function runDex4780(){if(dex4780.running)return;dex4780.running=true;dex4780.runs++;dex4780.lastRunAt=new Date().toISOString();try{
+ const rows=await Promise.all(MC4750_CHAINS.map(async c=>{
+  if(!c.rpc)return {name:c.name,chainId:c.chainId,status:"RPC_NOT_CONFIGURED",venues:[]};
+  try{return await dexDiscover4780(c);}catch(e){return {name:c.name,chainId:c.chainId,status:"ERROR",lastError:String(e?.message||e),venues:[]};}
+ }));for(const row of rows)dex4780.chains[row.chainId]=row;
+ }finally{dex4780.running=false;dex4780.lastCompletedAt=new Date().toISOString();}}
+app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
+app.get("/api/dex-independent/run",(req,res)=>{setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
+setTimeout(()=>runDex4780().catch(()=>{}),15000);
