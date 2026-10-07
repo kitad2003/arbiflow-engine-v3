@@ -1,0 +1,11 @@
+ArbiFlow 4.72.1 — Broad Discovery Worker Corrective
+
+- Preserves 4.72.0 Base four-venue discovery and all 4.71.1 infrastructure/safety gates.
+- Replaces monolithic background diagnostic call with staged discovery.
+- Bounded concurrency (default 8).
+- Hard per-quote timeout (default 4 seconds).
+- Failure isolation: slow/unavailable venue quote cannot hold the full sweep open indefinitely.
+- Incremental live progress telemetry: phase, jobsPlanned, jobsCompleted, exactQuotes, failures, timeouts, lastProgressAt.
+- Cheap $500 screening pass first; multi-size depth work only for positive/near-parity routes.
+- Full reconciliation remains <=5 minutes.
+- Read-only; mainnet execution/broadcast/funds movement remain disabled.
