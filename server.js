@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.59.1";
+const VERSION = "4.59.2";
 
 /*
 =========================================================
@@ -8018,14 +8018,31 @@ app.get("/api/opportunities/graph/start",(req,res)=>{if(opportunityGraphState459
 app.get("/api/opportunities/graph/status",(req,res)=>{const st=opportunityGraphState4590;res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
 
-/* ArbiFlow 4.59.1 — candidate-first exact validator. */
-let candidateExactState4591={status:"IDLE",startedAt:null,completedAt:null,error:null,result:null,progress:{candidateCount:0,candidatesValidated:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,elapsedMs:0}};
+/* ArbiFlow 4.59.2 — local economics + route pruning before exact validation.
+   The graph spread is a screening signal only. We conservatively remove fee-tier
+   directions whose preliminary spread cannot cover the two pool fees plus a
+   configurable safety buffer, then exact-test only representative sizes.
+   Exact quoter output remains the authority for gross P/L. */
+let candidateExactState4591={status:"IDLE",startedAt:null,completedAt:null,error:null,result:null,progress:{candidateCount:0,candidatesValidated:0,localDirectionsConsidered:0,localDirectionsPruned:0,localDirectionsPromoted:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,elapsedMs:0}};
+
+function localRouteScreen4592(c,buyFee,sellFee,safetyBps){
+ const spreadBps=Math.max(0,Number(c.preliminarySpreadPct||0)*100);
+ const feeBps=(Number(buyFee)+Number(sellFee))/100; // V3 fee units: 500 = 5 bps
+ const requiredBps=feeBps+Math.max(0,safetyBps);
+ return {spreadBps,feeBps,requiredBps,estimatedSurplusBps:spreadBps-requiredBps,promote:spreadBps>requiredBps};
+}
+function representativeSizes4592(){
+ const raw=String(process.env.ARBIFLOW_LOCAL_EXACT_SIZES_USD||"100,500,2500").split(",").map(Number).filter(x=>Number.isFinite(x)&&x>0);
+ return [...new Set(raw)].sort((a,b)=>a-b).slice(0,5);
+}
 async function candidateExactValidation4591(){
  const started=Date.now();
  let graph=opportunityGraphState4590.result;
  if(!graph||opportunityGraphState4590.status!=="COMPLETE") graph=await buildOpportunityGraph4590();
  const minSpreadPct=Math.max(0,Number(process.env.ARBIFLOW_CANDIDATE_MIN_SPREAD_PCT||"0.01"));
  const maxCandidates=Math.max(1,Math.min(100,Number(process.env.ARBIFLOW_CANDIDATE_LIMIT||"60")));
+ const safetyBps=Math.max(0,Number(process.env.ARBIFLOW_LOCAL_SCREEN_SAFETY_BPS||"2"));
+ const exactSizes=representativeSizes4592();
  const candidates=(graph.topCandidates||[]).filter(x=>Number(x.preliminarySpreadPct)>=minSpreadPct).slice(0,maxCandidates);
  const progress=candidateExactState4591.progress; progress.candidateCount=candidates.length;
  const decimalCache=new Map(), timeoutMs=12000;
@@ -8036,15 +8053,31 @@ async function candidateExactValidation4591(){
   if(!cfg||!rpc||!quoter)return {chain,classification:!cfg?"NO_CONFIG":!rpc?"RPC_NOT_CONFIGURED":"QUOTER_NOT_CONFIGURED",rows:[]};
   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false}); await withTimeout4501(provider.getNetwork(),timeoutMs,"NETWORK_TIMEOUT");
   const jobs=[];
-  for(const c of list){const base=cfg.tokens[c.baseSym],asset=cfg.tokens[c.assetSym];if(!base||!asset)continue;for(const [buyFee,sellFee] of [[c.feeA,c.feeB],[c.feeB,c.feeA]])for(const usd of OPPORTUNITY_SIZES_4580)jobs.push({c,base,asset,buyFee,sellFee,usd});}
+  for(const c of list){
+   const base=cfg.tokens[c.baseSym],asset=cfg.tokens[c.assetSym];if(!base||!asset)continue;
+   for(const [buyFee,sellFee] of [[c.feeA,c.feeB],[c.feeB,c.feeA]]){
+    progress.localDirectionsConsidered++;
+    const local=localRouteScreen4592(c,buyFee,sellFee,safetyBps);
+    if(!local.promote){progress.localDirectionsPruned++;continue;}
+    progress.localDirectionsPromoted++;
+    for(const usd of exactSizes)jobs.push({c,base,asset,buyFee,sellFee,usd,local});
+   }
+  }
   progress.routeJobsBuilt+=jobs.length;
-  const rows=await mapLimit4501(jobs,8,async j=>{try{const bd=await getDecimals(chain,provider,j.base);const amountIn=parseUnits(String(j.usd),bd);const q1=await withTimeout4501(quoteV3Single4490(provider,quoter,j.base,j.asset,j.buyFee,amountIn,chain),timeoutMs,"BUY_QUOTE_TIMEOUT");const q2=await withTimeout4501(quoteV3Single4490(provider,quoter,j.asset,j.base,j.sellFee,q1,chain),timeoutMs,"SELL_QUOTE_TIMEOUT");progress.quotesCompleted+=2;progress.exactQuotes+=2;const out=Number(formatUnits(q2,bd)),gross=out-j.usd;if(gross>0)progress.positiveGross++;return {chain,venue:j.c.venue,base:j.c.baseSym,asset:j.c.assetSym,sizeUsd:j.usd,buyFee:j.buyFee,sellFee:j.sellFee,preliminarySpreadPct:j.c.preliminarySpreadPct,amountOutUsd:out,grossUsd:gross,positive:gross>0};}catch(e){progress.quoteFailures++;return null;}});
-  progress.candidatesValidated+=list.length; return {chain,classification:"CANDIDATE_EXACT_VALIDATED",candidateCount:list.length,rows:rows.filter(Boolean)};
+  const rows=await mapLimit4501(jobs,8,async j=>{try{
+   const bd=await getDecimals(chain,provider,j.base);const amountIn=parseUnits(String(j.usd),bd);
+   const q1=await withTimeout4501(quoteV3Single4490(provider,quoter,j.base,j.asset,j.buyFee,amountIn,chain),timeoutMs,"BUY_QUOTE_TIMEOUT");
+   const q2=await withTimeout4501(quoteV3Single4490(provider,quoter,j.asset,j.base,j.sellFee,q1,chain),timeoutMs,"SELL_QUOTE_TIMEOUT");
+   progress.quotesCompleted+=2;progress.exactQuotes+=2;
+   const out=Number(formatUnits(q2,bd)),gross=out-j.usd;if(gross>0)progress.positiveGross++;
+   return {chain,venue:j.c.venue,base:j.c.baseSym,asset:j.c.assetSym,sizeUsd:j.usd,buyFee:j.buyFee,sellFee:j.sellFee,preliminarySpreadPct:j.c.preliminarySpreadPct,localEstimatedSurplusBps:j.local.estimatedSurplusBps,amountOutUsd:out,grossUsd:gross,positive:gross>0};
+  }catch(e){progress.quoteFailures++;return null;}});
+  progress.candidatesValidated+=list.length; return {chain,classification:"LOCAL_PRUNED_EXACT_VALIDATED",candidateCount:list.length,rows:rows.filter(Boolean)};
  });
  const ranked=chainResults.flatMap(x=>x.rows||[]).filter(x=>x.positive).sort((a,b)=>b.grossUsd-a.grossUsd);progress.elapsedMs=Date.now()-started;
- return {success:true,version:VERSION,classification:"CANDIDATE_FIRST_EXACT_VALIDATION_COMPLETE",architecture:"POOL_STATE_GRAPH_TO_RANKED_CANDIDATES_TO_EXACT_QUOTES",candidateFilter:{minSpreadPct,maxCandidates,graphCandidateCount:graph.candidateCount,selectedCandidates:candidates.length,bothDirectionsValidated:true},progress:{...progress},chainResults:chainResults.map(x=>({chain:x.chain,classification:x.classification,candidateCount:x.candidateCount||0,rows:(x.rows||[]).length})),rankedOpportunities:ranked.slice(0,100),positiveOpportunityCount:ranked.length,diagnosticFallbackRoute:"/api/opportunities/multichain/start",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
+ return {success:true,version:VERSION,classification:"LOCAL_SIMULATION_ROUTE_PRUNING_COMPLETE",architecture:"POOL_STATE_GRAPH_TO_LOCAL_FEE_SCREEN_TO_REPRESENTATIVE_SIZE_EXACT_VALIDATION",candidateFilter:{minSpreadPct,maxCandidates,graphCandidateCount:graph.candidateCount,selectedCandidates:candidates.length,bothDirectionsScreened:true,safetyBps,exactSizesUsd:exactSizes},progress:{...progress},chainResults:chainResults.map(x=>({chain:x.chain,classification:x.classification,candidateCount:x.candidateCount||0,rows:(x.rows||[]).length})),rankedOpportunities:ranked.slice(0,100),positiveOpportunityCount:ranked.length,diagnosticFallbackRoute:"/api/opportunities/multichain/start",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,generatedAt:new Date().toISOString()};
 }
-async function runCandidateExact4591(){if(candidateExactState4591.status==="RUNNING")return;candidateExactState4591={status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,result:candidateExactState4591.result,progress:{candidateCount:0,candidatesValidated:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,elapsedMs:0}};try{const result=await candidateExactValidation4591();candidateExactState4591={...candidateExactState4591,status:"COMPLETE",completedAt:new Date().toISOString(),result};}catch(e){candidateExactState4591={...candidateExactState4591,status:"ERROR",completedAt:new Date().toISOString(),error:e?.message||String(e)};}}
+async function runCandidateExact4591(){if(candidateExactState4591.status==="RUNNING")return;candidateExactState4591={status:"RUNNING",startedAt:new Date().toISOString(),completedAt:null,error:null,result:candidateExactState4591.result,progress:{candidateCount:0,candidatesValidated:0,localDirectionsConsidered:0,localDirectionsPruned:0,localDirectionsPromoted:0,routeJobsBuilt:0,quotesCompleted:0,exactQuotes:0,quoteFailures:0,positiveGross:0,elapsedMs:0}};try{const result=await candidateExactValidation4591();candidateExactState4591={...candidateExactState4591,status:"COMPLETE",completedAt:new Date().toISOString(),result};}catch(e){candidateExactState4591={...candidateExactState4591,status:"ERROR",completedAt:new Date().toISOString(),error:e?.message||String(e)};}}
 app.get("/api/opportunities/candidates/start",(req,res)=>{const running=candidateExactState4591.status==="RUNNING";if(!running)setImmediate(()=>runCandidateExact4591());res.json({success:true,version:VERSION,status:running?"ALREADY_RUNNING":"STARTED",statusRoute:"/api/opportunities/candidates/status",readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/opportunities/candidates/status",(req,res)=>{const st=candidateExactState4591;if(st.status==="RUNNING"&&st.startedAt)st.progress.elapsedMs=Date.now()-Date.parse(st.startedAt);res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,progress:st.progress,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
@@ -8059,7 +8092,7 @@ app.get("/api/opportunities/multichain/start",(req,res)=>{const running=opportun
 app.get("/api/opportunities/multichain/status",(req,res)=>{const st=opportunityScanState4581;if(st.status==="RUNNING"&&st.startedAt)st.progress.elapsedMs=Date.now()-Date.parse(st.startedAt);res.json({success:st.status!=="ERROR",version:VERSION,status:st.status,startedAt:st.startedAt,completedAt:st.completedAt,error:st.error,progress:st.progress,result:st.result,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 app.get("/api/opportunities/multichain",(req,res)=>{const st=opportunityScanState4581;res.json({success:true,version:VERSION,status:st.status,instruction:st.status==="IDLE"?"Open /api/opportunities/multichain/start once, then /api/opportunities/multichain/status.":"Use /api/opportunities/multichain/status for progress/results.",startRoute:"/api/opportunities/multichain/start",statusRoute:"/api/opportunities/multichain/status",result:st.status==="COMPLETE"?st.result:null,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.59.1_CANDIDATE_FIRST_EXACT_VALIDATION",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.59.2_LOCAL_SIMULATION_ROUTE_PRUNING",multiChainOpportunityRoute:"/api/opportunities/multichain",multiChainOpportunityStartRoute:"/api/opportunities/multichain/start",multiChainOpportunityStatusRoute:"/api/opportunities/multichain/status",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -8069,10 +8102,10 @@ SERVER
 
 const startupGate = process.env.ARBIFLOW_STARTUP_WRAPPER === "1";
 if (!startupGate) {
-  console.error("[ArbiFlow 4.59.0] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
+  console.error("[ArbiFlow 4.59.2] STARTUP BLOCKED: server.js must be launched by Startup4300.js");
   process.exit(1);
 }
-console.log(`[ArbiFlow 4.59.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
+console.log(`[ArbiFlow 4.59.2] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
 app.listen(
   PORT,

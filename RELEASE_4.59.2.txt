@@ -1,0 +1,16 @@
+ArbiFlow Engine 4.59.2 — Local Simulation & Route Pruning
+
+Changes
+- Preserves 4.59.1 candidate-first graph handoff.
+- Adds local fee-economics screening before exact V3 quote calls.
+- Screens both fee-tier directions independently.
+- Prunes directions whose preliminary graph spread cannot cover round-trip pool fees plus safety buffer.
+- Reduces exact validation to representative USD sizes (default: 100, 500, 2500; configurable).
+- Adds progress counters: localDirectionsConsidered, localDirectionsPruned, localDirectionsPromoted.
+- Keeps the legacy multichain scanner as a diagnostic fallback.
+- Corrects stale 4.59.0 startup labels.
+- Read-only; mainnet broadcast and fund movement remain disabled.
+
+Validation
+- npm run check: PASS
+- node --check all JavaScript: PASS
