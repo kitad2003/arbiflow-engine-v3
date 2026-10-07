@@ -1,0 +1,19 @@
+ArbiFlow Engine 4.71.1 Verification
+
+PASS: Exact 4.71.0 milestone used as baseline.
+PASS: 4.70 candidate engine preserved through 4.71 baseline.
+PASS: Base USDC and protocol constants canonicalized; address helper lowercases then validates with ethers getAddress.
+PASS: Dynamic Aave Pool and aToken addresses normalized before use.
+PASS: 1inch config explicitly reports ONEINCH_API_KEY and credentialEmbedded=false.
+PASS: /api/global/start returns STARTED_BACKGROUND/ALREADY_RUNNING with requestComplete=true.
+PASS: npm run check (all JavaScript syntax checks) completed successfully.
+PASS: readOnly=true / executionEligible=false / mainnetBroadcast=false / fundsMovedOnMainnet=false remain in common health response.
+
+LIVE DEPLOYMENT REQUIRED:
+- Morpho USDC capacity read
+- Aave reserve/aToken capacity read
+- Aave FLASHLOAN_PREMIUM_TOTAL read
+- 1inch firm quote after ONEINCH_API_KEY is configured in Render
+- live health gates and candidate funnel
+
+No claim of live financing or aggregator PASS is made by this package verification.

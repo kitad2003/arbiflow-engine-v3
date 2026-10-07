@@ -1,13 +1,13 @@
 "use strict";
 
-const { JsonRpcProvider, Contract, formatUnits, parseUnits } = require("ethers");
+const { JsonRpcProvider, Contract, formatUnits, parseUnits, getAddress } = require("ethers");
 
-const VERSION="4.71.0";
+const VERSION="4.71.1";
 const BASE_CHAIN_ID=8453;
 const BASE_WETH="0x4200000000000000000000000000000000000006";
-const BASE_USDC="0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913";
-const MORPHO="0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-const AAVE={provider:"0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D",poolFallback:"0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",data:"0x0F43731EB8d45A581f4a36DD74F5f358bc90C73A"};
+const BASE_USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+const MORPHO="0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb";
+const AAVE={provider:"0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",poolFallback:"0xa238dd80c259a72e81d7e4664a9801593f98d1c5",data:"0x0f43731eb8d45a581f4a36dd74f5f358bc90c73a"};
 const ERC20=["function balanceOf(address) view returns(uint256)"];
 const ADDR_PROVIDER=["function getPool() view returns(address)"];
 const AAVE_POOL=["function FLASHLOAN_PREMIUM_TOTAL() view returns(uint128)"];
@@ -37,6 +37,7 @@ const S=global.__arbiflow4710||{
 global.__arbiflow4710=S;
 
 function now(){return new Date().toISOString();}
+function addr(value){return getAddress(String(value).toLowerCase());}
 function age(ts){return ts?Date.now()-Date.parse(ts):null;}
 function reject(reason){S.rejections[reason]=(S.rejections[reason]||0)+1;}
 async function fetchJson(url,opts={},timeout=2500){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),timeout);try{const r=await fetch(url,{...opts,signal:ac.signal});if(!r.ok)throw new Error(`HTTP_${r.status}`);return await r.json();}finally{clearTimeout(t);}}
@@ -56,13 +57,13 @@ async function pollReferences(){
 }
 
 async function refreshBase(){if(!provider)return;try{const b=await provider.getBlockNumber();if(b!==S.lastBaseBlock){S.lastBaseBlock=b;S.lastBaseBlockAt=now();S.metrics.baseStateUpdates++;}}catch(e){S.lastError=`BASE_RPC:${e.message}`;}}
-async function resolveAavePool(){if(!provider)return AAVE.poolFallback;try{return await new Contract(AAVE.provider,ADDR_PROVIDER,provider).getPool();}catch{return AAVE.poolFallback;}}
+async function resolveAavePool(){if(!provider)return addr(AAVE.poolFallback);try{return addr(await new Contract(addr(AAVE.provider),ADDR_PROVIDER,provider).getPool());}catch{return addr(AAVE.poolFallback);}}
 async function refreshFinancing(){
  if(!provider){S.financing={status:"UNAVAILABLE",lastCheckedAt:now(),reason:"BASE_RPC_URL_MISSING"};return;}
  S.metrics.financingChecks++;
  try{
-  const usdc=new Contract(BASE_USDC,ERC20,provider);const morphoRaw=await usdc.balanceOf(MORPHO);const pool=await resolveAavePool();const data=new Contract(AAVE.data,DATA,provider);const [aToken]=await data.getReserveTokensAddresses(BASE_USDC);const aaveRaw=await usdc.balanceOf(aToken);let premiumBps=null;try{premiumBps=Number(await new Contract(pool,AAVE_POOL,provider).FLASHLOAN_PREMIUM_TOTAL());}catch{}
-  S.financing={status:"LIVE",lastCheckedAt:now(),morpho:{provider:"MORPHO",asset:"USDC",capacity:formatUnits(morphoRaw,6),flashFeeBps:0,address:MORPHO},aave:{provider:"AAVE_V3",asset:"USDC",capacity:formatUnits(aaveRaw,6),flashFeeBps:premiumBps,pool,resolvedDynamically:pool.toLowerCase()!==AAVE.poolFallback.toLowerCase()}};S.metrics.financingPassed++;
+  const usdc=new Contract(addr(BASE_USDC),ERC20,provider);const morphoRaw=await usdc.balanceOf(addr(MORPHO));const pool=await resolveAavePool();const data=new Contract(addr(AAVE.data),DATA,provider);const [aTokenRaw]=await data.getReserveTokensAddresses(addr(BASE_USDC));const aToken=addr(aTokenRaw);const aaveRaw=await usdc.balanceOf(aToken);let premiumBps=null;try{premiumBps=Number(await new Contract(pool,AAVE_POOL,provider).FLASHLOAN_PREMIUM_TOTAL());}catch{}
+  S.financing={status:"LIVE",lastCheckedAt:now(),morpho:{provider:"MORPHO",asset:"USDC",capacity:formatUnits(morphoRaw,6),flashFeeBps:0,address:addr(MORPHO)},aave:{provider:"AAVE_V3",asset:"USDC",capacity:formatUnits(aaveRaw,6),flashFeeBps:premiumBps,pool,resolvedDynamically:pool.toLowerCase()!==AAVE.poolFallback.toLowerCase()}};S.metrics.financingPassed++;
  }catch(e){S.financing={status:"ERROR",lastCheckedAt:now(),lastError:e.message};}
 }
 
@@ -92,13 +93,13 @@ function readiness(){const feeds=feedHealth();const liveFeeds=Object.values(feed
 function common(){const r=readiness();return {success:true,version:VERSION,process:S.status,tradingReadiness:r.tradingReadiness,gates:r.gates,readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false};}
 
 function register(app){
- app.get("/api/global/start",(req,res)=>{start();res.json({...common(),statusRoute:"/api/system/health"});});
+ app.get("/api/global/start",(req,res)=>{const alreadyRunning=S.status==="RUNNING";start();res.json({...common(),startResult:alreadyRunning?"ALREADY_RUNNING":"STARTED_BACKGROUND",requestComplete:true,statusRoute:"/api/system/health",note:"Workers continue asynchronously; this HTTP request is complete."});});
  app.get("/api/global/stop",(req,res)=>{stop();res.json(common());});
  app.get("/api/system/health",(req,res)=>res.json({...common(),lastReferencePollAt:S.lastReferencePollAt,lastReconcileAt:S.lastReconcileAt,lastBaseBlock:S.lastBaseBlock,lastBaseBlockAt:S.lastBaseBlockAt,lastError:S.lastError}));
  app.get("/api/reference/status",(req,res)=>res.json({...common(),feeds:feedHealth(),consensus:S.reference}));
  app.get("/api/assets/status",(req,res)=>res.json({...common(),registry,identityPolicy:"CHAIN_ID_PLUS_ADDRESS; symbols are display metadata only",equivalencePolicy:"WRAPPED_NATIVE_DIRECT_ONLY_IN_4.71.0"}));
  app.get("/api/market/base/status",(req,res)=>res.json({...common(),chainId:BASE_CHAIN_ID,blockNumber:S.lastBaseBlock,lastBlockAt:S.lastBaseBlockAt,blockAgeMs:age(S.lastBaseBlockAt),stateVersion:`base:${S.lastBaseBlock||"unknown"}`}));
- app.get("/api/coverage/status",(req,res)=>res.json({...common(),referenceFeeds:{configured:3,live:Object.values(feedHealth()).filter(x=>x.status==="LIVE").length},chains:{configured:1,live:age(S.lastBaseBlockAt)!=null&&age(S.lastBaseBlockAt)<30000?1:0},aggregator:{name:"1inch",chainId:BASE_CHAIN_ID,configured:Boolean(ONEINCH_KEY),...S.aggregator},directCandidateEngine4700Preserved:true}));
+ app.get("/api/coverage/status",(req,res)=>res.json({...common(),referenceFeeds:{configured:3,live:Object.values(feedHealth()).filter(x=>x.status==="LIVE").length},chains:{configured:1,live:age(S.lastBaseBlockAt)!=null&&age(S.lastBaseBlockAt)<30000?1:0},aggregator:{name:"1inch",chainId:BASE_CHAIN_ID,configured:Boolean(ONEINCH_KEY),requiredEnvironmentVariable:"ONEINCH_API_KEY",credentialEmbedded:false,...S.aggregator},directCandidateEngine4700Preserved:true}));
  app.get("/api/candidates/status",(req,res)=>res.json({...common(),metrics:S.metrics,rejections:S.rejections,candidateCount:S.candidates.length,qualifiedCount:S.qualified.length,candidates:S.candidates.slice(0,20)}));
  app.get("/api/candidates/qualified",(req,res)=>res.json({...common(),policy:{minimumExecutableSpreadPct:MIN_SPREAD_PCT,minimumNetProfitUsd:MIN_NET_USD,maxRisk:"MEDIUM",firmValidationRequired:true,simulationRequired:true},count:S.qualified.length,candidates:S.qualified}));
  app.get("/api/financing/status",async(req,res)=>{if(req.query.refresh==="1")await refreshFinancing();res.json({...common(),financing:S.financing,policy:{walletDoesNotCapDiscovery:true,optimalSizeBeforeFinancing:true,morphoZeroFeeModeled:true,aavePremiumReadLive:true}});});
