@@ -26,15 +26,24 @@ const PORT = process.env.PORT || 3000;
 const ZEROX_API_KEY = process.env.ZEROX_API_KEY || "";
 
 const RPC_URLS = {
-  base: process.env.BASE_RPC_URL || "",
+  ethereum: process.env.ETHEREUM_RPC_URL || "",
   arbitrum: process.env.ARBITRUM_RPC_URL || "",
   optimism: process.env.OPTIMISM_RPC_URL || "",
+  base: process.env.BASE_RPC_URL || "",
   polygon: process.env.POLYGON_RPC_URL || "",
-  ethereum: process.env.ETHEREUM_RPC_URL || "",
-  bnb: process.env.BNB_RPC_URL || ""
+  bnb: process.env.BNB_RPC_URL || process.env.BSC_RPC_URL || "",
+  avalanche: process.env.AVALANCHE_RPC_URL || "",
+  linea: process.env.LINEA_RPC_URL || "",
+  scroll: process.env.SCROLL_RPC_URL || "",
+  mantle: process.env.MANTLE_RPC_URL || "",
+  zksync: process.env.ZKSYNC_RPC_URL || "",
+  gnosis: process.env.GNOSIS_RPC_URL || "",
+  metis: process.env.METIS_RPC_URL || "",
+  sonic: process.env.SONIC_RPC_URL || "",
+  celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.45.0";
+const VERSION = "4.46.0";
 
 /*
 =========================================================
@@ -7179,11 +7188,59 @@ const runMarketLiquidityDiagnostic4450=async(req,res)=>{
  }catch(e){return res.status(500).json({success:false,version:VERSION,classification:"MARKET_LIQUIDITY_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt});}finally{marketLiquidityDiagnostic4450Active=false;}
 };
 app.get("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
+
+/*
+=========================================================
+ARBIFLOW 4.46 MULTI-MARKET FOUNDATION - READ ONLY
+
+Registry only. No CEX credentials, approvals, signatures,
+swaps, transactions, or mainnet execution are performed.
+=========================================================
+*/
+const MULTIMARKET_CHAINS_4460 = [
+  {key:"ethereum",name:"Ethereum",chainId:1,env:"ETHEREUM_RPC_URL"},
+  {key:"arbitrum",name:"Arbitrum",chainId:42161,env:"ARBITRUM_RPC_URL"},
+  {key:"optimism",name:"Optimism",chainId:10,env:"OPTIMISM_RPC_URL"},
+  {key:"base",name:"Base",chainId:8453,env:"BASE_RPC_URL"},
+  {key:"polygon",name:"Polygon",chainId:137,env:"POLYGON_RPC_URL"},
+  {key:"bnb",name:"BNB Smart Chain",chainId:56,env:"BNB_RPC_URL/BSC_RPC_URL"},
+  {key:"avalanche",name:"Avalanche",chainId:43114,env:"AVALANCHE_RPC_URL"},
+  {key:"linea",name:"Linea",chainId:59144,env:"LINEA_RPC_URL"},
+  {key:"scroll",name:"Scroll",chainId:534352,env:"SCROLL_RPC_URL"},
+  {key:"mantle",name:"Mantle",chainId:5000,env:"MANTLE_RPC_URL"},
+  {key:"zksync",name:"zkSync Era",chainId:324,env:"ZKSYNC_RPC_URL"},
+  {key:"gnosis",name:"Gnosis",chainId:100,env:"GNOSIS_RPC_URL"},
+  {key:"metis",name:"Metis",chainId:1088,env:"METIS_RPC_URL"},
+  {key:"sonic",name:"Sonic",chainId:146,env:"SONIC_RPC_URL"},
+  {key:"celo",name:"Celo",chainId:42220,env:"CELO_RPC_URL"}
+];
+const MULTIMARKET_CEX_4460 = ["Binance","Coinbase","Kraken","KuCoin","Bybit","OKX","Gate.io","HTX","Bitfinex","Gemini","Bitstamp","MEXC"];
+const MULTIMARKET_DEX_FAMILIES_4460 = ["Uniswap","SushiSwap","Curve","Balancer","PancakeSwap","Camelot","Trader Joe"];
+
+async function multiMarketFoundationDiagnostic4460(){
+  const startedAt=Date.now();
+  const chains=[];
+  for(const c of MULTIMARKET_CHAINS_4460){
+    const rpc=RPC_URLS[c.key]||"";
+    if(!rpc){chains.push({...c,configured:false,reachable:false,chainIdMatch:false,status:"RPC_NOT_CONFIGURED"});continue;}
+    try{
+      const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+      const result=await Promise.race([Promise.all([provider.getNetwork(),provider.getBlockNumber()]),new Promise((_,reject)=>setTimeout(()=>reject(new Error("RPC_TIMEOUT_6000MS")),6000))]);
+      const actualChainId=Number(result[0].chainId);
+      chains.push({...c,configured:true,reachable:true,actualChainId,latestBlock:result[1],chainIdMatch:actualChainId===c.chainId,status:actualChainId===c.chainId?"READY":"CHAIN_ID_MISMATCH"});
+    }catch(e){chains.push({...c,configured:true,reachable:false,chainIdMatch:false,status:"RPC_UNREACHABLE",error:e?.message||String(e)});}
+  }
+  const configured=chains.filter(x=>x.configured).length;
+  const ready=chains.filter(x=>x.status==="READY").length;
+  return {success:true,version:VERSION,classification:"MULTI_MARKET_FOUNDATION_DIAGNOSTIC_COMPLETE",architecture:"READ_ONLY_CHAIN_AND_VENUE_REGISTRY",coverage:{chainsTargeted:chains.length,chainsConfigured:configured,chainsReady:ready,cexRegistryCount:MULTIMARKET_CEX_4460.length,dexFamilyRegistryCount:MULTIMARKET_DEX_FAMILIES_4460.length},chains,centralizedExchangeRegistry:MULTIMARKET_CEX_4460.map(name=>({name,marketDataMode:"PUBLIC_READ_ONLY_PLANNED",executionEnabled:false})),dexFamilyRegistry:MULTIMARKET_DEX_FAMILIES_4460.map(name=>({name,poolDiscoveryMode:"ADAPTER_PLANNED",executionEnabled:false})),strategyModules:{baseMorphoLiquidations:"PRESERVED",dexToDex:"PLANNED",triangularMultiHop:"PLANNED",cexToDex:"PLANNED",crossChainInventory:"PLANNED"},readOnly:true,privateKeysRequired:false,cexApiKeysRequired:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+}
+
+app.get("/api/diagnostics/multimarket/foundation", async (req,res)=>res.json(await multiMarketFoundationDiagnostic4460()));
 app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic4450);
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.45.0_MARKET_LIQUIDITY_DIAGNOSTIC",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.46.0_MULTI_MARKET_FOUNDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
