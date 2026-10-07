@@ -1,0 +1,7 @@
+ArbiFlow 4.73.1 — Global Coverage Route Corrective
+
+- Fix /api/global-coverage/status Internal Server Error caused by an undefined globalState4710 reference.
+- Read measured CEX feed state from the registered GlobalDiscrepancy module export.
+- Preserve 4.72.1 bounded discovery and 4.73.0 coverage architecture.
+- Preserve fail-closed gas qualification and read-only execution safety.
+- No mainnet execution or funds movement enabled.

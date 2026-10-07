@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.73.0";
+const VERSION = "4.73.1";
 
 /*
 =========================================================
@@ -9108,7 +9108,8 @@ reference, normalization, Base, aggregator, financing, candidate and
 validator health surfaces. Read-only; no mainnet execution.
 =========================================================
 */
-require("./GlobalDiscrepancy4710").register(app);
+const globalDiscrepancy4710 = require("./GlobalDiscrepancy4710");
+globalDiscrepancy4710.register(app);
 // 4.72 broad discovery starts independently; failures cannot block the web process.
 startBroadDiscovery4720();
 
@@ -9134,7 +9135,7 @@ app.listen(
   }
 );
 
-// === ArbiFlow 4.73.0 Global Coverage Architecture Layer ===
+// === ArbiFlow 4.73.1 Global Coverage Architecture Layer ===
 const COVERAGE4730 = {
   target: { majorCexFeeds: 15, dexLiquiditySources: 500, tier1Chains: 15 },
   cexAdapters: [
@@ -9164,8 +9165,11 @@ const COVERAGE4730 = {
 function coverage4730Summary(){
   const liveChains=COVERAGE4730.chains.filter(x=>x.state==="LIVE_DISCOVERY").length;
   const readyChains=COVERAGE4730.chains.filter(x=>x.state.includes("READY")).length;
-  const ref=(typeof global4710!=="undefined"&&global4710&&global4710.reference)?global4710.reference:null;
-  return {success:true,version:VERSION,architecture:"GLOBAL_COVERAGE_LAYER_MEASURED_NOT_MARKETING_CLAIMS",target:COVERAGE4730.target,measured:{liveDiscoveryChains:liveChains,adapterReadyChains:readyChains,directDexAdapters:COVERAGE4730.liquidityArchitecture.directBaseAdapters.length,aggregatorAdapters:COVERAGE4730.liquidityArchitecture.aggregatorAdapters.length,configuredCexFeeds:(globalState4710?.referenceFeeds?.configured??3),liveCexFeeds:(globalState4710?.referenceFeeds?.live??2)},cexAdapters:COVERAGE4730.cexAdapters.map((name,i)=>({name,state:i<3?"LEGACY_REFERENCE_SLOT":"REGISTERED_NOT_LIVE"})),chains:COVERAGE4730.chains,liquidityArchitecture:COVERAGE4730.liquidityArchitecture,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+  const gs=globalDiscrepancy4710._state || {};
+  const feeds=gs.feeds || {};
+  const configuredCexFeeds=Object.keys(feeds).length;
+  const liveCexFeeds=Object.values(feeds).filter(f=>f && f.status==="LIVE").length;
+  return {success:true,version:VERSION,architecture:"GLOBAL_COVERAGE_LAYER_MEASURED_NOT_MARKETING_CLAIMS",target:COVERAGE4730.target,measured:{liveDiscoveryChains:liveChains,adapterReadyChains:readyChains,directDexAdapters:COVERAGE4730.liquidityArchitecture.directBaseAdapters.length,aggregatorAdapters:COVERAGE4730.liquidityArchitecture.aggregatorAdapters.length,configuredCexFeeds,liveCexFeeds},cexAdapters:COVERAGE4730.cexAdapters.map((name,i)=>({name,state:i<3?"LEGACY_REFERENCE_SLOT":"REGISTERED_NOT_LIVE"})),chains:COVERAGE4730.chains,liquidityArchitecture:COVERAGE4730.liquidityArchitecture,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary()));
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
