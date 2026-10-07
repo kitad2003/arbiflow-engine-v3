@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.50.0";
+const VERSION = "4.50.1";
 
 /*
 =========================================================
@@ -7257,28 +7257,42 @@ const UNISWAP_V3_DISCOVERY_4470 = {
 };
 const UNISWAP_V3_POOL_READ_ABI_4470=["function liquidity() view returns (uint128)","function token0() view returns (address)","function token1() view returns (address)","function fee() view returns (uint24)"];
 function pairCombos4470(tokens){const e=Object.entries(tokens),out=[];for(let i=0;i<e.length;i++)for(let j=i+1;j<e.length;j++)out.push([e[i],e[j]]);return out;}
+async function withTimeout4501(promise,ms,label){
+ let timer; try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label}_TIMEOUT_${ms}MS`)),ms);})]);}finally{if(timer)clearTimeout(timer);}
+}
+async function mapLimit4501(items,limit,fn){
+ const out=new Array(items.length); let next=0;
+ async function worker(){while(true){const i=next++;if(i>=items.length)return;try{out[i]=await fn(items[i],i);}catch(e){out[i]={__error:e};}}}
+ await Promise.all(Array.from({length:Math.min(limit,items.length)},()=>worker())); return out;
+}
 async function discoverUniswapV3Pools4470(){
- const startedAt=Date.now(),chains=[]; let poolsDiscovered=0,poolsWithLiquidity=0,queries=0;
- for(const chain of MULTIMARKET_CHAINS_4460){
+ const startedAt=Date.now();
+ const chainResults=await mapLimit4501(MULTIMARKET_CHAINS_4460,6,async chain=>{
   const cfg=UNISWAP_V3_DISCOVERY_4470[chain.key],rpc=RPC_URLS[chain.key]||"";
-  if(!cfg){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"ADAPTER_NOT_YET_CONFIGURED",pools:[]});continue;}
-  if(!rpc){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"RPC_NOT_CONFIGURED",factory:cfg.factory,pools:[]});continue;}
+  if(!cfg)return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"ADAPTER_NOT_YET_CONFIGURED",pools:[],queries:0};
+  if(!rpc)return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"RPC_NOT_CONFIGURED",factory:cfg.factory,pools:[],queries:0};
   try{
-   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false}); const net=await provider.getNetwork();
-   if(Number(net.chainId)!==chain.chainId){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"CHAIN_ID_MISMATCH",actualChainId:Number(net.chainId),factory:cfg.factory,pools:[]});continue;}
-   const code=await provider.getCode(cfg.factory); if(!code||code==="0x"){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"FACTORY_NOT_DEPLOYED",factory:cfg.factory,pools:[]});continue;}
-   const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider),pools=[];
-   for(const [[symA,tokenA],[symB,tokenB]] of pairCombos4470(cfg.tokens)) for(const fee of [100,500,3000,10000]){
-    const tokenANormalized=String(tokenA).toLowerCase(), tokenBNormalized=String(tokenB).toLowerCase();
-    queries++; try{const pool=await factory.getPool(tokenANormalized,tokenBNormalized,fee); if(pool&&pool!=="0x0000000000000000000000000000000000000000"){
-      const pc=new Contract(pool,UNISWAP_V3_POOL_READ_ABI_4470,provider); let liquidity=null; try{liquidity=(await pc.liquidity()).toString();}catch{}
-      pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,tokenA,tokenB,feeTier:fee,pool,liquidityRaw:liquidity,hasLiquidity:liquidity!==null&&BigInt(liquidity)>0n,readOnly:true}); poolsDiscovered++; if(liquidity!==null&&BigInt(liquidity)>0n)poolsWithLiquidity++;
-    }}catch(e){pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,feeTier:fee,status:"POOL_QUERY_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true});}
-   }
-   chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCANNED",factory:cfg.factory,factoryCodeBytes:(code.length-2)/2,tokenUniverse:Object.keys(cfg.tokens),pairUniverse:pairCombos4470(cfg.tokens).map(x=>`${x[0][0]}/${x[1][0]}`),pools});
-  }catch(e){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCAN_FAILED",factory:cfg.factory,error:e?.message||String(e),pools:[]});}
- }
- return {success:true,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_COMPLETE",architecture:"MULTI_CHAIN_ONCHAIN_FACTORY_READS",adapter:"UNISWAP_V3_FACTORY",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsWithAdapter:Object.keys(UNISWAP_V3_DISCOVERY_4470).length,chainsScanned:chains.filter(x=>x.status==="SCANNED").length,tokensConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+Object.keys(x.tokens).length,0),pairUniverseConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+pairCombos4470(x.tokens).length,0),poolQueries:queries,poolsDiscovered,poolsWithNonzeroLiquidity:poolsWithLiquidity},chains,readOnly:true,quoteExecutionPerformed:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+   const [net,code]=await withTimeout4501(Promise.all([provider.getNetwork(),provider.getCode(cfg.factory)]),8000,`${chain.key}_FACTORY`);
+   if(Number(net.chainId)!==chain.chainId)return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"CHAIN_ID_MISMATCH",actualChainId:Number(net.chainId),factory:cfg.factory,pools:[],queries:0};
+   if(!code||code==="0x")return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"FACTORY_NOT_DEPLOYED",factory:cfg.factory,pools:[],queries:0};
+   const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider);
+   const jobs=[]; for(const [[symA,tokenA],[symB,tokenB]] of pairCombos4470(cfg.tokens))for(const fee of [100,500,3000,10000])jobs.push({symA,tokenA,symB,tokenB,fee});
+   const rows=await mapLimit4501(jobs,12,async j=>{
+    try{
+     const pool=await withTimeout4501(factory.getPool(String(j.tokenA).toLowerCase(),String(j.tokenB).toLowerCase(),j.fee),6000,`${chain.key}_GET_POOL`);
+     if(!pool||pool==="0x0000000000000000000000000000000000000000")return null;
+     const pc=new Contract(pool,UNISWAP_V3_POOL_READ_ABI_4470,provider); let liquidity=null;
+     try{liquidity=(await withTimeout4501(pc.liquidity(),6000,`${chain.key}_LIQUIDITY`)).toString();}catch{}
+     return {dex:chain.key==="bnb"?"PancakeSwap V3":"Uniswap V3",pair:`${j.symA}/${j.symB}`,tokenA:j.tokenA,tokenB:j.tokenB,feeTier:j.fee,pool,liquidityRaw:liquidity,hasLiquidity:liquidity!==null&&BigInt(liquidity)>0n,readOnly:true};
+    }catch(e){return {dex:chain.key==="bnb"?"PancakeSwap V3":"Uniswap V3",pair:`${j.symA}/${j.symB}`,feeTier:j.fee,status:"POOL_QUERY_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true};}
+   });
+   return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCANNED",factory:cfg.factory,factoryCodeBytes:(code.length-2)/2,tokenUniverse:Object.keys(cfg.tokens),pairUniverse:pairCombos4470(cfg.tokens).map(x=>`${x[0][0]}/${x[1][0]}`),pools:rows.filter(Boolean),queries:jobs.length};
+  }catch(e){return {key:chain.key,name:chain.name,chainId:chain.chainId,status:"SCAN_FAILED",factory:cfg.factory,error:e?.message||String(e),pools:[],queries:0};}
+ });
+ const chains=chainResults.map(x=>x?.__error?{status:"SCAN_FAILED",error:x.__error.message,pools:[],queries:0}:x);
+ const pools=chains.flatMap(x=>x.pools||[]); const valid=pools.filter(x=>x.pool);
+ return {success:true,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_COMPLETE",architecture:"MULTI_CHAIN_BOUNDED_CONCURRENT_ONCHAIN_FACTORY_READS",adapter:"V3_FACTORY_FAMILY",coverage:{chainsTargeted:MULTIMARKET_CHAINS_4460.length,chainsWithAdapter:Object.keys(UNISWAP_V3_DISCOVERY_4470).length,chainsScanned:chains.filter(x=>x.status==="SCANNED").length,tokensConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+Object.keys(x.tokens).length,0),pairUniverseConfigured:Object.values(UNISWAP_V3_DISCOVERY_4470).reduce((n,x)=>n+pairCombos4470(x.tokens).length,0),poolQueries:chains.reduce((n,x)=>n+(x.queries||0),0),poolsDiscovered:valid.length,poolsWithNonzeroLiquidity:valid.filter(x=>x.hasLiquidity).length},performance:{boundedConcurrency:true,chainConcurrency:6,poolQueryConcurrencyPerChain:12,rpcTimeoutMs:6000},chains,readOnly:true,quoteExecutionPerformed:false,approvalPerformed:false,signaturePerformed:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/dex-pools",async(req,res)=>{try{res.json(await discoverUniswapV3Pools4470());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"REAL_DEX_POOL_DISCOVERY_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7371,9 +7385,11 @@ const UNISWAP_V3_QUOTER_V1_4490 = {
   arbitrum:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
   optimism:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
   base:"0x222ca98f00ed15b1fae10b61c277703a194cf5d2",
-  polygon:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+  polygon:"0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+  bnb:"0x78D78E420Da98ad378D7799bE8f4AF69033EB077"
 };
 const QUOTER_V1_ABI_4490=["function quoteExactInputSingle(address tokenIn,address tokenOut,uint24 fee,uint256 amountIn,uint160 sqrtPriceLimitX96) returns (uint256 amountOut)"];
+const QUOTER_V2_ABI_4501=["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"];
 const ERC20_META_BALANCE_ABI_4490=["function decimals() view returns(uint8)","function balanceOf(address) view returns(uint256)"];
 const DEFAULT_SIZES_USD_4490=[100,250,500,1000,2500,5000,10000,25000,50000];
 const MIN_ROUND_TRIP_RETENTION_4491=0.90;
@@ -7381,9 +7397,14 @@ const SATURATION_MIN_INPUT_MULTIPLE_4491=2;
 const SATURATION_MIN_OUTPUT_GROWTH_4491=0.05;
 const ROUND_TRIP_GAS_UNITS_4490=260000n;
 function tokenAddress4490(chainKey,symbol){const a=UNISWAP_V3_DISCOVERY_4470[chainKey]?.tokens?.[symbol]||null; return a?String(a).toLowerCase():null;}
-async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amountIn){
+async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amountIn,chainKey=null){
+ if(chainKey==="bnb"){
+  const q=new Contract(quoterAddress,QUOTER_V2_ABI_4501,provider);
+  const out=await withTimeout4501(q.quoteExactInputSingle.staticCall({tokenIn:String(tokenIn).toLowerCase(),tokenOut:String(tokenOut).toLowerCase(),amountIn,fee:Number(fee),sqrtPriceLimitX96:0}),7000,"BNB_QUOTER_V2");
+  return BigInt((out.amountOut??out[0]).toString());
+ }
  const q=new Contract(quoterAddress,QUOTER_V1_ABI_4490,provider);
- const out=await q.quoteExactInputSingle.staticCall(String(tokenIn).toLowerCase(),String(tokenOut).toLowerCase(),Number(fee),amountIn,0);
+ const out=await withTimeout4501(q.quoteExactInputSingle.staticCall(String(tokenIn).toLowerCase(),String(tokenOut).toLowerCase(),Number(fee),amountIn,0),7000,"V3_QUOTER");
  return BigInt(out.toString());
 }
 function stableLike4490(sym){return ["USDC","USDT","USDbC"].includes(sym);}
@@ -7403,21 +7424,27 @@ async function exactTradeSizeDiagnostic4490(){
  const discoveryTelemetry={
    spotObservationsFound:spotObservations.length,
    spotCandidatesFound:positive.length,
+   candidatesAttempted:0,
    candidatesDepthTested:0,
    candidatesRejectedForDepth:0,
    candidatesRejectedForSaturation:0,
    candidatesExactQuoted:0,
+   candidatesAdapterNotConfigured:0,
+   candidatesTokenMappingMissing:0,
+   candidatesQuoterUnavailable:0,
+   candidatesQuoteFailed:0,
    candidatesWithPositiveEstimatedNet:0,
    profitableCandidates:0
  };
  for(const edge of positive){
+  discoveryTelemetry.candidatesAttempted++;
   const cfg=UNISWAP_V3_DISCOVERY_4470[edge.chainKey],rpc=RPC_URLS[edge.chainKey]||"",quoter=UNISWAP_V3_QUOTER_V1_4490[edge.chainKey];
-  if(!cfg||!rpc||!quoter){results.push({...edge,classification:"EXACT_QUOTE_ADAPTER_NOT_CONFIGURED",exactQuoteConfirmed:false});continue;}
+  if(!cfg||!rpc||!quoter){discoveryTelemetry.candidatesAdapterNotConfigured++;results.push({...edge,classification:"EXACT_QUOTE_ADAPTER_NOT_CONFIGURED",exactQuoteConfirmed:false});continue;}
   const [assetA,assetB]=String(edge.pair).split("/"); const tokenA=tokenAddress4490(edge.chainKey,assetA),tokenB=tokenAddress4490(edge.chainKey,assetB);
-  if(!tokenA||!tokenB){results.push({...edge,classification:"PAIR_TOKEN_MAPPING_MISSING",exactQuoteConfirmed:false});continue;}
+  if(!tokenA||!tokenB){discoveryTelemetry.candidatesTokenMappingMissing++;results.push({...edge,classification:"PAIR_TOKEN_MAPPING_MISSING",exactQuoteConfirmed:false});continue;}
   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
   try{
-   const code=await provider.getCode(quoter); if(!code||code==="0x"){results.push({...edge,classification:"QUOTER_NOT_DEPLOYED",quoter,exactQuoteConfirmed:false});continue;}
+   const code=await provider.getCode(quoter); if(!code||code==="0x"){discoveryTelemetry.candidatesQuoterUnavailable++;results.push({...edge,classification:"QUOTER_NOT_DEPLOYED",quoter,exactQuoteConfirmed:false});continue;}
    const dB=Number(await new Contract(String(tokenB).toLowerCase(),ERC20_META_BALANCE_ABI_4490,provider).decimals());
    const feeData=await provider.getFeeData(); const gasPrice=feeData.gasPrice||feeData.maxFeePerGas||0n;
    // Convert native gas to USD from the chain's WETH/stable spot when available.
@@ -7429,8 +7456,8 @@ async function exactTradeSizeDiagnostic4490(){
     if(!stableLike4490(assetB))continue;
     try{
      const amountIn=parseUnits(String(usd),dB);
-     const acquiredA=await quoteV3Single4490(provider,quoter,tokenB,tokenA,edge.buyFeeTier,amountIn);
-     const finalB=await quoteV3Single4490(provider,quoter,tokenA,tokenB,edge.sellFeeTier,acquiredA);
+     const acquiredA=await quoteV3Single4490(provider,quoter,tokenB,tokenA,edge.buyFeeTier,amountIn,edge.chainKey);
+     const finalB=await quoteV3Single4490(provider,quoter,tokenA,tokenB,edge.sellFeeTier,acquiredA,edge.chainKey);
      const finalUnits=Number(formatUnits(finalB,dB)),grossNet=finalUnits-usd,gasUsd=modeledGasUsd??0,netOwn=grossNet-gasUsd;
      const roundTripRetention=usd>0?finalUnits/usd:0;
      const catastrophicDepthImpact=roundTripRetention<MIN_ROUND_TRIP_RETENTION_4491;
@@ -7454,16 +7481,19 @@ async function exactTradeSizeDiagnostic4490(){
    discoveryTelemetry.candidatesDepthTested += sizes.some(x=>x.exactDexQuoteConfirmed)?1:0;
    if(depthRejected) discoveryTelemetry.candidatesRejectedForDepth++;
    if(saturationStopped) discoveryTelemetry.candidatesRejectedForSaturation++;
-   const valid=sizes.filter(x=>x.exactDexQuoteConfirmed&&x.estimatedNetOwnCapitalUsd!==null&&!x.catastrophicDepthImpact);
+   const successfulQuotes=sizes.filter(x=>x.exactDexQuoteConfirmed);
+   const failedQuotes=sizes.filter(x=>x.exactDexQuoteConfirmed===false);
+   if(!successfulQuotes.length&&failedQuotes.length) discoveryTelemetry.candidatesQuoteFailed++;
+   const valid=successfulQuotes.filter(x=>x.estimatedNetOwnCapitalUsd!==null&&!x.catastrophicDepthImpact);
    if(valid.length) discoveryTelemetry.candidatesExactQuoted++;
    if(valid.some(x=>x.estimatedNetOwnCapitalUsd>0)) discoveryTelemetry.candidatesWithPositiveEstimatedNet++;
    if(valid.some(x=>x.estimatedNetOwnCapitalUsd>=15)) discoveryTelemetry.profitableCandidates++;
    const best=[...valid].sort((a,b)=>b.estimatedNetOwnCapitalUsd-a.estimatedNetOwnCapitalUsd)[0]||null;
-   const classification=depthRejected?"REJECTED_INSUFFICIENT_EXECUTABLE_DEPTH":saturationStopped?"REJECTED_QUOTE_OUTPUT_SATURATION":best&&best.estimatedNetOwnCapitalUsd>=15?"ESTIMATED_NET_POSITIVE_AFTER_MODELED_GAS":"NO_ESTIMATED_NET_PROFIT_AFTER_MODELED_GAS";
+   const classification=depthRejected?"REJECTED_INSUFFICIENT_EXECUTABLE_DEPTH":saturationStopped?"REJECTED_QUOTE_OUTPUT_SATURATION":(!successfulQuotes.length&&failedQuotes.length)?"QUOTE_FAILED":best&&best.estimatedNetOwnCapitalUsd>=15?"ESTIMATED_NET_POSITIVE_AFTER_MODELED_GAS":"NO_ESTIMATED_NET_PROFIT_AFTER_MODELED_GAS";
    results.push({...edge,quoter,quoteMethod:"UNISWAP_V3_QUOTER_EXACT_INPUT_ROUND_TRIP",depthGate:{minimumRoundTripRetentionPct:MIN_ROUND_TRIP_RETENTION_4491*100,stopOnCatastrophicDepthImpact:true,stopOnOutputSaturation:true},sizes,bestOwnCapitalSize:best,classification,exactQuoteConfirmed:valid.length>0,readOnly:true});
-  }catch(e){results.push({...edge,classification:"EXACT_SIZE_DIAGNOSTIC_FAILED",error:e?.shortMessage||e?.message||String(e),exactQuoteConfirmed:false,readOnly:true});}
+  }catch(e){discoveryTelemetry.candidatesQuoteFailed++;results.push({...edge,classification:"EXACT_SIZE_DIAGNOSTIC_FAILED",error:e?.shortMessage||e?.message||String(e),exactQuoteConfirmed:false,readOnly:true});}
  }
- return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"EXACT_UNISWAP_V3_ROUND_TRIP_QUOTES_PLUS_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+ return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"BOUNDED_CONCURRENT_V3_DISCOVERY_PLUS_EXACT_ROUND_TRIP_QUOTES_AND_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/exact-size-funding",async(req,res)=>{try{res.json(await exactTradeSizeDiagnostic4490());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7471,7 +7501,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.50.0_EXPANDED_ONCHAIN_PAIR_UNIVERSE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.50.1_CONCURRENT_DISCOVERY_QUOTE_TELEMETRY",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7480,7 +7510,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.50.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.50.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
