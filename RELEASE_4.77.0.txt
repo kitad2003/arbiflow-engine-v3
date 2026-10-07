@@ -1,0 +1,7 @@
+4.77.0 conservative quote-budget correction
+- Shared process-wide 1inch discovery quote pacing (1 request / 1.5s) and Retry-After handling.
+- 60s reconciliation; single $500 screening notional, NOT capital or flash-loan ceiling.
+- Reference threshold now actually skips unnecessary reverse quotes.
+- Provider availability no longer counted as verified flash financing.
+- Independent DEX comparisons, optimized flash loan sizing and atomic simulation are NOT implemented by this corrective release. Execution remains disabled.
+- 4.75 heartbeat probes still independently poll 1inch; their calls are not covered by the new discovery scheduler.
