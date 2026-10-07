@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.47.0";
+const VERSION = "4.47.1";
 
 /*
 =========================================================
@@ -7269,7 +7269,8 @@ async function discoverUniswapV3Pools4470(){
    const code=await provider.getCode(cfg.factory); if(!code||code==="0x"){chains.push({key:chain.key,name:chain.name,chainId:chain.chainId,status:"FACTORY_NOT_DEPLOYED",factory:cfg.factory,pools:[]});continue;}
    const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider),pools=[];
    for(const [[symA,tokenA],[symB,tokenB]] of pairCombos4470(cfg.tokens)) for(const fee of [100,500,3000,10000]){
-    queries++; try{const pool=await factory.getPool(tokenA,tokenB,fee); if(pool&&pool!=="0x0000000000000000000000000000000000000000"){
+    const tokenANormalized=String(tokenA).toLowerCase(), tokenBNormalized=String(tokenB).toLowerCase();
+    queries++; try{const pool=await factory.getPool(tokenANormalized,tokenBNormalized,fee); if(pool&&pool!=="0x0000000000000000000000000000000000000000"){
       const pc=new Contract(pool,UNISWAP_V3_POOL_READ_ABI_4470,provider); let liquidity=null; try{liquidity=(await pc.liquidity()).toString();}catch{}
       pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,tokenA,tokenB,feeTier:fee,pool,liquidityRaw:liquidity,hasLiquidity:liquidity!==null&&BigInt(liquidity)>0n,readOnly:true}); poolsDiscovered++; if(liquidity!==null&&BigInt(liquidity)>0n)poolsWithLiquidity++;
     }}catch(e){pools.push({dex:"Uniswap V3",pair:`${symA}/${symB}`,feeTier:fee,status:"POOL_QUERY_FAILED",error:e?.shortMessage||e?.message||String(e),readOnly:true});}
@@ -7285,7 +7286,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.47.0_MULTI_MARKET_FOUNDATION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.47.1_DEX_ADDRESS_NORMALIZATION_FIX",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7294,7 +7295,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.47.0] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.47.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
