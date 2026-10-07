@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.50.2";
+const VERSION = "4.51.0";
 
 /*
 =========================================================
@@ -7408,6 +7408,28 @@ async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amo
  return BigInt(out.toString());
 }
 function stableLike4490(sym){return ["USDC","USDT","USDbC"].includes(sym);}
+function usdReference4510(spread,chainKey,symbol){
+ if(stableLike4490(symbol))return {usdPerToken:1,source:"USD_LIKE_1_TO_1",referencePair:symbol};
+ const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey]; const target=tokenAddress4490(chainKey,symbol);
+ if(!cfg||!target)return null;
+ const stableSymbols=["USDC","USDT","USDbC"].filter(x=>cfg.tokens?.[x]);
+ const chain=(spread.chains||[]).find(x=>x.key===chainKey); if(!chain)return null;
+ const samples=[];
+ for(const pr of chain.pairs||[])for(const pool of pr.pools||[]){
+  const r=Number(pool.token1PerToken0); if(!Number.isFinite(r)||r<=0)continue;
+  const t0=String(pool.token0||"").toLowerCase(),t1=String(pool.token1||"").toLowerCase();
+  for(const st of stableSymbols){
+   const stable=tokenAddress4490(chainKey,st); if(!stable)continue;
+   let px=null;
+   if(t0===target&&t1===stable)px=r; else if(t1===target&&t0===stable)px=1/r;
+   if(px&&Number.isFinite(px)&&px>0)samples.push({px,fee:Number(pool.feeTier||999999),pair:pr.pair,pool:pool.pool,stable:st});
+  }
+ }
+ if(!samples.length)return null;
+ samples.sort((a,b)=>a.fee-b.fee); const best=samples[0];
+ return {usdPerToken:best.px,source:"ONCHAIN_V3_STABLE_REFERENCE",referencePair:best.pair,referencePool:best.pool,referenceStable:best.stable,referenceFeeTier:best.fee};
+}
+
 async function baseFunding4490(provider,asset,decimals){
  try{
   const token=new Contract(asset,ERC20_READ_ABI,provider), pool=new Contract(AAVE_V3_BASE.pool,AAVE_POOL_ABI,provider), dp=new Contract(AAVE_V3_BASE.protocolDataProvider,AAVE_DATA_PROVIDER_ABI,provider);
@@ -7432,6 +7454,8 @@ async function exactTradeSizeDiagnostic4490(){
    candidatesAdapterNotConfigured:0,
    candidatesTokenMappingMissing:0,
    candidatesNoUsdInputMapping:0,
+   candidatesUsdNormalized:0,
+   candidatesUsdReferenceMissing:0,
    candidatesQuoterUnavailable:0,
    candidatesQuoteFailed:0,
    candidatesWithPositiveEstimatedNet:0,
@@ -7449,25 +7473,28 @@ async function exactTradeSizeDiagnostic4490(){
   if(!cfg||!rpc||!quoter){discoveryTelemetry.candidatesAdapterNotConfigured++;results.push({...edge,classification:"EXACT_QUOTE_ADAPTER_NOT_CONFIGURED",exactQuoteConfirmed:false});continue;}
   const [assetA,assetB]=String(edge.pair).split("/"); const tokenA=tokenAddress4490(edge.chainKey,assetA),tokenB=tokenAddress4490(edge.chainKey,assetB);
   if(!tokenA||!tokenB){discoveryTelemetry.candidatesTokenMappingMissing++;results.push({...edge,classification:"PAIR_TOKEN_MAPPING_MISSING",exactQuoteConfirmed:false});continue;}
-  if(!stableLike4490(assetB)){discoveryTelemetry.candidatesNoUsdInputMapping++;results.push({...edge,classification:"NO_USD_INPUT_MAPPING",reason:`Exact-size USD diagnostic requires a stable quote/input asset; ${assetB} is not mapped as USD-like.`,exactQuoteConfirmed:false,readOnly:true});continue;}
+  const usdRefB=usdReference4510(spread,edge.chainKey,assetB);
+  if(!usdRefB){discoveryTelemetry.candidatesNoUsdInputMapping++;discoveryTelemetry.candidatesUsdReferenceMissing++;results.push({...edge,classification:"NO_USD_REFERENCE_ROUTE",reason:`No on-chain stable reference route was found for ${assetB}; exact USD sizing was not attempted.`,exactQuoteConfirmed:false,readOnly:true});continue;}
+  if(!stableLike4490(assetB))discoveryTelemetry.candidatesUsdNormalized++;
   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
   try{
    const code=await provider.getCode(quoter); if(!code||code==="0x"){discoveryTelemetry.candidatesQuoterUnavailable++;results.push({...edge,classification:"QUOTER_NOT_DEPLOYED",quoter,exactQuoteConfirmed:false});continue;}
    const dB=Number(await new Contract(String(tokenB).toLowerCase(),ERC20_META_BALANCE_ABI_4490,provider).decimals());
    const feeData=await provider.getFeeData(); const gasPrice=feeData.gasPrice||feeData.maxFeePerGas||0n;
-   // Convert native gas to USD from the chain's WETH/stable spot when available.
-   let nativeUsd=null;
-   for(const c of spread.chains||[])if(c.key===edge.chainKey)for(const pr of c.pairs||[])if(pr.pair===`WETH/${assetB}`){const pp=(pr.pools||[]).find(x=>x.token1PerToken0&&x.token1PerToken0>10);if(pp){nativeUsd=Number(pp.token1PerToken0);break;}}
+   // Convert native gas to USD using the same address-aware stable reference logic.
+   const nativeRef=usdReference4510(spread,edge.chainKey,edge.chainKey==="bnb"?"WBNB":"WETH");
+   const nativeUsd=nativeRef?.usdPerToken||null;
    const gasNative=Number(formatUnits(gasPrice*ROUND_TRIP_GAS_UNITS_4490,18)); const modeledGasUsd=nativeUsd?gasNative*nativeUsd:null;
    const sizes=[]; let depthRejected=false, saturationStopped=false, previousSuccessful=null;
    for(const usd of DEFAULT_SIZES_USD_4490){
-    if(!stableLike4490(assetB))continue;
     try{
-     const amountIn=parseUnits(String(usd),dB);
+     const inputTokenUnits=usd/Number(usdRefB.usdPerToken);
+     if(!Number.isFinite(inputTokenUnits)||inputTokenUnits<=0)throw new Error("INVALID_USD_REFERENCE_PRICE");
+     const amountIn=parseUnits(inputTokenUnits.toFixed(Math.min(dB,12)),dB);
      const acquiredA=await quoteV3Single4490(provider,quoter,tokenB,tokenA,edge.buyFeeTier,amountIn,edge.chainKey);
      const finalB=await quoteV3Single4490(provider,quoter,tokenA,tokenB,edge.sellFeeTier,acquiredA,edge.chainKey);
-     const finalUnits=Number(formatUnits(finalB,dB)),grossNet=finalUnits-usd,gasUsd=modeledGasUsd??0,netOwn=grossNet-gasUsd;
-     const roundTripRetention=usd>0?finalUnits/usd:0;
+     const finalUnits=Number(formatUnits(finalB,dB)),finalUsd=finalUnits*Number(usdRefB.usdPerToken),grossNet=finalUsd-usd,gasUsd=modeledGasUsd??0,netOwn=grossNet-gasUsd;
+     const roundTripRetention=usd>0?finalUsd/usd:0;
      const catastrophicDepthImpact=roundTripRetention<MIN_ROUND_TRIP_RETENTION_4491;
      let saturationDetected=false;
      if(previousSuccessful&&usd>=previousSuccessful.usd*SATURATION_MIN_INPUT_MULTIPLE_4491){
@@ -7478,9 +7505,9 @@ async function exactTradeSizeDiagnostic4490(){
      if(edge.chainKey==="base"){
       const f=await baseFunding4490(provider,tokenB,dB), morphoCap=Number(f.morpho?.availableTokenUnits||0),aaveCap=Number(f.aave?.availableTokenUnits||0),aaveBps=Number(f.aave?.premiumBps||5);
       const morphoNet=grossNet-gasUsd, aavePremium=usd*aaveBps/10000, aaveNet=grossNet-gasUsd-aavePremium;
-      funding={...funding,morphoFlash:{availableUsdApprox:morphoCap,feeBps:0,sizeSupported:morphoCap>=usd,estimatedNetProfitUsd:Number(morphoNet.toFixed(6)),qualifies:morphoCap>=usd&&morphoNet>=15},aaveFlash:{availableUsdApprox:aaveCap,premiumBps:aaveBps,sizeSupported:aaveCap>=usd,estimatedPremiumUsd:Number(aavePremium.toFixed(6)),estimatedNetProfitUsd:Number(aaveNet.toFixed(6)),qualifies:aaveCap>=usd&&aaveNet>=15}};
+      funding={...funding,morphoFlash:{availableUsdApprox:morphoCap*Number(usdRefB.usdPerToken),feeBps:0,sizeSupported:morphoCap*Number(usdRefB.usdPerToken)>=usd,estimatedNetProfitUsd:Number(morphoNet.toFixed(6)),qualifies:morphoCap*Number(usdRefB.usdPerToken)>=usd&&morphoNet>=15},aaveFlash:{availableUsdApprox:aaveCap*Number(usdRefB.usdPerToken),premiumBps:aaveBps,sizeSupported:aaveCap*Number(usdRefB.usdPerToken)>=usd,estimatedPremiumUsd:Number(aavePremium.toFixed(6)),estimatedNetProfitUsd:Number(aaveNet.toFixed(6)),qualifies:aaveCap*Number(usdRefB.usdPerToken)>=usd&&aaveNet>=15}};
      }else funding={...funding,flashFunding:{status:"PRESERVED_NOT_YET_CONFIGURED_FOR_THIS_CHAIN",note:"Flash-loan architecture is retained. This build only reads validated Morpho/Aave funding capacity on Base."}};
-     sizes.push({inputAsset:assetB,inputUsdApprox:usd,amountInRaw:amountIn.toString(),intermediateAsset:assetA,intermediateAmountRaw:acquiredA.toString(),finalAsset:assetB,finalAmount:finalUnits,roundTripPnlBeforeGasUsd:Number(grossNet.toFixed(6)),roundTripRetentionPct:Number((roundTripRetention*100).toFixed(6)),catastrophicDepthImpact,saturationDetected,modeledRoundTripGasUnits:Number(ROUND_TRIP_GAS_UNITS_4490),modeledGasUsd:modeledGasUsd===null?null:Number(modeledGasUsd.toFixed(6)),estimatedNetOwnCapitalUsd:modeledGasUsd===null?null:Number(netOwn.toFixed(6)),funding,exactDexQuoteConfirmed:true,transactionSimulationConfirmed:false});
+     sizes.push({inputAsset:assetB,inputUsdApprox:usd,inputTokenUnits:Number(inputTokenUnits.toFixed(12)),usdReference:usdRefB,amountInRaw:amountIn.toString(),intermediateAsset:assetA,intermediateAmountRaw:acquiredA.toString(),finalAsset:assetB,finalAmount:finalUnits,finalUsdApprox:Number(finalUsd.toFixed(6)),roundTripPnlBeforeGasUsd:Number(grossNet.toFixed(6)),roundTripRetentionPct:Number((roundTripRetention*100).toFixed(6)),catastrophicDepthImpact,saturationDetected,modeledRoundTripGasUnits:Number(ROUND_TRIP_GAS_UNITS_4490),modeledGasUsd:modeledGasUsd===null?null:Number(modeledGasUsd.toFixed(6)),estimatedNetOwnCapitalUsd:modeledGasUsd===null?null:Number(netOwn.toFixed(6)),funding,exactDexQuoteConfirmed:true,transactionSimulationConfirmed:false});
      previousSuccessful={usd,finalUnits};
      if(catastrophicDepthImpact){depthRejected=true;break;}
      if(saturationDetected){saturationStopped=true;break;}
@@ -7503,7 +7530,7 @@ async function exactTradeSizeDiagnostic4490(){
  }
  }));
  results.sort((a,b)=>Number(b.feeAdjustedSpotSpreadPct||0)-Number(a.feeAdjustedSpotSpreadPct||0));
- return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"BOUNDED_CONCURRENT_DISCOVERY_AND_CANDIDATE_VALIDATION_PLUS_EXACT_ROUND_TRIP_QUOTES_AND_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+ return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"USD_NORMALIZED_NON_STABLE_PAIR_SIZING_PLUS_BOUNDED_CONCURRENT_EXACT_ROUND_TRIP_QUOTES_AND_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/exact-size-funding",async(req,res)=>{try{res.json(await exactTradeSizeDiagnostic4490());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7511,7 +7538,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.50.2_CONCURRENT_CANDIDATE_VALIDATION_CLASSIFICATION_FIX",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.51.0_NON_STABLE_USD_NORMALIZATION_EXACT_SIZE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7520,7 +7547,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.50.2] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.50.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
