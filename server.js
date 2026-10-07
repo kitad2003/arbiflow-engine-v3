@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.0";
+const VERSION = "4.78.1";
 
 /*
 =========================================================
@@ -9272,7 +9272,7 @@ app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary())
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
 
 
-// === 4.78.0 Independent DEX pool evidence (READ ONLY) ===
+// === 4.78.1 Independent DEX pool evidence (READ ONLY) ===
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
@@ -9294,22 +9294,29 @@ async function dexCall4780(c,to,data){
  if(typeof j.result!=="string"||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error("INVALID_RPC_RESULT");return j.result;
  }finally{clearTimeout(timer);}
 }
+const VERIFIED_UNISWAP_V3_FACTORIES_4781=Object.freeze({
+ 8453:"0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+ 42161:"0x1F98431c8aD98523631AE4a59f267346ea31F984",
+ 10:"0x1F98431c8aD98523631AE4a59f267346ea31F984"
+});
+// Official Uniswap V3 deployments: developers.uniswap.org/docs/protocols/v3/deployments
+// Other factories intentionally remain unconfigured until separately verified.
 function dexVenues4780(c){
- // Configure factories explicitly in Render, e.g. DEX_BASE_UNISWAP_V3_FACTORY.
  const prefix=`DEX_${c.key.toUpperCase()}_`;
+ const uniswap=process.env[prefix+"UNISWAP_V3_FACTORY"]||VERIFIED_UNISWAP_V3_FACTORIES_4781[c.chainId];
  return [
- {name:"UNISWAP_V3",kind:"V3",factory:process.env[prefix+"UNISWAP_V3_FACTORY"],fee:500},
- {name:"UNISWAP_V3_3000",kind:"V3",factory:process.env[prefix+"UNISWAP_V3_FACTORY"],fee:3000},
- {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"]},
- {name:"PANCAKESWAP_V3",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:500},
- {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:3000}
+ {name:"UNISWAP_V3",kind:"V3",factory:uniswap,fee:500,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
+ {name:"UNISWAP_V3_3000",kind:"V3",factory:uniswap,fee:3000,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
+ {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"],source:"ENV_ONLY"},
+ {name:"PANCAKESWAP_V3",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:500,source:"ENV_ONLY"},
+ {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:process.env[prefix+"PANCAKESWAP_V3_FACTORY"],fee:3000,source:"ENV_ONLY"}
  ];
 }
 async function dexDiscover4780(c){
  const result={name:c.name,chainId:c.chainId,status:"RUNNING",venues:[],independentPools:0,independentFactories:0,executableQuotes:0,qualified:0,lastError:null};
  const verified=new Set();
  for(const venue of dexVenues4780(c)){
-  const v={name:venue.name,kind:venue.kind,feeTier:venue.fee??null,status:"NOT_CONFIGURED",factory:venue.factory||null,pool:null,liquidityEvidence:null,error:null};
+  const v={name:venue.name,kind:venue.kind,feeTier:venue.fee??null,status:"NOT_CONFIGURED",factory:venue.factory||null,configurationSource:venue.factory?venue.source:"NOT_CONFIGURED",pool:null,liquidityEvidence:null,error:null};
   result.venues.push(v);
   if(!venue.factory)continue;
   if(!dexAddress4780(venue.factory)){v.status="INVALID_FACTORY_ADDRESS";continue;}
