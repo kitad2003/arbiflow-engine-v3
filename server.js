@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.57.1";
+const VERSION = "4.58.0";
 
 /*
 =========================================================
@@ -7850,7 +7850,107 @@ async function arbitrumExactQuoteExpansion4570(){
 }
 app.get("/api/diagnostics/multimarket/arbitrum-exact-quotes",async(req,res)=>{try{res.json(await arbitrumExactQuoteExpansion4570());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"ARBITRUM_EXACT_QUOTE_EXPANSION_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.57.1_ARBITRUM_EXACT_QUOTE_EXPANSION",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+
+/*
+=========================================================
+ARBIFLOW 4.58 MULTI-CHAIN OPPORTUNITY BOARD - READ ONLY
+
+Breadth milestone: scans every currently configured V3-family chain
+adapter and ranks exact executable quote dislocations across fee-tier
+liquidity pools. This is discovery/screening, not execution.
+Base multi-DEX + Morpho/Aave liquidation/funding architecture remains.
+=========================================================
+*/
+const OPPORTUNITY_CHAINS_4580=["ethereum","arbitrum","optimism","base","polygon","bnb"];
+const OPPORTUNITY_SIZES_4580=[100,250,500,1000,2500,5000,10000];
+const OPPORTUNITY_FEE_TIERS_4580=[100,500,3000,10000];
+const OPPORTUNITY_GAS_UNITS_4580=320000n;
+function classifyQuoteFailure4580(e){
+ const m=String(e?.shortMessage||e?.message||e||"").toUpperCase();
+ if(m.includes("TIMEOUT"))return "TIMEOUT";
+ if(m.includes("429")||m.includes("503")||m.includes("RPC")||m.includes("NETWORK")||m.includes("SERVER"))return "RPC_ERROR";
+ if(m.includes("REVERT")||m.includes("CALL_EXCEPTION"))return "QUOTER_REVERT";
+ return "NO_QUOTE";
+}
+async function exactV3FeeRoute4580(provider,chainKey,quoter,cfg,baseSym,assetSym,sizeUsd,buyFee,sellFee){
+ const base=cfg.tokens[baseSym],asset=cfg.tokens[assetSym];
+ const bc=new Contract(base,ERC20_META_ABI_4480,provider),ac=new Contract(asset,ERC20_META_ABI_4480,provider);
+ const [bd,ad]=await Promise.all([bc.decimals(),ac.decimals()]);
+ const amountIn=parseUnits(String(sizeUsd),Number(bd));
+ const acquired=await quoteV3Single4490(provider,quoter,base,asset,buyFee,amountIn,chainKey);
+ if(acquired<=0n)throw new Error("NO_BUY_QUOTE");
+ const finalRaw=await quoteV3Single4490(provider,quoter,asset,base,sellFee,acquired,chainKey);
+ if(finalRaw<=0n)throw new Error("NO_SELL_QUOTE");
+ const finalUsd=Number(formatUnits(finalRaw,Number(bd))),pnl=finalUsd-sizeUsd;
+ return {chain:chainKey,baseAsset:baseSym,asset:assetSym,inputUsd:sizeUsd,buyFeeTier:buyFee,sellFeeTier:sellFee,
+   intermediateAmount:Number(formatUnits(acquired,Number(ad))),finalUsd:round(finalUsd,6),
+   grossPnlUsd:round(pnl,6),grossReturnPct:round(pnl/sizeUsd*100,6),retentionPct:round(finalUsd/sizeUsd*100,6)};
+}
+async function multiChainOpportunityBoard4580(){
+ const startedAt=Date.now(),all=[],chainCoverage=[],failures={NO_POOL:0,QUOTER_REVERT:0,TIMEOUT:0,RPC_ERROR:0,NO_QUOTE:0};
+ for(const chainKey of OPPORTUNITY_CHAINS_4580){
+  const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey],rpc=RPC_URLS[chainKey]||"",quoter=UNISWAP_V3_QUOTER_V1_4490[chainKey];
+  if(!cfg||!rpc||!quoter){chainCoverage.push({chain:chainKey,status:!rpc?"RPC_NOT_CONFIGURED":"ADAPTER_NOT_CONFIGURED",jobs:0,quoted:0});continue;}
+  const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
+  let chainId=null;try{chainId=Number((await withTimeout4501(provider.getNetwork(),8000,`${chainKey}_NETWORK`)).chainId);}catch(e){chainCoverage.push({chain:chainKey,status:"RPC_ERROR",error:e?.message||String(e),jobs:0,quoted:0});continue;}
+  const baseSyms=["USDC","USDT","USDbC"].filter(x=>cfg.tokens[x]);
+  const assetSyms=Object.keys(cfg.tokens).filter(x=>!baseSyms.includes(x));
+  const factory=new Contract(cfg.factory,UNISWAP_V3_FACTORY_ABI,provider);
+  const jobs=[];
+  // Only schedule fee-tier combinations backed by real pools, avoiding known-invalid blind quoter calls.
+  for(const baseSym of baseSyms)for(const assetSym of assetSyms){
+   const active=[];
+   for(const fee of OPPORTUNITY_FEE_TIERS_4580){
+    try{const pool=await withTimeout4501(factory.getPool(cfg.tokens[baseSym],cfg.tokens[assetSym],fee),5000,`${chainKey}_POOL`);
+      if(pool&&String(pool).toLowerCase()!=="0x0000000000000000000000000000000000000000")active.push({fee,pool});
+    }catch(e){failures.RPC_ERROR++;}
+   }
+   for(const sizeUsd of OPPORTUNITY_SIZES_4580)for(const b of active)for(const q of active)if(b.fee!==q.fee)jobs.push({baseSym,assetSym,sizeUsd,buyFee:b.fee,sellFee:q.fee,buyPool:b.pool,sellPool:q.pool});
+  }
+  const rows=await mapLimit4501(jobs,3,async j=>{
+   try{return {...await exactV3FeeRoute4580(provider,chainKey,quoter,cfg,j.baseSym,j.assetSym,j.sizeUsd,j.buyFee,j.sellFee),buyPool:j.buyPool,sellPool:j.sellPool,exactReadOnlyQuotes:true};}
+   catch(e){const failureClass=classifyQuoteFailure4580(e);failures[failureClass]=(failures[failureClass]||0)+1;return {...j,chain:chainKey,status:"QUOTE_FAILED",failureClass,error:e?.shortMessage||e?.message||String(e),exactReadOnlyQuotes:false};}
+  });
+  const ok=rows.filter(x=>x.exactReadOnlyQuotes); all.push(...ok);
+  chainCoverage.push({chain:chainKey,chainId,status:"SCANNED",stableBases:baseSyms,assets:assetSyms,jobs:jobs.length,quoted:ok.length,failed:rows.length-ok.length});
+ }
+ // Approximate gas in USD from a small USDC->native exact quote on each chain where possible.
+ const gasCache=new Map();
+ async function gasUsd(row){
+  if(gasCache.has(row.chain))return gasCache.get(row.chain);
+  const cfg=UNISWAP_V3_DISCOVERY_4470[row.chain],rpc=RPC_URLS[row.chain],native=NATIVE_GAS_SYMBOL_4511[row.chain];
+  let v=null;
+  try{
+   if(cfg&&rpc&&native&&cfg.tokens.USDC){
+    const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false}),fd=await provider.getFeeData(),gp=fd.gasPrice??fd.maxFeePerGas;
+    let nativeOut=0n;
+    for(const fee of OPPORTUNITY_FEE_TIERS_4580){try{nativeOut=await quoteV3Single4490(provider,UNISWAP_V3_QUOTER_V1_4490[row.chain],cfg.tokens.USDC,cfg.tokens[native],fee,parseUnits("100",6),row.chain);if(nativeOut>0n)break;}catch{}}
+    if(nativeOut>0n&&gp){const nd=Number(await new Contract(cfg.tokens[native],ERC20_META_ABI_4480,provider).decimals()),nativeUnits=Number(formatUnits(nativeOut,nd)),usdPerNative=100/nativeUnits;v=Number(formatUnits(gp*OPPORTUNITY_GAS_UNITS_4580,18))*usdPerNative;}
+   }
+  }catch{}
+  gasCache.set(row.chain,v);return v;
+ }
+ const positives=all.filter(x=>x.grossPnlUsd>0).sort((a,b)=>b.grossPnlUsd-a.grossPnlUsd);
+ const ranked=[];
+ for(const r of positives.slice(0,100)){
+  const g=await gasUsd(r),net=g==null?null:r.grossPnlUsd-g;
+  ranked.push({...r,modeledGasUsd:g==null?null:round(g,6),estimatedNetAfterGasUsd:net==null?null:round(net,6),minimumNetProfitUsd:15,passesMinimumNet:net!=null&&net>=15,simulationStatus:net!=null&&net>=15?"SIMULATION_CANDIDATE":"SCREEN_ONLY"});
+ }
+ ranked.sort((a,b)=>(b.estimatedNetAfterGasUsd??-1e99)-(a.estimatedNetAfterGasUsd??-1e99));
+ return {success:true,version:VERSION,classification:"MULTI_CHAIN_OPPORTUNITY_BOARD_COMPLETE",
+  architecture:"SIX_CHAIN_V3_FAMILY_EXACT_FEE_TIER_DISLOCATION_GRAPH_PLUS_EXISTING_BASE_MULTI_DEX_AND_LIQUIDATION_MODULES",
+  coverage:{chainsTargeted:OPPORTUNITY_CHAINS_4580.length,chainsScanned:chainCoverage.filter(x=>x.status==="SCANNED").length,
+   exactQuotes:all.length,positiveGross:positives.length,probeSizesUsd:OPPORTUNITY_SIZES_4580,chainCoverage},
+  rankedOpportunities:ranked.slice(0,50),topGrossOpportunities:positives.slice(0,50),failureClasses:failures,
+  preservedArchitecture:{baseFourDexGraph:true,morphoLiquidations:true,morphoFlashLiquidity:true,aaveFlashLiquidity:true,productionExecutorPreserved:true},
+  importantLimitations:{crossVenueBeyondBase:"NOT_YET_ALL_CHAINS",cexCoverage:"NOT_YET_CONNECTED",multiHopExecution:"NOT_YET_IN_THIS_BOARD",
+   fundingBeyondBase:"NOT_YET_CONFIGURED",transactionSimulationPerformed:false,executionEligibility:false,
+   note:"This release materially broadens discovery across every currently connected V3-family chain, but fee-tier dislocations are screening candidates. No trade is executable until strategy-specific funding and transaction simulation pass."},
+  readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+}
+app.get("/api/opportunities/multichain",async(req,res)=>{try{res.json(await multiChainOpportunityBoard4580());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"MULTI_CHAIN_OPPORTUNITY_BOARD_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
+
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.58.0_MULTI_CHAIN_OPPORTUNITY_BOARD",multiChainOpportunityRoute:"/api/opportunities/multichain",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",multiMarketCrossDexBaseRoute:"/api/diagnostics/multimarket/cross-dex-base",multiMarketCrossDexEconomicRoute:"/api/diagnostics/multimarket/cross-dex-economic",arbitrumExactQuoteExpansionRoute:"/api/diagnostics/multimarket/arbitrum-exact-quotes",baseMultiDexVenues:["UNISWAP_V3","AERODROME","PANCAKESWAP_V3","SUSHISWAP_V3"],baseCrossDexAssets:["WETH","cbBTC","DAI","cbETH","USDbC"],zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
