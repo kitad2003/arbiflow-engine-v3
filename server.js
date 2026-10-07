@@ -43,7 +43,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.51.0";
+const VERSION = "4.51.1";
 
 /*
 =========================================================
@@ -7408,26 +7408,42 @@ async function quoteV3Single4490(provider,quoterAddress,tokenIn,tokenOut,fee,amo
  return BigInt(out.toString());
 }
 function stableLike4490(sym){return ["USDC","USDT","USDbC"].includes(sym);}
-function usdReference4510(spread,chainKey,symbol){
- if(stableLike4490(symbol))return {usdPerToken:1,source:"USD_LIKE_1_TO_1",referencePair:symbol};
- const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey]; const target=tokenAddress4490(chainKey,symbol);
- if(!cfg||!target)return null;
- const stableSymbols=["USDC","USDT","USDbC"].filter(x=>cfg.tokens?.[x]);
- const chain=(spread.chains||[]).find(x=>x.key===chainKey); if(!chain)return null;
- const samples=[];
+const NATIVE_GAS_SYMBOL_4511={ethereum:"WETH",arbitrum:"WETH",optimism:"WETH",base:"WETH",polygon:"WPOL",bnb:"WBNB"};
+function buildUsdReferenceGraph4511(spread,chainKey){
+ const chain=(spread.chains||[]).find(x=>x.key===chainKey); const graph=new Map();
+ if(!chain)return graph;
+ function add(a,b,rate,meta){if(!a||!b||!Number.isFinite(rate)||rate<=0)return; if(!graph.has(a))graph.set(a,[]); graph.get(a).push({to:b,rate,...meta});}
  for(const pr of chain.pairs||[])for(const pool of pr.pools||[]){
   const r=Number(pool.token1PerToken0); if(!Number.isFinite(r)||r<=0)continue;
   const t0=String(pool.token0||"").toLowerCase(),t1=String(pool.token1||"").toLowerCase();
-  for(const st of stableSymbols){
-   const stable=tokenAddress4490(chainKey,st); if(!stable)continue;
-   let px=null;
-   if(t0===target&&t1===stable)px=r; else if(t1===target&&t0===stable)px=1/r;
-   if(px&&Number.isFinite(px)&&px>0)samples.push({px,fee:Number(pool.feeTier||999999),pair:pr.pair,pool:pool.pool,stable:st});
-  }
+  const meta={pair:pr.pair,pool:pool.pool,feeTier:Number(pool.feeTier||0)};
+  add(t0,t1,r,meta); add(t1,t0,1/r,meta);
  }
- if(!samples.length)return null;
- samples.sort((a,b)=>a.fee-b.fee); const best=samples[0];
- return {usdPerToken:best.px,source:"ONCHAIN_V3_STABLE_REFERENCE",referencePair:best.pair,referencePool:best.pool,referenceStable:best.stable,referenceFeeTier:best.fee};
+ return graph;
+}
+function usdReference4511(spread,chainKey,symbol,cache){
+ const cacheKey=`${chainKey}:${symbol}`; if(cache?.has(cacheKey))return cache.get(cacheKey);
+ if(stableLike4490(symbol)){const v={usdPerToken:1,source:"USD_LIKE_1_TO_1",referencePair:symbol,hops:0};cache?.set(cacheKey,v);return v;}
+ const cfg=UNISWAP_V3_DISCOVERY_4470[chainKey],target=tokenAddress4490(chainKey,symbol);
+ if(!cfg||!target){cache?.set(cacheKey,null);return null;}
+ const stableAddresses=new Map(["USDC","USDT","USDbC"].filter(x=>cfg.tokens?.[x]).map(x=>[tokenAddress4490(chainKey,x),x]));
+ const graph=buildUsdReferenceGraph4511(spread,chainKey);
+ // Search direct and two-hop routes. Lowest total fee wins; this avoids repeated per-candidate discovery.
+ let frontier=[{addr:target,rate:1,fee:0,path:[],seen:new Set([target])}],found=[];
+ for(let depth=0;depth<2;depth++){
+  const next=[];
+  for(const st of frontier)for(const e of graph.get(st.addr)||[]){
+   if(st.seen.has(e.to))continue; const rate=st.rate*e.rate,fee=st.fee+e.feeTier;
+   const path=[...st.path,{from:st.addr,to:e.to,pair:e.pair,pool:e.pool,feeTier:e.feeTier,rate:e.rate}];
+   if(stableAddresses.has(e.to))found.push({rate,fee,path,stable:stableAddresses.get(e.to)});
+   else {const seen=new Set(st.seen);seen.add(e.to);next.push({addr:e.to,rate,fee,path,seen});}
+  }
+  frontier=next;
+ }
+ if(!found.length){cache?.set(cacheKey,null);return null;}
+ found.sort((a,b)=>a.fee-b.fee||a.path.length-b.path.length); const best=found[0];
+ const v={usdPerToken:best.rate,source:best.path.length===1?"ONCHAIN_V3_STABLE_REFERENCE":"ONCHAIN_V3_MULTI_HOP_STABLE_REFERENCE",referenceStable:best.stable,hops:best.path.length,referencePath:best.path,totalReferenceFeeTier:best.fee};
+ cache?.set(cacheKey,v); return v;
 }
 
 async function baseFunding4490(provider,asset,decimals){
@@ -7441,6 +7457,7 @@ async function baseFunding4490(provider,asset,decimals){
 }
 async function exactTradeSizeDiagnostic4490(){
  const startedAt=Date.now(), spread=await realDexSpreadDiagnostic4480(), results=[];
+ const usdReferenceCache4511=new Map();
  const spotObservations=(spread.topFeeAdjustedSpotDivergences||[]);
  const positive=spotObservations.filter(x=>x.classification==="POSITIVE_SPOT_DIVERGENCE");
  const discoveryTelemetry={
@@ -7473,7 +7490,7 @@ async function exactTradeSizeDiagnostic4490(){
   if(!cfg||!rpc||!quoter){discoveryTelemetry.candidatesAdapterNotConfigured++;results.push({...edge,classification:"EXACT_QUOTE_ADAPTER_NOT_CONFIGURED",exactQuoteConfirmed:false});continue;}
   const [assetA,assetB]=String(edge.pair).split("/"); const tokenA=tokenAddress4490(edge.chainKey,assetA),tokenB=tokenAddress4490(edge.chainKey,assetB);
   if(!tokenA||!tokenB){discoveryTelemetry.candidatesTokenMappingMissing++;results.push({...edge,classification:"PAIR_TOKEN_MAPPING_MISSING",exactQuoteConfirmed:false});continue;}
-  const usdRefB=usdReference4510(spread,edge.chainKey,assetB);
+  const usdRefB=usdReference4511(spread,edge.chainKey,assetB,usdReferenceCache4511);
   if(!usdRefB){discoveryTelemetry.candidatesNoUsdInputMapping++;discoveryTelemetry.candidatesUsdReferenceMissing++;results.push({...edge,classification:"NO_USD_REFERENCE_ROUTE",reason:`No on-chain stable reference route was found for ${assetB}; exact USD sizing was not attempted.`,exactQuoteConfirmed:false,readOnly:true});continue;}
   if(!stableLike4490(assetB))discoveryTelemetry.candidatesUsdNormalized++;
   const provider=new JsonRpcProvider(rpc,undefined,{staticNetwork:false});
@@ -7482,7 +7499,8 @@ async function exactTradeSizeDiagnostic4490(){
    const dB=Number(await new Contract(String(tokenB).toLowerCase(),ERC20_META_BALANCE_ABI_4490,provider).decimals());
    const feeData=await provider.getFeeData(); const gasPrice=feeData.gasPrice||feeData.maxFeePerGas||0n;
    // Convert native gas to USD using the same address-aware stable reference logic.
-   const nativeRef=usdReference4510(spread,edge.chainKey,edge.chainKey==="bnb"?"WBNB":"WETH");
+   const nativeSymbol4511=NATIVE_GAS_SYMBOL_4511[edge.chainKey];
+   const nativeRef=nativeSymbol4511?usdReference4511(spread,edge.chainKey,nativeSymbol4511,usdReferenceCache4511):null;
    const nativeUsd=nativeRef?.usdPerToken||null;
    const gasNative=Number(formatUnits(gasPrice*ROUND_TRIP_GAS_UNITS_4490,18)); const modeledGasUsd=nativeUsd?gasNative*nativeUsd:null;
    const sizes=[]; let depthRejected=false, saturationStopped=false, previousSuccessful=null;
@@ -7530,7 +7548,7 @@ async function exactTradeSizeDiagnostic4490(){
  }
  }));
  results.sort((a,b)=>Number(b.feeAdjustedSpotSpreadPct||0)-Number(a.feeAdjustedSpotSpreadPct||0));
- return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"USD_NORMALIZED_NON_STABLE_PAIR_SIZING_PLUS_BOUNDED_CONCURRENT_EXACT_ROUND_TRIP_QUOTES_AND_PRESERVED_FLASH_FUNDING",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
+ return {success:true,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_COMPLETE",architecture:"CACHED_MULTI_HOP_USD_NORMALIZATION_PLUS_NATIVE_GAS_VALUATION_AND_BOUNDED_CONCURRENT_EXACT_QUOTES",minimumNetProfitUsd:15,sizesUsd:DEFAULT_SIZES_USD_4490,opportunitiesScreened:positive.length,discoveryTelemetry,spotScreening:{observations:spotObservations.slice(0,25),positiveFeeAdjustedCandidates:positive.length,note:positive.length===0?"No fee-adjusted positive spot candidates existed at this snapshot; exact-size stage correctly remained idle.":"Fee-adjusted positive spot candidates were forwarded to exact-size depth testing."},results,fundingArchitecture:{ownCapital:true,morphoFlashLoansPreserved:true,aaveFlashLoansPreserved:true,baseFundingCapacityRead:true,otherChainFlashFunding:"PRESERVED_NOT_YET_CONFIGURED",dynamicSizing:true},depthProtection:{minimumRoundTripRetentionPct:90,earlyStopOnCatastrophicDepthImpact:true,earlyStopOnOutputSaturation:true,addressNormalization:true},limitations:{gas:"MODELED_NOT_TRANSACTION_SIMULATED",mevModeled:false,atomicExecutionSimulated:false,note:"Exact DEX quote outputs are read from Quoter contracts at requested sizes. Gas is modeled, so estimated net profit is not yet an execution guarantee."},readOnly:true,flashLoanRequested:false,approvalPerformed:false,signaturePerformed:false,swapExecuted:false,mainnetBroadcast:false,fundsMovedOnMainnet:false,elapsedMs:Date.now()-startedAt};
 }
 app.get("/api/diagnostics/multimarket/exact-size-funding",async(req,res)=>{try{res.json(await exactTradeSizeDiagnostic4490());}catch(e){res.status(500).json({success:false,version:VERSION,classification:"EXACT_TRADE_SIZE_AND_FUNDING_DIAGNOSTIC_ERROR",error:e?.message||String(e),readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false});}});
 
@@ -7538,7 +7556,7 @@ app.post("/api/diagnostics/base/market-liquidity",runMarketLiquidityDiagnostic44
 
 app.get("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
 app.post("/api/production/base/candidate-safety-pipeline",runCandidateSafetyPipeline4400);
-app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.51.0_NON_STABLE_USD_NORMALIZATION_EXACT_SIZE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
+app.get("/api/version", (req,res)=>res.json({success:true,engine:"ArbiFlow Opportunity Engine",version:VERSION,release:"4.51.1_MULTI_HOP_USD_REFERENCE_GAS_VALUATION_CACHE",controlledAtomicRoute:"/api/test/base/controlled-atomic",zeroXAccessRoute:"/api/zero-x/base/access",zeroXProductionReadinessRoute:"/api/zero-x/base/production-readiness",kyberSwapRouteReadinessRoute:"/api/kyberswap/base/route-readiness",kyberSwapBuildReadinessRoute:"/api/kyberswap/base/build-readiness",controlledKyberAtomicRoute:"/api/test/base/controlled-kyberswap-atomic",productionDeploymentReadinessRoute:"/api/production/base/deployment-readiness",productionDeploymentPlanRoute:"/api/production/base/deployment-plan",productionBoundForkValidationRoute:"/api/test/base/production-bound-fork",mainnetExecutionSafetyGateRoute:"/api/production/base/execution-safety-gate",candidateSafetyPipelineRoute:"/api/production/base/candidate-safety-pipeline",hotWatchSafetyPipelineRoute:"/api/production/base/hot-watch-safety-pipeline",marketLiquidityDiagnosticRoute:"/api/diagnostics/base/market-liquidity",multiMarketFoundationRoute:"/api/diagnostics/multimarket/foundation",multiMarketDexPoolDiscoveryRoute:"/api/diagnostics/multimarket/dex-pools",multiMarketDexSpreadRoute:"/api/diagnostics/multimarket/dex-spreads",multiMarketExactSizeFundingRoute:"/api/diagnostics/multimarket/exact-size-funding",zeroXAccessAliases:["/api/test/zerox/access","/api/test/zero-x/access"],liveExecutionEnabled:false,mainnetBroadcast:false,time:now()}));
 
 /*
 =========================================================
@@ -7547,7 +7565,7 @@ SERVER
 */
 
 if (process.env.ARBIFLOW_FORK_VERIFIED !== "1") {
-  console.error("[ArbiFlow 4.50.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
+  console.error("[ArbiFlow 4.51.1] STARTUP BLOCKED: fork verification wrapper was bypassed. Ensure package.json start is: node Startup4300.js");
   process.exit(1);
 }
 
