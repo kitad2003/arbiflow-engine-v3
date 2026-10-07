@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.75.0";
+const VERSION = "4.76.0";
 
 /*
 =========================================================
@@ -9155,6 +9155,43 @@ function startMultiChain4750(){if(mc4750.timer)return;pollMultiChain4750().catch
 app.get("/api/multichain/status",(req,res)=>res.json(multiChain4750Summary()));
 app.get("/api/multichain/probe",async(req,res)=>{await pollMultiChain4750();res.json(multiChain4750Summary());});
 startMultiChain4750();
+
+
+
+// === ArbiFlow 4.76.0 Three-Chain Reference-Directed Candidate Discovery ===
+const DISC4760 = {
+  startedAt:new Date().toISOString(), intervalMs:15000, running:false, runs:0, lastRunAt:null, lastCompletedAt:null,
+  policy:{referenceTriggerAbsPct:0.10,minimumExecutableSpreadPct:0.5,minimumNetProfitUsd:15,gasRequiredForQualification:true,financingRequiredForQualification:true,simulationRequired:true},
+  chains:{}, timer:null
+};
+for(const c of MC4750_CHAINS) DISC4760.chains[c.key]={name:c.name,chainId:c.chainId,status:"IDLE",observations:0,referenceDiscrepancies:0,quoteRequests:0,quoteSuccesses:0,quoteFailures:0,quoteTimeouts:0,positiveExecutableSpreads:0,depthPassed:0,optimalSizes:0,gasEstimates:0,gasFailures:0,financingPasses:0,netProfitPasses:0,simulationEligible:0,qualified:0,lastRunAt:null,lastCompletedAt:null,lastError:null,candidates:[]};
+function timeout4760(p,ms,label){return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(`${label}_TIMEOUT_${ms}MS`)),ms))]);}
+async function quote1inch4760(c,src,dst,amount){const st=DISC4760.chains[c.key],key=process.env.ONEINCH_API_KEY||"";st.quoteRequests++;if(!key)throw new Error("ONEINCH_API_KEY_MISSING");const u=new URL(`https://api.1inch.dev/swap/v6.1/${c.chainId}/quote`);u.searchParams.set("src",src);u.searchParams.set("dst",dst);u.searchParams.set("amount",String(amount));const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),4500);try{const r=await fetch(u,{headers:{Authorization:`Bearer ${key}`},signal:ctl.signal});const body=await r.text();if(!r.ok)throw new Error(`HTTP_${r.status}:${body.slice(0,120)}`);const j=JSON.parse(body);if(!j?.dstAmount)throw new Error("NO_DST_AMOUNT");st.quoteSuccesses++;return BigInt(j.dstAmount);}catch(e){st.quoteFailures++;if(e?.name==="AbortError"||String(e?.message||e).includes("TIMEOUT"))st.quoteTimeouts++;throw e;}finally{clearTimeout(timer);}}
+async function gas4760(c,ethUsd){const st=DISC4760.chains[c.key];try{const provider=new JsonRpcProvider(c.rpc,undefined,{staticNetwork:false});const f=await timeout4760(provider.getFeeData(),4000,`${c.key}_GAS`);const gp=f.gasPrice||f.maxFeePerGas;if(!gp)throw new Error("GAS_PRICE_UNAVAILABLE");const usd=Number(formatUnits(gp*500000n,18))*ethUsd;if(!Number.isFinite(usd)||usd<=0)throw new Error("GAS_USD_INVALID");st.gasEstimates++;return usd;}catch(e){st.gasFailures++;throw e;}}
+async function discoverChain4760(c,ref){const st=DISC4760.chains[c.key];st.status="RUNNING";st.lastRunAt=new Date().toISOString();st.lastError=null;const out=[];try{
+  if(mc4750.chains[c.key]?.status!=="LIVE")throw new Error("CHAIN_NOT_LIVE"); if(mc4750.chains[c.key]?.aggregator?.status!=="LIVE")throw new Error("AGGREGATOR_NOT_LIVE");
+  const probes=[100,500,2500];
+  for(const usd of probes){st.observations++;let wethOut,usdcBack;{
+    const usdcIn=parseUnits(String(usd),6); wethOut=await quote1inch4760(c,c.tokens.USDC,c.tokens.WETH,usdcIn);
+    const wethUnits=Number(formatUnits(wethOut,18)); if(!Number.isFinite(wethUnits)||wethUnits<=0)continue;
+    const buyPx=usd/wethUnits; const deviationPct=((buyPx-ref.mid)/ref.mid)*100;
+    if(Math.abs(deviationPct)>=DISC4760.policy.referenceTriggerAbsPct)st.referenceDiscrepancies++;
+    usdcBack=await quote1inch4760(c,c.tokens.WETH,c.tokens.USDC,wethOut); const backUsd=Number(formatUnits(usdcBack,6)); const executableSpreadPct=((backUsd-usd)/usd)*100; const gross=backUsd-usd;
+    const gasUsd=await gas4760(c,ref.mid); const estimatedNet=gross-gasUsd; const depthPass=backUsd/usd>=0.90; if(depthPass)st.depthPassed++;
+    if(executableSpreadPct>0)st.positiveExecutableSpreads++; st.optimalSizes++;
+    let financingStatus=c.key==="base"?"BASE_PROVIDER_AVAILABLE_NOT_RESERVED":"NOT_YET_ACTIVATED_ON_CHAIN"; if(c.key==="base")st.financingPasses++;
+    let rejection=null; if(executableSpreadPct<DISC4760.policy.minimumExecutableSpreadPct)rejection="EXECUTABLE_SPREAD_TOO_LOW"; else if(!depthPass)rejection="INSUFFICIENT_DEPTH"; else if(estimatedNet<DISC4760.policy.minimumNetProfitUsd)rejection="NET_PROFIT_TOO_LOW"; else if(c.key!=="base")rejection="FINANCING_NOT_ACTIVATED"; else rejection="SIMULATION_REQUIRED";
+    if(estimatedNet>=DISC4760.policy.minimumNetProfitUsd)st.netProfitPasses++;
+    if(!rejection){st.simulationEligible++;} // intentionally unreachable until simulation implementation promotes explicitly
+    out.push({candidateId:`${c.key.toUpperCase()}:WETH-USDC:1INCH-ROUNDTRIP:${usd}`,opportunityType:"REFERENCE_DIRECTED_ONCHAIN_ROUNDTRIP_SCREEN",canonicalPair:"WETH/USDC",chainId:c.chainId,notionalUsd:usd,referenceMidUsd:ref.mid,onchainBuyPriceUsd:buyPx,referenceDeviationPct:deviationPct,roundTripUsd:backUsd,executableSpreadPct,grossProfitUsd:gross,modeledGasUsd:gasUsd,estimatedNetProfitUsd:estimatedNet,depthPassed:depthPass,financingStatus,simulationStatus:"NOT_RUN",riskLevel:"UNASSESSED",status:"REJECTED",rejectionReason:rejection,executionEligible:false,detectedAt:new Date().toISOString()});
+  }} st.candidates=out.sort((a,b)=>b.estimatedNetProfitUsd-a.estimatedNetProfitUsd).slice(0,20); st.status="COMPLETE";
+ }catch(e){st.status="ERROR";st.lastError=e?.message||String(e);}finally{st.lastCompletedAt=new Date().toISOString();}}
+async function run4760(){if(DISC4760.running)return;DISC4760.running=true;DISC4760.runs++;DISC4760.lastRunAt=new Date().toISOString();try{const ref=globalDiscrepancy4710._state?.reference?.ETHUSD;if(!ref||ref.status!=="LIVE"||!Number.isFinite(ref.mid))throw new Error("REFERENCE_CONSENSUS_NOT_LIVE");await Promise.all(MC4750_CHAINS.map(c=>discoverChain4760(c,ref)));}catch(e){for(const st of Object.values(DISC4760.chains))if(st.status==="IDLE")st.lastError=e?.message||String(e);}finally{DISC4760.running=false;DISC4760.lastCompletedAt=new Date().toISOString();}}
+function summary4760(){const chains=Object.values(DISC4760.chains).map(x=>({...x,candidates:x.candidates.slice(0,10)}));const sum=k=>chains.reduce((n,x)=>n+(x[k]||0),0);return {success:true,version:VERSION,architecture:"CEX_CONSENSUS_TO_THREE_CHAIN_REFERENCE_TRIGGER_TO_EXACT_1INCH_ROUNDTRIP_TO_GAS_TO_FAIL_CLOSED_QUALIFICATION",status:DISC4760.running?"RUNNING":"IDLE_WAIT",startedAt:DISC4760.startedAt,intervalMs:DISC4760.intervalMs,runs:DISC4760.runs,lastRunAt:DISC4760.lastRunAt,lastCompletedAt:DISC4760.lastCompletedAt,policy:DISC4760.policy,metrics:{observations:sum("observations"),referenceDiscrepancies:sum("referenceDiscrepancies"),quoteRequests:sum("quoteRequests"),quoteSuccesses:sum("quoteSuccesses"),quoteFailures:sum("quoteFailures"),quoteTimeouts:sum("quoteTimeouts"),positiveExecutableSpreads:sum("positiveExecutableSpreads"),depthPassed:sum("depthPassed"),optimalSizes:sum("optimalSizes"),gasEstimates:sum("gasEstimates"),gasFailures:sum("gasFailures"),financingPasses:sum("financingPasses"),netProfitPasses:sum("netProfitPasses"),simulationEligible:sum("simulationEligible"),qualified:sum("qualified")},chains,safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};}
+app.get("/api/multichain/discovery/status",(req,res)=>res.json(summary4760()));
+app.get("/api/multichain/discovery/run",(req,res)=>{setImmediate(()=>run4760());res.json({success:true,version:VERSION,status:DISC4760.running?"ALREADY_RUNNING":"STARTED_BACKGROUND",statusRoute:"/api/multichain/discovery/status",readOnly:true});});
+function start4760(){setTimeout(()=>run4760().catch(()=>{}),5000);DISC4760.timer=setInterval(()=>run4760().catch(()=>{}),DISC4760.intervalMs);}
+start4760();
 
 // === ArbiFlow 4.73.1 Global Coverage Architecture Layer ===
 const COVERAGE4730 = {

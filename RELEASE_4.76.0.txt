@@ -1,0 +1,15 @@
+ArbiFlow 4.76.0 — Three-Chain Reference-Directed Candidate Discovery
+
+- Preserves accepted 4.75.0 Base/Arbitrum/Optimism live heartbeats and 1inch probes.
+- Adds automatic three-chain discovery every 15 seconds.
+- Uses live CEX median consensus as a discovery reference, not as an executable leg.
+- Performs exact 1inch USDC->WETH->USDC round-trip screens at $100/$500/$2500 on each live chain.
+- Measures quote success/failure/timeout, reference deviations, depth, gas, financing readiness, net-profit passes and qualification funnel per chain.
+- Gas is required and fail-closed. Unknown gas cannot qualify.
+- Arbitrum/Optimism financing is explicitly NOT_YET_ACTIVATED_ON_CHAIN and therefore cannot qualify.
+- Simulation remains required and not run in this milestone.
+- Mainnet execution remains disabled; no funds are moved.
+
+Endpoints:
+/api/multichain/discovery/status
+/api/multichain/discovery/run
