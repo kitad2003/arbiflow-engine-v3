@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.12";
+const VERSION = "4.78.13";
 
 /*
 =========================================================
@@ -9548,6 +9548,64 @@ function dexQuoteReadiness47812(){
  return {success:true,version:VERSION,stage:'READ_ONLY_QUOTE_READINESS_AND_V2_RESERVE_MATH',scope:'LAST_VERIFIED_IN_MEMORY_SNAPSHOTS',sizesUsd:DEX_QUOTE_SIZES_47812,feePolicy:'V2_30_BPS_ASSUMED_NOT_VERIFIED',alertPolicy:{minimumIndicativeSpreadPct:0.5,allowedRisk:['LOW','MEDIUM'],requiresPositiveVerifiedNetProfit:true,alertsEmitted:0},chains,limitations:['NO_VERIFIED_V3_QUOTER','NO_CROSS_DEX_EXECUTABLE_ROUNDTRIP','V2_FEE_NOT_VERIFIED','NO_TICK_CROSSING_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_ATOMIC_SIMULATION','IN_MEMORY_SNAPSHOTS_EXPIRE_AFTER_10_MINUTES'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get('/api/dex-independent/quote-readiness',(req,res)=>res.json(dexQuoteReadiness47812()));
+
+// 4.78.13: manually requested on-chain quoter checks for Uniswap V3 vs Sushi V2.
+// Each call uses the existing shared, rate-limited DEX RPC transport.
+// Exact-input quote outputs are observations, NOT executable atomic arbitrage.
+const dexQuoterInterface47813=new (require('ethers').Interface)(QUOTER_V1_ABI_4490);
+const dexV2Interface47813=new (require('ethers').Interface)(['function getReserves() view returns (uint112,uint112,uint32)']);
+const dexQuotes47813={running:false,lastCompletedAt:null,lastResult:null,runs:0};
+async function dexCrossQuotes47813(chainId,size){
+ const c=MC4750_CHAINS.find(x=>x.chainId===chainId);
+ if(!c||![100,500,1000].includes(size))throw Error('UNSUPPORTED_CHAIN_OR_SIZE');
+ const snap=dexVerified4788.get(chainId),age=snap?Date.now()-Date.parse(snap.observedAt):null;
+ if(!snap||age<0||age>DEX_SNAPSHOT_MAX_AGE_MS_4788)throw Error('FRESH_DISCOVERY_REQUIRED');
+ const sushi=snap.venues.find(v=>v.name==='SUSHISWAP_V2'&&v.status==='POOL_LIVE');
+ const unis=snap.venues.filter(v=>v.kind==='V3'&&v.name.startsWith('UNISWAP_V3')&&v.status==='POOL_LIVE');
+ if(!sushi||!unis.length)throw Error('LIVE_SUSHI_AND_UNISWAP_POOLS_REQUIRED');
+ const quoter=UNISWAP_V3_QUOTER_V1_4490[c.key];
+ if(!dexAddress4780(quoter))throw Error('UNISWAP_QUOTER_NOT_CONFIGURED');
+ const reservesRaw=await dexCall4780(c,sushi.pool,dexV2Interface47813.encodeFunctionData('getReserves',[]));
+ const reserves=dexV2Interface47813.decodeFunctionResult('getReserves',reservesRaw);
+ const weth0=BigInt(c.tokens.WETH.toLowerCase())<BigInt(c.tokens.USDC.toLowerCase());
+ const r0=BigInt(reserves[0]),r1=BigInt(reserves[1]);
+ const rUsdc=weth0?r1:r0,rWeth=weth0?r0:r1;
+ const usdcIn=BigInt(size)*1000000n;
+ const sushiBuyWeth=dexV2AmountOut47812(usdcIn,rUsdc,rWeth);
+ const rows=[];
+ for(const uni of unis){
+  const fee=Number(uni.feeTier);
+  for(const direction of ['SUSHI_BUY_UNI_SELL','UNI_BUY_SUSHI_SELL']){
+   const tokenIn=direction==='SUSHI_BUY_UNI_SELL'?c.tokens.WETH:c.tokens.USDC;
+   const tokenOut=direction==='SUSHI_BUY_UNI_SELL'?c.tokens.USDC:c.tokens.WETH;
+   const amountIn=direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:usdcIn;
+   try{
+    if(amountIn<=0n)throw Error('ZERO_FIRST_LEG_OUTPUT');
+    const data=dexQuoterInterface47813.encodeFunctionData('quoteExactInputSingle',[tokenIn,tokenOut,fee,amountIn,0]);
+    const raw=await dexCall4780(c,quoter,data);
+    const decoded=dexQuoterInterface47813.decodeFunctionResult('quoteExactInputSingle',raw);
+    const v3Out=BigInt(decoded[0]);
+    const finalUsdc=direction==='SUSHI_BUY_UNI_SELL'?v3Out:dexV2AmountOut47812(v3Out,rWeth,rUsdc);
+    const grossMicro=finalUsdc-usdcIn;
+    rows.push({direction,v3Venue:uni.name,v3Pool:uni.pool,v3FeeTier:fee,sushiPool:sushi.pool,inputUsdc:size,firstLegWethOut:(direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:v3Out).toString(),finalUsdcBeforeGas:Number(finalUsdc)/1e6,grossBeforeGasUsd:Number(grossMicro)/1e6,quoterReturned:true,atomicSimulationVerified:false,gasUsd:null,netProfitUsd:null,qualified:false,warning:'UNISWAP_QUOTER_OUTPUT_PLUS_SUSHI_RESERVE_MATH; NO ATOMIC EXECUTION OR GAS VALIDATION'});
+   }catch(e){rows.push({direction,v3Venue:uni.name,v3FeeTier:fee,quoterReturned:false,qualified:false,error:String(e.message||e).slice(0,180)});if(/429|COOLDOWN|RATE_LIMIT/.test(String(e.message)))break;}
+  }
+  if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)break;
+ }
+ return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_CONTRACT_IDENTITY_NOT_VERIFIED_BY_THIS_ENDPOINT','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get('/api/dex-independent/cross-dex-quotes/status',(req,res)=>res.json({success:true,version:VERSION,running:dexQuotes47813.running,runs:dexQuotes47813.runs,lastCompletedAt:dexQuotes47813.lastCompletedAt,result:dexQuotes47813.lastResult,safety:{readOnly:true,mainnetBroadcast:false}}));
+app.get('/api/dex-independent/cross-dex-quotes/run',(req,res)=>{
+ if(dexQuotes47813.running)return res.status(409).json({success:false,error:'QUOTE_CHECK_ALREADY_RUNNING'});
+ const chainId=Number(req.query.chainId||8453),size=Number(req.query.size||100);
+ if(!MC4750_CHAINS.some(c=>c.chainId===chainId)||![100,500,1000].includes(size))return res.status(400).json({success:false,error:'USE_CHAINID_8453_42161_10_AND_SIZE_100_500_1000'});
+ const snap=dexVerified4788.get(chainId);
+ if(!snap||Date.now()-Date.parse(snap.observedAt)>DEX_SNAPSHOT_MAX_AGE_MS_4788)return res.status(409).json({success:false,error:'RUN_DISCOVERY_FIRST_SNAPSHOT_MUST_BE_UNDER_10_MINUTES'});
+ dexQuotes47813.running=true;dexQuotes47813.runs++;
+ setImmediate(async()=>{try{dexQuotes47813.lastResult=await dexCrossQuotes47813(chainId,size);}catch(e){dexQuotes47813.lastResult={success:false,version:VERSION,error:String(e.message||e)};}finally{dexQuotes47813.running=false;dexQuotes47813.lastCompletedAt=new Date().toISOString();}});
+ res.json({success:true,version:VERSION,status:'STARTED_BACKGROUND',statusRoute:'/api/dex-independent/cross-dex-quotes/status',readOnly:true});
+});
+
 
 app.get("/api/rpc-budget/trace",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",byChain:rpcTrace47810.byChain,byCaller:rpcTrace47810.byCaller,byMethod:rpcTrace47810.byMethod,responses:rpcTrace47810.responses,recent429:rpcTrace47810.recent429,warning:rpcTrace47810.unmonitoredTransportWarning,containsSecrets:false,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/rpc-budget/status",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",monthlyQuotaMeasured:false,cuPerSecondMeasured:false,requests:rpcBudget4789.requests,rateLimited:rpcBudget4789.rateLimited,methods:rpcBudget4789.methods,minimumSpacingMs:rpcBudget4789.minimumSpacingMs,last429:rpcBudget4789.last429,cooldownRemainingMs:Math.max(0,rpcBudget4789.blockedUntil-Date.now()),note:"Other RPC transports and external apps are not covered",safety:{readOnly:true,mainnetBroadcast:false}}));
