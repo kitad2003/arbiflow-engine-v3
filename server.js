@@ -72,6 +72,7 @@ app.use(express.json());
 // Phase 7: manual read-only public exchange market data (pre-integrated).
 require('./phase7-cex').mount(app);
 require('./phase73-net').mount(app);
+require('./phase8-flashloan').mount(app);
 
 const PORT = process.env.PORT || 3000;
 const ZEROX_API_KEY = process.env.ZEROX_API_KEY || "";
