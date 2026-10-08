@@ -1,14 +1,10 @@
-ARBIFLOW PHASE 7.2 — FULL INTEGRATED UPDATE
+ArbiFlow Phase 7.3 additive integration
 
-1. Extract ZIP.
-2. Upload server.js and phase7-cex.js to GitHub repository ROOT, replacing the existing versions.
-3. Leave all other files untouched.
-4. Deploy Render. Do not change environment variables.
-5. Check /api/phase7/status: stage must read PHASE7_2_MANUAL_PUBLIC_CEX_MARKET_DATA and build 7.2.0.
-6. Test /api/phase7/quote?venue=gemini and ?venue=bitstamp.
-7. Test /api/phase7/compare. It now includes depthSizedCandidates for $100/$500/$1000.
+Upload server.js, phase7-cex.js, phase73-net.js to the ROOT of the existing GitHub repository. Replace the first two files; add the third. Keep ALL other files unchanged. Commit and wait for Render deployment.
 
-If UNKNOWN_VENUE still appears with an older build, Render is serving an old deployment or another service/instance. Confirm the deployed commit and restart.
+Status: /api/phase73/status
+Manual scenario: /api/phase73/net-compare?capitalUSD=500&buyFeeBps=20&sellFeeBps=20&transferUSD=0
 
-No automated scans, orders, broadcasts or real money execution. Gross spreads are NOT profit.
-Exchange fees, inventory, settlement and transfer costs are not verified.
+Fee basis points are HYPOTHETICAL USER INPUTS (20 bps=0.20%). No exchange-specific actual fees are verified. Transfer defaults to 0 for pre-funded account scenario; not a claim that transfers are free. Never interpret positive scenario as executable profit.
+
+Safety: read only; no automatic scanning; no trading; no mainnet broadcasting.
