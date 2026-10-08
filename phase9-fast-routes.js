@@ -17,7 +17,7 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.5';
+const BUILD='9.9.6';
 const RPC_TIMEOUT_MS=12000;
 const SCAN_TIMEOUT_MS=180000;
 const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
@@ -85,19 +85,23 @@ function mount(app,{getBaseChain,rpc}){
   const oriented=(from,to)=>triangleLive.filter(v=>(v.from===from&&v.to===to)||(v.from===to&&v.to===from)).map(v=>({...v,from,to}));
   const triangleDirections=[['USDC','LINK','WETH','USDC'],['USDC','WETH','LINK','USDC']];
   const triangleRoutes=[];
-  const triangleTradeSizesUsd=[25,50,100,200,500];
+  const triangleTradeSizesUsd=[25,50,100];
   let triangleQuoteCalls=0;
+  const quoteTiming={calls:0,totalMs:0,maxMs:0};
   async function triangleQuote(v,amount){
-   if(v.kind==='AERODROME'){
-    const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[TOKENS[v.from],TOKENS[v.to],v.stable,v.factory]]]);
-    return amounts[amounts.length-1];
-   }
-   const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[TOKENS[v.from],TOKENS[v.to],amount,v.fee,0]]);
-   return output;
+   const started=Date.now();
+   try{
+    if(v.kind==='AERODROME'){
+     const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[TOKENS[v.from],TOKENS[v.to],v.stable,v.factory]]]);
+     return amounts[amounts.length-1];
+    }
+    const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[TOKENS[v.from],TOKENS[v.to],amount,v.fee,0]]);
+    return output;
+   }finally{const ms=Date.now()-started;quoteTiming.calls++;quoteTiming.totalMs+=ms;quoteTiming.maxMs=Math.max(quoteTiming.maxMs,ms)}
   }
   // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
   progress('QUOTE_TRIANGLES');
-  const triangleQuoteBudget=1;
+  const triangleQuoteBudget=2;
   for(const path of triangleDirections){
    const legs=[0,1,2].map(i=>oriented(path[i],path[i+1]));
    const candidates=[];
@@ -123,8 +127,23 @@ function mount(app,{getBaseChain,rpc}){
   }
   const validTriangle=triangleRoutes.filter(r=>r&&Number.isFinite(r.grossProfitUsd));
   const bestTriangle=validTriangle.slice().sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd)[0]??null;
+  const splitComparisons=[];
+  const full100=validTriangle.filter(r=>r.sizeUsdc===100);
+  const half50=validTriangle.filter(r=>r.sizeUsdc===50);
+  for(const single of full100){
+   for(let i=0;i<half50.length;i++)for(let j=i+1;j<half50.length;j++){
+    const a=half50[i],b=half50[j];
+    if(a.route!==single.route||b.route!==single.route)continue;
+    const pa=new Set(a.pools.map(x=>x.toLowerCase()));
+    if(b.pools.some(x=>pa.has(x.toLowerCase())))continue;
+    const combinedReturnRaw=BigInt(a.usdcReturnedRaw)+BigInt(b.usdcReturnedRaw);
+    const combinedGrossUsd=Number(combinedReturnRaw-100000000n)/1e6;
+    splitComparisons.push({route:single.route,sizeUsdc:100,splitSizesUsd:[50,50],splitVenues:[a.venues,b.venues],splitPools:[a.pools,b.pools],singleGrossProfitUsd:single.grossProfitUsd,splitGrossProfitUsd:combinedGrossUsd,grossImprovementUsd:combinedGrossUsd-single.grossProfitUsd,netProfitUsd:null,executionEligible:false,reason:'DISJOINT_POOLS_QUOTED_AT_SAME_BLOCK_NOT_ATOMIC_AND_GAS_UNVERIFIED'});
+   }
+  }
   const triangleSizing={method:'BOUNDED_GROSS_SIZE_SEARCH',testedSizesUsd:triangleTradeSizesUsd,bestGrossRoute:bestTriangle,bestPositiveGrossRoute:validTriangle.filter(r=>r.grossProfitUsd>0).sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd)[0]??null,netOptimalSizeUsd:null,breakEvenSizeUsd:null,reason:'GAS_AND_ATOMIC_EXECUTION_NOT_VERIFIED'};
   state.partial.triangleSizing=triangleSizing;
+  state.partial.splitComparison={tested:splitComparisons.length,comparisons:splitComparisons,limitation:splitComparisons.length?'GAS_AND_ATOMIC_EXECUTION_UNVERIFIED':'NO_FULLY_DISJOINT_POOL_ROUTE_PAIRS_WITH_COMPLETE_50_AND_100_USD_QUOTES'};
   phase91.registerPools(pools);
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.asset===b.asset&&a.name!==b.name).map(b=>({buy:a,sell:b})));
@@ -167,7 +186,7 @@ function mount(app,{getBaseChain,rpc}){
    const best=ranked()[0];
    const output={...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};state.partial.twoLegRoutes.push(output);return output;
   },()=>signal.aborted);
-  return {success:true,stage:'PHASE990_TRIANGULAR_EXPERIMENT',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,triangleExperiment:{readOnly:true,assets:triangleAssets,tradeSizesUsd:triangleTradeSizesUsd,sizing:triangleSizing,poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:triangleRoutes.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:triangleRoutes.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NO_TOKEN_SAFETY_VERIFICATION','NOT_EXECUTION_ELIGIBLE']},tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'PHASE990_TRIANGULAR_EXPERIMENT',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,triangleExperiment:{readOnly:true,assets:triangleAssets,tradeSizesUsd:triangleTradeSizesUsd,sizing:triangleSizing,splitComparison:state.partial.splitComparison,quoteTiming:{...quoteTiming,averageMs:quoteTiming.calls?Math.round(quoteTiming.totalMs/quoteTiming.calls):null},poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:triangleRoutes.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:triangleRoutes.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NO_TOKEN_SAFETY_VERIFICATION','NOT_EXECUTION_ELIGIBLE']},tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){if(state.running)return;await execute({type:'CONFIRMED_SWAP',pool:event.pool,blockNumber:event.blockNumber,transactionHash:event.transactionHash})}
  phase92.register(eventRequote);
