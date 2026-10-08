@@ -1,14 +1,16 @@
-ArbiFlow Phase 6 Monad + Sui identity fix
+ArbiFlow Phase 6: final Sui identifier verification
 
-Replace ONLY phase6-network-probe.js in GitHub repository root. Do NOT replace server.js, package.json, or scanner code.
+Replace ONLY phase6-network-probe.js in your repository root.
+Do not replace server.js, package.json, scanner modules or contracts.
 
-Render variables:
-MONAD_RPC_URL=https://rpc.monad.xyz
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 SUI_GRAPHQL_URL=https://graphql.mainnet.sui.io/graphql
+MONAD_RPC_URL=https://rpc.monad.xyz
 
-SUI_RPC_URL is legacy JSON-RPC and is no longer used by this module.
-SUI_CHAIN_IDENTIFIER is optional; until an independently trusted Sui mainnet identifier is configured, a successful Sui GraphQL request reports REACHABLE_UNVERIFIED, not VERIFIED. Obtain the expected identifier from a trusted independent source; do not blindly copy the result from the same endpoint.
+The Sui expected identifier is hardcoded from Mysten Labs' public Sui SDK
+reference; SUI_CHAIN_IDENTIFIER can override it if explicitly configured.
+If SUI_CHAIN_IDENTIFIER is set incorrectly in Render, remove it.
 
-Endpoint: /api/expansion-25x25/phase6-probe
-All probes are manual, read-only, sequential via existing server integration. No transaction broadcasts.
+Deploy to Render and manually visit:
+https://arbiflow-engine-v3.onrender.com/api/expansion-25x25/phase6-probe
+
+Read-only RPC checks only; no automatic scanning or mainnet broadcasting.

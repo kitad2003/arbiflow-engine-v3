@@ -4,13 +4,13 @@ const CONFIG = Object.freeze({
   ronin: { vm: "evm", env: "RONIN_RPC_URL", expected: "0x7e4" },
   monad: { vm: "evm", env: "MONAD_RPC_URL", expected: "0x8f" },
   solana: { vm: "solana", env: "SOLANA_RPC_URL", expected: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
-  sui: { vm: "sui-graphql", env: "SUI_GRAPHQL_URL", expected: null },
+  sui: { vm: "sui-graphql", env: "SUI_GRAPHQL_URL", expected: "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S" },
 });
 const SUI_DEFAULT_GRAPHQL = "https://graphql.mainnet.sui.io/graphql";
 function expectedFor(key) {
   if (key === "monad") return process.env.MONAD_CHAIN_ID || CONFIG.monad.expected;
   if (key === "solana") return process.env.SOLANA_GENESIS_HASH || CONFIG.solana.expected;
-  if (key === "sui") return process.env.SUI_CHAIN_IDENTIFIER || null;
+  if (key === "sui") return process.env.SUI_CHAIN_IDENTIFIER || CONFIG.sui.expected;
   return CONFIG[key].expected;
 }
 function endpointFor(key) {
