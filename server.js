@@ -9940,3 +9940,6 @@ app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:
 app.get("/api/dex-independent/run",(req,res)=>{if(dex4780.running||Date.now()<dexRpcGate4783.cooldownUntil)return res.json({success:false,version:VERSION,status:dex4780.running?"ALREADY_RUNNING":"RPC_COOLDOWN_ACTIVE",retryAfterMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now()),readOnly:true});setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
 // Free-tier mode: independent DEX discovery runs only on explicit request.
 if(process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true")setTimeout(()=>runDex4780().catch(()=>{}),15000);
+
+// Phase 8.2 integrated with the EXISTING independent DEX scanner state.
+require('./phase82-dex').mount(app,{getEvidence:()=>dex4780});

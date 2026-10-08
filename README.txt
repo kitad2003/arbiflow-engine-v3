@@ -1,10 +1,14 @@
-ArbiFlow Phase 8.1 — DEX evidence coverage audit
+ArbiFlow Phase 8.2 - bounded DEX candidate discovery + existing-scanner evidence bridge
+Upload ALL five JavaScript files (server.js, phase82-dex.js, phase8-flashloan.js, phase73-net.js, phase7-cex.js) to the repository root. Preserve other existing repository files and environment settings.
 
-Upload ALL FIVE JS files to the GitHub repository root. Replace same-named files, keep all other repository files unchanged. Render deploy.
+Endpoints:
+/api/phase82/status - existing independent DEX scanner evidence plus external candidate counts
+/api/phase82/diagnostics - why evidence might be empty
+/api/phase82/discover?network=base - MANUAL GeckoTerminal candidate discovery (up to 30 results)
+/api/phase82/candidates?network=base - indexed candidates, NOT on-chain verified
+/api/dex-independent/run - existing manual on-chain pool discovery (RPC costs and cooldowns apply)
+/api/dex-independent/status - existing independent DEX verification state
 
-/api/phase81/status
-/api/phase81/dex-coverage
+Important: GeckoTerminal candidate addresses and indexed reserves are not independently verified. They do not count toward the 500 verified liquidity-source target. The candidate cache and existing scanner evidence are in-memory, NOT durable across Render restarts. PostgreSQL persistence, protocol-wide factory enumeration, multi-hop quote graph and atomic fork simulation remain future work.
 
-Audit reads existing in-memory DEX discovery evidence. It makes no RPC calls and does not pretend 500 DEXs are active. To populate existing discovery evidence, use the existing manual /api/dex-independent/run endpoint sparingly and check /api/dex-independent/status. Respect RPC cooldowns.
-
-No auto scanning, live trade execution, or mainnet broadcast added. Phase 8.1 is an audit, NOT atomic flash-loan execution.
+Safety: no new automatic scans, no broadcasting, no wallet access, no transaction execution. Existing safety settings and other modules are unchanged.
