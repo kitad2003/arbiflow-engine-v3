@@ -2,6 +2,7 @@
 // Phase 10.1: read-only pending-block classification. RPC pending view is not the full mempool.
 const {Interface}=require('ethers');
 const {simulateAerodrome}=require('./phase102-impact');
+const pendingObservations=require('./phase108-observations');
 const routerRegistry={
  UNISWAP_ROUTER_02:'0x2626664c2603336e57b271c5c0b26f421741e481',
  AERODROME_ROUTER:'0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43'
@@ -44,7 +45,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'10.5.0',running:false,checks:0,lastResult:null};
+ const state={build:'10.8.0',running:false,checks:0,lastResult:null};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  app.get('/api/phase10/probe',async(_req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
@@ -54,9 +55,10 @@ function mount(app,{getBaseChain,rpc}){
    const pending=await Promise.race([rpc(chain,'eth_getBlockByNumber',['pending',true]),new Promise((_,reject)=>setTimeout(()=>reject(Error('PENDING_RPC_TIMEOUT_12000MS')),12000))]);
    const transactions=Array.isArray(pending?.transactions)?pending.transactions:[];
    const samples=transactions.slice(0,1000),counts={nativeTransfer:0,contractCreation:0,contractInteraction:0,knownRouter:0,supportedSwapMethod:0,unsupportedRouterMethod:0,nestedMulticall:0,hashOnly:0};
-   const routers={},swaps=[],unknownSelectors={},unknownTargets=new Map(),tokenMethods={verifiedUsdc:0,unverifiedErc20Selector:0},watchedAssets={usdc:0,weth:0};
+   let newPendingObservations=0;const routers={},swaps=[],unknownSelectors={},unknownTargets=new Map(),tokenMethods={verifiedUsdc:0,unverifiedErc20Selector:0},watchedAssets={usdc:0,weth:0};
    for(const tx of samples){
     if(!tx||typeof tx!=='object'){counts.hashOnly++;continue;}
+    if(pendingObservations.record(tx))newPendingObservations++;
     if(!tx.to){counts.contractCreation++;continue;}
     const data=String(tx.input||tx.data||'0x');
     if(data==='0x'||data.length<10){counts.nativeTransfer++;continue;}
@@ -70,7 +72,7 @@ function mount(app,{getBaseChain,rpc}){
    }
    for(const swap of swaps.filter(x=>x.router==='AERODROME_ROUTER').slice(0,2)){swap.impact=await simulateAerodrome({value:swap._txValue},swap,chain,rpc);}
    for(const swap of swaps)delete swap._txValue;
-   state.lastResult={success:true,build:state.build,chainId:8453,tokenMethods,watchedAssets,reportedPendingTransactions:transactions.length,inspectedTransactions:samples.length,inspectionCoveragePct:transactions.length?Math.round(samples.length/transactions.length*10000)/100:100,inspectionTruncated:transactions.length>samples.length,inspectionLimit:1000,counts,knownRouterHits:routers,dominantUnknownTarget:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,1).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,shareOfInspectedPct:samples.length?Math.round(count/samples.length*10000)/100:0,verifiedIdentity:false};})[0]||null,topUnknownDestinations:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,classification:to===BASE_USDC&&erc20Selectors[selector]?'VERIFIED_USDC_'+erc20Selectors[selector]:erc20Selectors[selector]?'ERC20_'+erc20Selectors[selector]+'_SELECTOR_UNVERIFIED_TARGET':'UNKNOWN_CONTRACT_METHOD'};}),topUnknownSelectors:Object.entries(unknownSelectors).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([selector,count])=>({selector,count})),decodedSupportedSwaps:swaps.length,swaps:swaps.slice(0,30),visibility:transactions.length?'RPC_PENDING_BLOCK_SAMPLE_NOT_FULL_MEMPOOL':'NO_PENDING_TRANSACTIONS_VISIBLE',limitations:['UNKNOWN_CONTRACT_IDENTITY_NOT_VERIFIED','TOKEN_METHODS_NOT_SWAP_SIGNALS','UNKNOWN_DESTINATIONS_REQUIRE_VERIFIED_ABIS','ROUTER_REGISTRY_PARTIAL','MULTICALL_INNER_CALLS_NOT_DECODED','NO_PRIVATE_ORDER_FLOW','INDICATIVE_ZERO_FEE_VOLATILE_MODEL_ONLY','NO_CONCENTRATED_LIQUIDITY_SIMULATION','NO_PROFIT_VALIDATION','NO_EXECUTION'],qualified:0,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+   state.lastResult={success:true,build:state.build,chainId:8453,newPendingObservations,pendingObservationStore:pendingObservations.stats(),tokenMethods,watchedAssets,reportedPendingTransactions:transactions.length,inspectedTransactions:samples.length,inspectionCoveragePct:transactions.length?Math.round(samples.length/transactions.length*10000)/100:100,inspectionTruncated:transactions.length>samples.length,inspectionLimit:1000,counts,knownRouterHits:routers,dominantUnknownTarget:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,1).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,shareOfInspectedPct:samples.length?Math.round(count/samples.length*10000)/100:0,verifiedIdentity:false};})[0]||null,topUnknownDestinations:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,classification:to===BASE_USDC&&erc20Selectors[selector]?'VERIFIED_USDC_'+erc20Selectors[selector]:erc20Selectors[selector]?'ERC20_'+erc20Selectors[selector]+'_SELECTOR_UNVERIFIED_TARGET':'UNKNOWN_CONTRACT_METHOD'};}),topUnknownSelectors:Object.entries(unknownSelectors).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([selector,count])=>({selector,count})),decodedSupportedSwaps:swaps.length,swaps:swaps.slice(0,30),visibility:transactions.length?'RPC_PENDING_BLOCK_SAMPLE_NOT_FULL_MEMPOOL':'NO_PENDING_TRANSACTIONS_VISIBLE',limitations:['UNKNOWN_CONTRACT_IDENTITY_NOT_VERIFIED','TOKEN_METHODS_NOT_SWAP_SIGNALS','UNKNOWN_DESTINATIONS_REQUIRE_VERIFIED_ABIS','ROUTER_REGISTRY_PARTIAL','MULTICALL_INNER_CALLS_NOT_DECODED','NO_PRIVATE_ORDER_FLOW','INDICATIVE_ZERO_FEE_VOLATILE_MODEL_ONLY','NO_CONCENTRATED_LIQUIDITY_SIMULATION','NO_PROFIT_VALIDATION','NO_EXECUTION'],qualified:0,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
   }catch(e){state.lastResult={success:false,build:state.build,error:safeError(e),visibility:'RPC_PENDING_BLOCK_UNAVAILABLE',safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
   finally{state.running=false;}
   res.json(state.lastResult);
