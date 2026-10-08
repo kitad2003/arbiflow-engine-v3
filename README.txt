@@ -1,16 +1,12 @@
-ArbiFlow Phase 7: Five CEX public quote probes (manual, read-only).
+ArbiFlow Phase 7 — fully integrated server.js + phase7-cex.js
 
-1. Upload phase7-cex.js to the ROOT of the GitHub repo beside server.js.
-2. In your CURRENT server.js, find the existing Express app initialization (const app = express() or equivalent).
-3. Add exactly ONE line after app is initialized, before app.listen:
-   require('./phase7-cex').mount(app);
-4. Commit, deploy to Render. Do NOT replace server.js with an older version.
-5. Test https://arbiflow-engine-v3.onrender.com/api/phase7/status
-6. Test one at a time (avoid rate limits):
-   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=binance
-   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=coinbase
-   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=kraken
-   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=okx
-   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=bybit
+Based on the exact server (1).js supplied by the user on October 8, 2026.
 
-Notes: No keys. No scheduled scan. No orders. Bid/ask are public indicative book-top prices, not executable size-aware quotes. Coinbase/Kraken use USD; others use USDT. Do NOT compare these as equal or calculate profit until normalized, with depth, fees, withdrawal/transfer constraints and latency. Public APIs can be geo-blocked or rate-limited. This addon does not activate the 25 CEX registry or DEX adapters.
+1. Back up the current GitHub server.js.
+2. Upload BOTH server.js and phase7-cex.js from this folder into the same repository root, replacing server.js.
+3. Do not remove existing Phase 2–6 files, especially phase6-network-probe.js and the 25x25 registry files.
+4. Commit; allow Render to redeploy.
+5. Visit /api/phase7/status then manually visit /api/phase7/quote?venue=binance (also coinbase, kraken, okx, bybit).
+
+No manual code edits required. No API keys required. This is public read-only market-data probing; it is NOT execution or profit verification.
+This ZIP contains only changed/new files, NOT all existing dependencies. Keep package.json, startup files, registry, and other modules as they are.
