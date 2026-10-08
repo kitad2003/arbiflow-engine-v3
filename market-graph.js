@@ -72,15 +72,23 @@ module.exports.mount=(app,{getChain,call})=>{
    routes.push(record);
    return record;
   }
-  // Dynamic candidate sizes are derived from observed USDC-side V2 reserves.
-  // They are screening bounds, not a wallet cap or verified optimum.
-  const usdcV2=live.filter(e=>!e.fee&&e.pair.includes('USDC')).map(e=>{
-   const index=e.token0===tokens.USDC.toLowerCase()?0:1;
-   return Number(BigInt(e.reserves[index]))/1e6;
-  }).filter(n=>Number.isFinite(n)&&n>0);
-  const smallestReserve=usdcV2.length?Math.min(...usdcV2):10000;
-  const sizeCandidates=[0.001,0.005,0.02].map(f=>Math.max(1,Math.min(25000,Math.round(smallestReserve*f*100)/100)));
-  const sizes=[...new Set(sizeCandidates)].sort((a,b)=>a-b);
+  // Never let the shallowest unrelated V2 pool set every route's size.
+  // Each candidate has an independent reserve-based ceiling. V3 liquidity
+  // is not directly USD-denominated, so V3 sizing remains probe-based.
+  function routeSizeLimit(legs,combo){
+   const ceilings=[];
+   for(let i=0;i<3;i++){
+    const e=combo[i],from=legs[i][0];
+    if(e.fee)continue;
+    const idx=e.token0===tokens[from].toLowerCase()?0:1;
+    const reserve=Number(BigInt(e.reserves[idx]))/10**decimals[from];
+    if(Number.isFinite(reserve)&&reserve>0&&from==='USDC')ceilings.push(reserve*0.02);
+   }
+   return Math.min(25000,...ceilings);
+  }
+  const baselineSize=1;
+  const refinementSizes=[5,25,100,500,2500,10000];
+  const sizes=[baselineSize,...refinementSizes];
   // All 27 venue combinations in both triangular directions, with one
   // baseline probe each. Refine only the strongest gross-return candidates.
   const candidates=[];
@@ -96,15 +104,26 @@ module.exports.mount=(app,{getChain,call})=>{
    if(row.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE')baseline.push({...candidate,score:row.grossProfitUsd});
   }
   baseline.sort((a,b)=>b.score-a.score);
+  // Spend remaining quote budget on the strongest routes, independently
+  // sized. Larger sizes are screened only if the prior size has not shown
+  // extreme deterioration. Never label these probes an optimized optimum.
+  const perRouteSizing=[];
   for(const candidate of baseline.slice(0,8)){
-   for(const size of sizes.slice(1)){
-    if(quoteCalls>=capQuotes)break;
-    await probe(candidate.legs,candidate.combo,size);
+   const limit=routeSizeLimit(candidate.legs,candidate.combo);
+   const row={route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reserveBasedLimitUsdc:limit,sizesTested:[baselineSize],stoppedReason:null};
+   for(const size of refinementSizes){
+    if(quoteCalls+3>capQuotes){row.stoppedReason='QUOTE_BUDGET';break;}
+    if(size>limit){row.stoppedReason='V2_RESERVE_SCREEN';break;}
+    const result=await probe(candidate.legs,candidate.combo,size);
+    row.sizesTested.push(size);
+    if(result.status!=='INDICATIVE_QUOTED_NOT_EXECUTABLE'){row.stoppedReason='QUOTE_FAILED';break;}
+    if(result.grossReturnPct < -10){row.stoppedReason='EXTREME_NEGATIVE_RETURN';break;}
    }
+   perRouteSizing.push(row);
   }
   const bestByGross=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE').sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd).slice(0,10);
   const quoted=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE');
-  return {success:true,stage:'DYNAMIC_BIDIRECTIONAL_TRIANGULAR_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,sizeCandidatesUsdc:sizes,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','DYNAMIC_SIZES_ARE_HEURISTIC_NOT_OPTIMIZED','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  return {success:true,stage:'DYNAMIC_BIDIRECTIONAL_TRIANGULAR_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,sizeCandidatesUsdc:sizes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','ROUTE_SPECIFIC_RESERVE_SCREEN_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
  }
  app.get('/api/market-graph/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false}}));
  app.get('/api/market-graph/run',(req,res)=>{
