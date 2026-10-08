@@ -13,6 +13,7 @@ VENUES.push(AERO);
 const af=new Interface(['function getPool(address,address,bool) view returns(address)']);
 const ar=new Interface(['function getReserves(address,address,bool,address) view returns(uint256,uint256)','function getAmountsOut(uint256,(address from,address to,bool stable,address factory)[]) view returns(uint256[])']);
 const f=new Interface(['function getPool(address,address,uint24) view returns(address)']);
+const erc20=new Interface(['function balanceOf(address) view returns(uint256)']);
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
@@ -25,21 +26,23 @@ function mount(app,{getBaseChain,rpc}){
   const block=await rpc(chain,'eth_blockNumber',[]);
   const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]));
   const markets=['WETH','DAI'];
+  const minUsd=500,maxUsd=50000;
+  const minReserveUsdc=BigInt(minUsd*10)*1000000n; // Conservative reserve gate: 10x probe size
   const pools=await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
    const [addr]=v.kind==='AERODROME'?await call(v.factory,af,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.stable]):await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.fee]);
    if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
    if(v.kind==='AERODROME'){
     const [reserveA,reserveB]=await call(v.router,ar,'getReserves',[TOKENS.USDC,TOKENS[v.asset],v.stable,v.factory]);
-    return {...v,pool:addr,reserveUsdcRaw:reserveA.toString(),reserveAssetRaw:reserveB.toString(),status:reserveA>0n&&reserveB>0n?'POOL_LIVE':'POOL_EMPTY'};
+    return {...v,pool:addr,reserveUsdcRaw:reserveA.toString(),reserveAssetRaw:reserveB.toString(),status:reserveA===0n||reserveB===0n?'POOL_EMPTY':reserveA<minReserveUsdc?'INSUFFICIENT_USDC_RESERVE':'POOL_LIVE'};
    }
    const [[t0],[t1],[liq]]=await Promise.all([call(addr,p,'token0',[]),call(addr,p,'token1',[]),call(addr,p,'liquidity',[])]);
    if(![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS.USDC.toLowerCase())||![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.asset].toLowerCase()))throw Error('TOKEN_IDENTITY_MISMATCH');
-   return {...v,pool:addr,liquidity:liq.toString(),status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};
+   const [usdcBalance]=await call(TOKENS.USDC,erc20,'balanceOf',[addr]);
+   return {...v,pool:addr,liquidity:liq.toString(),reserveUsdcRaw:usdcBalance.toString(),status:liq===0n?'POOL_EMPTY':usdcBalance<minReserveUsdc?'INSUFFICIENT_USDC_RESERVE':'POOL_LIVE'};
   });
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.asset===b.asset&&a.name!==b.name).map(b=>({buy:a,sell:b})));
   // Adaptive bounded range: 3 coarse points, then up to 2 refinements per route.
-  const minUsd=500,maxUsd=50000;
   const initial=[minUsd,Math.round(Math.sqrt(minUsd*maxUsd)),maxUsd];
   let quoteCalls=0;
   const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
@@ -61,7 +64,8 @@ function mount(app,{getBaseChain,rpc}){
    }
    // Screen the minimum size before expensive adaptive sampling.
    const screening=await sample(minUsd);
-   const promising=Number.isFinite(screening.grossSpreadPct)&&screening.grossSpreadPct>0;
+   const sane=buy.asset!=='DAI'||(BigInt(screening.wethOutputRaw||0)>0n&&Number(BigInt(screening.wethOutputRaw||0))/1e18>=minUsd*0.95&&Number(BigInt(screening.wethOutputRaw||0))/1e18<=minUsd*1.05);
+   const promising=sane&&Number.isFinite(screening.grossSpreadPct)&&screening.grossSpreadPct>0;
    if(promising)for(const size of initial.filter(x=>x!==minUsd))await sample(size);
    const ranked=()=>samples.filter(s=>Number.isFinite(s.grossProfitUsd)).sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd);
    const bestCoarse=ranked()[0];
@@ -75,9 +79,9 @@ function mount(app,{getBaseChain,rpc}){
     }
    }
    const best=ranked()[0];
-   return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AT_MIN_SIZE'},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
+   return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
   });
-  return {success:true,stage:'PHASE95_MULTI_TOKEN_SCREENED_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'PHASE96_RESERVE_AND_SANITY_GATED_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){
   if(state.running)return;
