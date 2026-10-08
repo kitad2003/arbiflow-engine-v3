@@ -151,6 +151,6 @@ function mount(app,{getBaseChain,rpc}){
  phase92.register(eventRequote);
  app.get('/api/phase92/status',(_req,res)=>res.json({success:true,...phase92.status(),quoteEngineRunning:state.running,lastCompletedAt:state.lastCompletedAt,lastResultSummary:state.lastResult?{success:state.lastResult.success,blockNumber:state.lastResult.blockNumber,routeCount:state.lastResult.routeCount,positiveIndicativeRoutes:state.lastResult.positiveIndicativeRoutes,qualified:state.lastResult.qualified,trigger:state.lastResult.trigger,error:state.lastResult.error}:null,safety}));
  app.get('/api/phase9/status',(_req,res)=>res.json({success:true,build:BUILD,...state,safety}));
- app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',progress:state.progress,startedAt:state.startedAt,safety});setImmediate(()=>execute());res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
+ app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',progress:state.progress,startedAt:state.startedAt,safety});state.running=true;setImmediate(()=>execute());res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
 }
 module.exports={mount,mapLimit};
