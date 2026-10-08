@@ -9216,6 +9216,32 @@ const { probeEvmChain, rpcEnvironmentNames } = require('./manual-rpc-probe');
 app.get('/api/expansion-25x25/rpc-config', (req, res) => {
   res.json({success:true, stage:'MANUAL_RPC_PROBE', chains:expansionRegistry47820.chains.map(c=>({key:c.key,vm:c.vm,expectedChainId:c.chainId,rpcConfigured:c.vm==='evm' && rpcEnvironmentNames(c.key).some(name=>Boolean(process.env[name])) || (c.vm==='evm' && Boolean(RPC_URLS[c.key])), probeSupported:c.vm==='evm' && Number.isInteger(c.chainId)})), automaticScanning:false, mainnetBroadcast:false});
 });
+// Phase 3: bounded, manually triggered sequential RPC checks. No timers or scans.
+const phase3Targets = Object.freeze(['avalanche','linea','scroll','mantle','zksync']);
+let phase3Busy = false;
+app.get('/api/expansion-25x25/phase3-config', (req,res) => {
+  res.json({success:true,stage:'PHASE3_RPC_ONBOARDING',targets:phase3Targets.map(key=>({key,expectedChainId:expansionRegistry47820.chains.find(c=>c.key===key).chainId,environmentVariable:rpcEnvironmentNames(key)[0],configured:rpcEnvironmentNames(key).some(n=>Boolean(process.env[n]))||Boolean(RPC_URLS[key])})),readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+});
+app.get('/api/expansion-25x25/phase3-probe', async (req,res) => {
+  if(phase3Busy)return res.status(429).json({success:false,error:'PHASE3_PROBE_ALREADY_RUNNING'});
+  phase3Busy=true;
+  try {
+    const results=[];
+    for(const key of phase3Targets){
+      const chain=expansionRegistry47820.chains.find(c=>c.key===key);
+      const envName=rpcEnvironmentNames(key).find(n=>Boolean(process.env[n]));
+      const url=envName?process.env[envName]:RPC_URLS[key];
+      if(!url){results.push({key,configured:false,status:'NOT_CONFIGURED'});continue;}
+      const result=await probeEvmChain({url,expectedChainId:chain.chainId});
+      results.push({key,configured:true,...result});
+      // Avoid a simultaneous five-network RPC burst.
+      await new Promise(resolve=>setTimeout(resolve,1200));
+    }
+    res.json({success:true,stage:'PHASE3_MANUAL_SEQUENTIAL_RPC_PROBE',results,verified:results.filter(x=>x.status==='VERIFIED').length,readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+  } catch(e){res.status(500).json({success:false,error:'PHASE3_PROBE_FAILED'});}
+  finally{phase3Busy=false;}
+});
+
 app.get('/api/expansion-25x25/rpc-probe', async (req, res) => {
   const key = typeof req.query.chain==='string' ? req.query.chain.trim().toLowerCase() : '';
   const chain = expansionRegistry47820.chains.find(c=>c.key===key);
