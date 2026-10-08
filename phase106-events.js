@@ -1,6 +1,7 @@
 'use strict';
 // Phase 10.7: bounded confirmed swap monitoring; cursor is process-local, not durable storage.
 const {Interface,id}=require('ethers');
+const pendingObservations=require('./phase108-observations');
 const FACTORY='0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const WETH='0x4200000000000000000000000000000000000006';
@@ -14,7 +15,7 @@ const hex=n=>'0x'+n.toString(16);
 function mount(app,{getBaseChain,rpc}){
  const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0};
  const seen=new Set();
- app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.7.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,lastResult:state.lastResult,safety}));
+ app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.8.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,lastResult:state.lastResult,safety}));
  app.get('/api/phase10/events/probe',async(_req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
   state.running=true;state.checks++;
@@ -22,7 +23,7 @@ function mount(app,{getBaseChain,rpc}){
    const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
    const latest=Number(BigInt(await rpc(chain,'eth_blockNumber',[])));
    const pools=[],observations=[],logDiagnostics=[];
-   let logFailures=0,duplicatesSkipped=0,scannedBlocks=0;
+   let logFailures=0,duplicatesSkipped=0,scannedBlocks=0,matchedPendingSwaps=0,unmatchedConfirmedSwaps=0;
    for(const fee of [500,3000]){
     const pool={fee};
     try{
@@ -55,7 +56,9 @@ function mount(app,{getBaseChain,rpc}){
       const event=swap.parseLog(log);
       if(!event)continue;
       const unique=String(log.blockHash||log.blockNumber)+'|'+String(log.transactionHash)+'|'+String(log.logIndex??log.index??'0');
-      parsed.push({unique,record:{pool:address,fee,transactionHash:log.transactionHash,blockNumber:Number(BigInt(log.blockNumber)),logIndex:log.logIndex??log.index??null,amount0Raw:event.args.amount0.toString(),amount1Raw:event.args.amount1.toString(),sqrtPriceX96After:event.args.sqrtPriceX96.toString(),status:'CONFIRMED_SWAP_EVENT_NOT_PREDICTED'}});
+      const observed=pendingObservations.match(log.transactionHash);
+      const confirmedObservedAtMs=Date.now();
+      parsed.push({unique,record:{pendingMatch:observed?'OBSERVED_IN_PENDING_SAMPLE':'NOT_OBSERVED_IN_PENDING_SAMPLE',firstPendingObservedAt:observed?new Date(observed.firstSeenAtMs).toISOString():null,observationAgeMs:observed?Math.max(0,confirmedObservedAtMs-observed.firstSeenAtMs):null,pool:address,fee,transactionHash:log.transactionHash,blockNumber:Number(BigInt(log.blockNumber)),logIndex:log.logIndex??log.index??null,amount0Raw:event.args.amount0.toString(),amount1Raw:event.args.amount1.toString(),sqrtPriceX96After:event.args.sqrtPriceX96.toString(),status:'CONFIRMED_SWAP_EVENT_NOT_PREDICTED'}});
      }
      // Successful response and parsing only: commit cursor and dedup state.
      state.cursors[key]=pool.toBlock;
@@ -65,13 +68,13 @@ function mount(app,{getBaseChain,rpc}){
       if(seen.has(entry.unique)){duplicatesSkipped++;continue;}
       seen.add(entry.unique);state.recentKeys.push(entry.unique);
       if(state.recentKeys.length>2000)seen.delete(state.recentKeys.shift());
-      state.totalUniqueEvents++;observations.push(entry.record);
+      state.totalUniqueEvents++;if(entry.record.pendingMatch==='OBSERVED_IN_PENDING_SAMPLE')matchedPendingSwaps++;else unmatchedConfirmedSwaps++;observations.push(entry.record);
      }
     }catch(e){logFailures++;pool.error=err(e);logDiagnostics.push({fee,attempt:'POOL_SCAN',error:err(e)});}
     pools.push(pool);
    }
-   state.lastResult={success:logFailures===0,build:'10.7.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','NO_PENDING_TRANSACTION_LINKAGE','NO_PROFIT_VALIDATION'],safety};
-  }catch(e){state.lastResult={success:false,build:'10.7.0',error:err(e),safety};}
+   state.lastResult={success:logFailures===0,build:'10.8.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,matchedPendingSwaps,unmatchedConfirmedSwaps,pendingObservationStore:pendingObservations.stats(),observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,pendingHashMatchingImplemented:true,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','PENDING_HASH_MATCHING_REQUIRES_PRIOR_PENDING_PROBES','OBSERVATION_AGE_NOT_BLOCK_CONFIRMATION_LEAD_TIME','NO_PROFIT_VALIDATION'],safety};
+  }catch(e){state.lastResult={success:false,build:'10.8.0',error:err(e),safety};}
   finally{state.running=false;}
   res.json(state.lastResult);
  });
