@@ -18,7 +18,7 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.7';
+const BUILD='9.9.8';
 const RPC_TIMEOUT_MS=12000;
 const SCAN_TIMEOUT_MS=180000;
 const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
@@ -37,6 +37,7 @@ function mount(app,{getBaseChain,rpc}){
   progress('FETCH_BLOCK');
   const block=await timeout(rpc(chain,'eth_blockNumber',[]),RPC_TIMEOUT_MS,'RPC_BLOCK');
   const call=async(to,iface,fn,args)=>{check();const result=await timeout(rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]),RPC_TIMEOUT_MS,'RPC_ETH_CALL');check();return iface.decodeFunctionResult(fn,result)};
+  const triangleOnly=true;
   const markets=['WETH','DAI','cbBTC','USDT'];
   progress('TOKEN_DECIMALS');
   const tokenDecimals={};
@@ -60,7 +61,7 @@ function mount(app,{getBaseChain,rpc}){
   const triangleAssets=['WETH','LINK'];
   const triangleEdges=[['USDC','LINK'],['LINK','WETH'],['WETH','USDC']];
   const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
-  const triangleOnly=true;
+  
   progress('DISCOVER_TRIANGLE_POOLS');
   let triangleDiscovered=0;
   state.partial.poolDiscovery.total=triangleCandidates.length;
