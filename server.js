@@ -18,10 +18,16 @@ const {
   id
 } = require("ethers");
 
-// 4.78.9: one account-level Alchemy RPC gate for native fetch and ethers fetch.
+// 4.78.10: one account-level Alchemy RPC gate for native fetch and ethers fetch.
 // CU costs vary by method/provider. This is deliberately a conservative request
 // pacing safeguard, NOT a certified CU/s meter or guaranteed account-wide limit.
 const rpcBudget4789={tail:Promise.resolve(),nextAt:0,blockedUntil:0,requests:0,rateLimited:0,methods:{},last429:null,minimumSpacingMs:Math.max(1000,Number(process.env.ARBIFLOW_ALCHEMY_SPACING_MS)||1500)};
+// Diagnostic only: bounded, redacted source attribution for Alchemy fetch traffic.
+// Do not log RPC URLs, bodies, headers, API keys, or wallet data.
+const rpcTrace47810={byChain:{},byCaller:{},byMethod:{},responses:{},recent429:[],unmonitoredTransportWarning:"ethers/provider and other HTTP transports may bypass global fetch"};
+function traceChain47810(url){try{const h=new URL(String(url)).hostname;return h.split('.')[0].replace(/[^a-z0-9-]/gi,'').slice(0,36)}catch{return 'unknown'}}
+function traceCaller47810(){const lines=(new Error().stack||'').split('\n');for(const line of lines){const m=line.match(/(?:\(|\s)([^\s()]*?\.js):(\d+):(\d+)/);if(!m)continue;const f=m[1].split(/[\\/]/).pop();if(f==='server.js'&&Number(m[2])<100)continue;return (f+':'+m[2]).slice(0,100)}return 'unattributed'}
+function trace42947810(response,chain,method,caller){const allowed=['retry-after','x-ratelimit-limit','x-ratelimit-remaining','x-ratelimit-reset'];const headers={};for(const k of allowed){const v=response.headers.get(k);if(v!=null)headers[k]=String(v).slice(0,100)}rpcTrace47810.recent429.push({at:new Date().toISOString(),chain,method,caller,httpStatus:429,headers});if(rpcTrace47810.recent429.length>12)rpcTrace47810.recent429.shift()}
 const nativeFetch4789=globalThis.fetch.bind(globalThis);
 const delay4789=ms=>new Promise(r=>setTimeout(r,ms));
 function isAlchemy4789(url){try{return new URL(String(url)).hostname.endsWith('.g.alchemy.com')}catch{return false}}
@@ -39,10 +45,16 @@ globalThis.fetch=async function guardedAlchemyFetch4789(url,opts={}){
   if(Date.now()<rpcBudget4789.blockedUntil)throw new Error('ALCHEMY_SHARED_COOLDOWN_ACTIVE');
   rpcBudget4789.nextAt=Date.now()+rpcBudget4789.minimumSpacingMs;
   const methods=rpcMethods4789(opts?.body);
+  const chain47810=traceChain47810(url),caller47810=traceCaller47810();
+  rpcTrace47810.byChain[chain47810]=(rpcTrace47810.byChain[chain47810]||0)+1;
+  rpcTrace47810.byCaller[caller47810]=(rpcTrace47810.byCaller[caller47810]||0)+1;
+  for(const m of methods)rpcTrace47810.byMethod[m]=(rpcTrace47810.byMethod[m]||0)+1;
   rpcBudget4789.requests++;
   for(const m of methods)rpcBudget4789.methods[m]=(rpcBudget4789.methods[m]||0)+1;
   const response=await nativeFetch4789(url,opts);
+  rpcTrace47810.responses[response.status]=(rpcTrace47810.responses[response.status]||0)+1;
   if(response.status===429){
+   trace42947810(response,chain47810,methods[0]||"unknown",caller47810);
    rpcBudget4789.rateLimited++;rpcBudget4789.last429=new Date().toISOString();
    const retry=response.headers.get('retry-after');const n=Number(retry);const date=Date.parse(retry);
    const wait=Number.isFinite(n)&&n>0?n*1000:Number.isFinite(date)?Math.max(0,date-Date.now()):0;
@@ -78,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.9";
+const VERSION = "4.78.10";
 
 /*
 =========================================================
@@ -9310,7 +9322,7 @@ app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
-// 4.78.9: preserve per-chain verified snapshots in process memory. A failed scan cannot erase them.
+// 4.78.10: preserve per-chain verified snapshots in process memory. A failed scan cannot erase them.
 // Snapshot pool state is historical, never an executable/current quote.
 const dexVerified4788=new Map();
 const DEX_SNAPSHOT_MAX_AGE_MS_4788=600000;
@@ -9496,6 +9508,7 @@ function dexPriceComparison4787(){
  return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"LAST_VERIFIED_PER_CHAIN_SNAPSHOT_IN_MEMORY",lastCompletedAt:dex4780.lastCompletedAt,ageMs:null,fresh,allChainsFresh:chains.every(c=>c.snapshotStatus==="FRESH"),requiresFreshScan:chains.some(c=>c.requiresFreshScan),chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["SNAPSHOTS_IN_MEMORY_LOST_ON_PROCESS_RESTART","NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get("/api/dex-independent/prices",(req,res)=>res.json(dexPriceComparison4787()));
+app.get("/api/rpc-budget/trace",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",byChain:rpcTrace47810.byChain,byCaller:rpcTrace47810.byCaller,byMethod:rpcTrace47810.byMethod,responses:rpcTrace47810.responses,recent429:rpcTrace47810.recent429,warning:rpcTrace47810.unmonitoredTransportWarning,containsSecrets:false,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/rpc-budget/status",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",monthlyQuotaMeasured:false,cuPerSecondMeasured:false,requests:rpcBudget4789.requests,rateLimited:rpcBudget4789.rateLimited,methods:rpcBudget4789.methods,minimumSpacingMs:rpcBudget4789.minimumSpacingMs,last429:rpcBudget4789.last429,cooldownRemainingMs:Math.max(0,rpcBudget4789.blockedUntil-Date.now()),note:"Other RPC transports and external apps are not covered",safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,backgroundHeartbeatIntervalMs:mc4750.pollIntervalMs,autoDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DISCOVERY==="true",autoDexDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true",cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
 app.get("/api/dex-independent/run",(req,res)=>{if(dex4780.running||Date.now()<dexRpcGate4783.cooldownUntil)return res.json({success:false,version:VERSION,status:dex4780.running?"ALREADY_RUNNING":"RPC_COOLDOWN_ACTIVE",retryAfterMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now()),readOnly:true});setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});

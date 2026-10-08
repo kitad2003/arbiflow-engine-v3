@@ -1,0 +1,1 @@
+ArbiFlow 4.78.10: Redacted Alchemy fetch trace. GET /api/rpc-budget/trace. No secrets logged. This diagnostic does not cover all ethers transports or external services. Trading remains read-only.
