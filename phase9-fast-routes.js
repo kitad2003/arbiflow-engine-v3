@@ -17,20 +17,28 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.0';
+const BUILD='9.9.1';
+const RPC_TIMEOUT_MS=12000;
+const SCAN_TIMEOUT_MS=180000;
+const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false,atomicSimulation:false};
 async function mapLimit(items,limit,fn){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
 function mount(app,{getBaseChain,rpc}){
- const state={running:false,runs:0,lastResult:null,lastCompletedAt:null};
+ const state={running:false,runs:0,lastResult:null,lastCompletedAt:null,startedAt:null,progress:{stage:'IDLE',updatedAt:null}};
+ const progress=(stage,details={})=>{state.progress={stage,updatedAt:new Date().toISOString(),...details}};
+ async function execute(trigger){state.running=true;state.runs++;state.startedAt=new Date().toISOString();progress('STARTING');try{state.lastResult=await timeout(run(),SCAN_TIMEOUT_MS,'SCAN');if(trigger)state.lastResult.trigger=trigger;progress('COMPLETED')}catch(e){state.lastResult={success:false,error:err(e),stage:state.progress.stage,safety};progress('FAILED',{error:err(e)})}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}}
  async function run(){
   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
-  const block=await rpc(chain,'eth_blockNumber',[]);
-  const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]));
+  progress('FETCH_BLOCK');
+  const block=await timeout(rpc(chain,'eth_blockNumber',[]),RPC_TIMEOUT_MS,'RPC_BLOCK');
+  const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await timeout(rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]),RPC_TIMEOUT_MS,'RPC_ETH_CALL'));
   const markets=['WETH','DAI','cbBTC','USDT'];
+  progress('TOKEN_DECIMALS');
   const tokenDecimals={};
   for(const asset of markets){const [decimals]=await call(TOKENS[asset],erc20,'decimals',[]);const d=Number(decimals);if(!Number.isInteger(d)||d<0||d>36)throw Error('INVALID_TOKEN_DECIMALS_'+asset);tokenDecimals[asset]=d;}
   const minUsd=500,maxUsd=50000;
   const minReserveUsdc=BigInt(minUsd*10)*1000000n;
+  progress('DISCOVER_TWO_LEG_POOLS');
   const pools=await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
    const [addr]=v.kind==='AERODROME'?await call(v.factory,af,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.stable]):await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.fee]);
    if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
@@ -51,6 +59,7 @@ function mount(app,{getBaseChain,rpc}){
    ['USDC','cbBTC'],['cbBTC','WETH'],['WETH','USDC']
   ];
   const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
+  progress('DISCOVER_TRIANGLE_POOLS');
   const trianglePools=await mapLimit(triangleCandidates,2,async v=>{
    const [addr]=v.kind==='AERODROME'
     ?await call(v.factory,af,'getPool',[TOKENS[v.from],TOKENS[v.to],v.stable])
@@ -77,6 +86,7 @@ function mount(app,{getBaseChain,rpc}){
    return output;
   }
   // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
+  progress('QUOTE_TRIANGLES');
   for(const path of triangleDirections){
    const legs=[0,1,2].map(i=>triangleLive.filter(v=>v.from===path[i]&&v.to===path[i+1]));
    const candidates=[];
@@ -100,6 +110,7 @@ function mount(app,{getBaseChain,rpc}){
   const initial=[minUsd,Math.round(Math.sqrt(minUsd*maxUsd)),maxUsd];
   let quoteCalls=0;
   const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
+  progress('QUOTE_TWO_LEG_ROUTES',{triangleRoutesChecked:triangleRoutes.length});
   const routes=await mapLimit(combinations,2,async({buy,sell})=>{
    const base={route:'USDC>'+buy.asset+'>USDC',asset:buy.asset,venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],qualified:false,netProfitUsd:null,atomicSimulation:false};
    const samples=[];
@@ -136,16 +147,10 @@ function mount(app,{getBaseChain,rpc}){
   });
   return {success:true,stage:'PHASE990_TRIANGULAR_EXPERIMENT',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,triangleExperiment:{readOnly:true,assets:triangleAssets,poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:triangleRoutes.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:triangleRoutes.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NO_TOKEN_SAFETY_VERIFICATION','NOT_EXECUTION_ELIGIBLE']},tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
- async function eventRequote(event){
-  if(state.running)return;
-  state.running=true;state.runs++;
-  try{state.lastResult=await run();state.lastResult.trigger={type:'CONFIRMED_SWAP',pool:event.pool,blockNumber:event.blockNumber,transactionHash:event.transactionHash};}
-  catch(e){state.lastResult={success:false,error:err(e),safety}}
-  finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}
- }
+ async function eventRequote(event){if(state.running)return;await execute({type:'CONFIRMED_SWAP',pool:event.pool,blockNumber:event.blockNumber,transactionHash:event.transactionHash})}
  phase92.register(eventRequote);
  app.get('/api/phase92/status',(_req,res)=>res.json({success:true,...phase92.status(),quoteEngineRunning:state.running,lastCompletedAt:state.lastCompletedAt,lastResultSummary:state.lastResult?{success:state.lastResult.success,blockNumber:state.lastResult.blockNumber,routeCount:state.lastResult.routeCount,positiveIndicativeRoutes:state.lastResult.positiveIndicativeRoutes,qualified:state.lastResult.qualified,trigger:state.lastResult.trigger,error:state.lastResult.error}:null,safety}));
  app.get('/api/phase9/status',(_req,res)=>res.json({success:true,build:BUILD,...state,safety}));
- app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',safety});state.running=true;state.runs++;setImmediate(async()=>{try{state.lastResult=await run()}catch(e){state.lastResult={success:false,error:err(e),safety}}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}});res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
+ app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',progress:state.progress,startedAt:state.startedAt,safety});setImmediate(()=>execute());res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
 }
 module.exports={mount,mapLimit};
