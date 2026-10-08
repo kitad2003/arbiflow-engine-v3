@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.10";
+const VERSION = "4.78.11";
 
 /*
 =========================================================
@@ -9158,8 +9158,10 @@ const globalDiscrepancy4710 = require("./GlobalDiscrepancy4710");
 globalDiscrepancy4710.register(app);
 // 4.74: reference/CEX telemetry is a core background service and must survive process restarts without a manual HTTP kick.
 globalDiscrepancy4710.start();
-// 4.72 broad discovery starts independently; failures cannot block the web process.
-startBroadDiscovery4720();
+// 4.78.11: Legacy broad discovery must not start automatically on Alchemy free tier.
+// Manual /api/discovery/start remains available. Explicit opt-in only.
+const legacyBroadAuto47811 = process.env.ARBIFLOW_AUTO_BROAD_DISCOVERY === "true";
+if (legacyBroadAuto47811) startBroadDiscovery4720();
 
 /*
 =========================================================

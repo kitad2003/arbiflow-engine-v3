@@ -1,0 +1,1 @@
+ArbiFlow 4.78.11: prevent legacy broad discovery from auto-starting by default. Manual /api/discovery/start remains available. To explicitly restore legacy auto-start set ARBIFLOW_AUTO_BROAD_DISCOVERY=true. Does not guarantee zero RPC 429; other services/transports remain. Read-only mainnet safeguards unchanged.
