@@ -9943,3 +9943,9 @@ if(process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true")setTimeout(()=>runDex4780().
 
 // Phase 8.2 integrated with the EXISTING independent DEX scanner state.
 require('./phase82-dex').mount(app,{getEvidence:()=>dex4780});
+
+// Phase 8.3: manual Base Uniswap V3 direct contract probe using existing RPC gate.
+require('./phase83-direct-dex').mount(app,{
+ getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),
+ rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)
+});
