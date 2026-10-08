@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.15";
+const VERSION = "4.78.16";
 
 /*
 =========================================================
@@ -9552,7 +9552,7 @@ app.get('/api/dex-independent/quote-readiness',(req,res)=>res.json(dexQuoteReadi
 // 4.78.13: manually requested on-chain quoter checks for Uniswap V3 vs Sushi V2.
 // Each call uses the existing shared, rate-limited DEX RPC transport.
 // Exact-input quote outputs are observations, NOT executable atomic arbitrage.
-const dexQuoterInterface47813=new (require('ethers').Interface)(QUOTER_V1_ABI_4490);
+const dexQuoterInterface47813=new (require('ethers').Interface)(QUOTER_V2_ABI_4501);
 const dexV2Interface47813=new (require('ethers').Interface)(['function getReserves() view returns (uint112,uint112,uint32)']);
 // Normalize hex addresses before ABI encoding. Ethers rejects invalid mixed-case checksums.
 // This does not establish whether a configured address is the correct on-chain contract.
@@ -9585,18 +9585,19 @@ async function dexCrossQuotes47813(chainId,size){
    const amountIn=direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:usdcIn;
    try{
     if(amountIn<=0n)throw Error('ZERO_FIRST_LEG_OUTPUT');
-    const data=dexQuoterInterface47813.encodeFunctionData('quoteExactInputSingle',[tokenIn,tokenOut,fee,amountIn,0]);
+    const data=dexQuoterInterface47813.encodeFunctionData('quoteExactInputSingle',[{tokenIn,tokenOut,amountIn,fee,sqrtPriceLimitX96:0}]);
     const raw=await dexCall4780(c,quoter,data);
     const decoded=dexQuoterInterface47813.decodeFunctionResult('quoteExactInputSingle',raw);
     const v3Out=BigInt(decoded[0]);
+    if(v3Out<=0n)throw Error('ZERO_V3_QUOTE_OUTPUT');
     const finalUsdc=direction==='SUSHI_BUY_UNI_SELL'?v3Out:dexV2AmountOut47812(v3Out,rWeth,rUsdc);
     const grossMicro=finalUsdc-usdcIn;
-    rows.push({direction,v3Venue:uni.name,v3Pool:uni.pool,v3FeeTier:fee,sushiPool:sushi.pool,inputUsdc:size,firstLegWethOut:(direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:v3Out).toString(),finalUsdcBeforeGas:Number(finalUsdc)/1e6,grossBeforeGasUsd:Number(grossMicro)/1e6,quoterReturned:true,atomicSimulationVerified:false,gasUsd:null,netProfitUsd:null,qualified:false,warning:'UNISWAP_QUOTER_OUTPUT_PLUS_SUSHI_RESERVE_MATH; NO ATOMIC EXECUTION OR GAS VALIDATION'});
+    rows.push({direction,v3Venue:uni.name,v3Pool:uni.pool,v3FeeTier:fee,sushiPool:sushi.pool,inputUsdc:size,firstLegWethOut:(direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:v3Out).toString(),finalUsdcBeforeGas:Number(finalUsdc)/1e6,grossBeforeGasUsd:Number(grossMicro)/1e6,quoterReturned:true,quoterAbi:'V2_TUPLE',atomicSimulationVerified:false,gasUsd:null,netProfitUsd:null,qualified:false,warning:'UNISWAP_QUOTER_OUTPUT_PLUS_SUSHI_RESERVE_MATH; NO ATOMIC EXECUTION OR GAS VALIDATION'});
    }catch(e){rows.push({direction,v3Venue:uni.name,v3FeeTier:fee,quoterReturned:false,qualified:false,error:String(e.message||e).slice(0,180)});if(/429|COOLDOWN|RATE_LIMIT/.test(String(e.message)))break;}
   }
   if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)break;
  }
- return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_CONTRACT_IDENTITY_AND_ABI_NOT_VERIFIED_BY_THIS_ENDPOINT','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+ return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_V2_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_V2_ABI_PROBED_ON_BASE_BUT_CONTRACT_IDENTITY_NOT_INDEPENDENTLY_VERIFIED','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 
 // 4.78.15: read-only, manually initiated Base quoter contract/ABI diagnostic.
