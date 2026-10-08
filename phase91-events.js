@@ -23,6 +23,7 @@ function registerPools(pools){
   }
  }
 }
+const BUILD='9.7.1';
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
 function mount(app){
  let provider=null,timer=null;
@@ -92,7 +93,7 @@ function mount(app){
   state.lastError=trim(e);state.status='RECONNECTING';state.reconnects++;
   disconnect().finally(()=>{if(epoch===generation)timer=setTimeout(()=>connect(epoch),Math.min(30000,1000*Math.pow(2,Math.min(state.reconnects,5))))});
  }
- app.get('/api/phase91/status',(_req,res)=>res.json({success:true,instanceId,autoStart,uptimeSeconds:Math.floor(process.uptime()),configured:!!process.env.ARBIFLOW_BASE_WSS_URL,...state,pools:[...POOLS,...[...discoveredPools.values()].filter(p=>!POOLS.some(x=>x.address.toLowerCase()===p.address.toLowerCase()))],eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
+ app.get('/api/phase91/status',(_req,res)=>res.json({success:true,build:BUILD,subscriptionCounts:{staticPools:POOLS.length,discoveredPools:discoveredPools.size,activeFilters:activeFilters.size},instanceId,autoStart,uptimeSeconds:Math.floor(process.uptime()),configured:!!process.env.ARBIFLOW_BASE_WSS_URL,...state,pools:[...POOLS,...[...discoveredPools.values()].filter(p=>!POOLS.some(x=>x.address.toLowerCase()===p.address.toLowerCase()))],eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
  app.get('/api/phase91/start',(_req,res)=>{
   if(state.status==='SUBSCRIBED'||state.status==='CONNECTING'||state.status==='RECONNECTING')return res.json({success:true,status:state.status,safety});
   generation++;state.startedAt=new Date().toISOString();state.reconnects=0;connect(generation).catch(e=>{state.lastError=trim(e)});
