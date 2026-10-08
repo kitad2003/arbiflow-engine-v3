@@ -3,10 +3,10 @@
 const CONFIG=Object.freeze({
  ronin:{vm:'evm',env:'RONIN_RPC_URL',expected:'0x7e4'},
  monad:{vm:'evm',env:'MONAD_RPC_URL',expected:null},
- solana:{vm:'solana',env:'SOLANA_RPC_URL',expected:null},
+ solana:{vm:'solana',env:'SOLANA_RPC_URL',expected:'5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'},
  sui:{vm:'sui',env:'SUI_RPC_URL',expected:null}
 });
-const expectedFor=(key)=>key==='monad' ? (process.env.MONAD_CHAIN_ID||null) : key==='solana' ? (process.env.SOLANA_GENESIS_HASH||null) : key==='sui' ? (process.env.SUI_CHAIN_IDENTIFIER||null) : CONFIG[key].expected;
+const expectedFor=(key)=>key==='monad' ? (process.env.MONAD_CHAIN_ID||null) : key==='solana' ? (process.env.SOLANA_GENESIS_HASH||CONFIG.solana.expected) : key==='sui' ? (process.env.SUI_CHAIN_IDENTIFIER||null) : CONFIG[key].expected;
 function phase6Config(){return Object.entries(CONFIG).map(([key,c])=>({key,vm:c.vm,environmentVariable:c.env,configured:Boolean(process.env[c.env]),expectedIdentifierConfigured:Boolean(expectedFor(key))}));}
 async function request(url,method,params=[]){
  const parsed=new URL(url);
