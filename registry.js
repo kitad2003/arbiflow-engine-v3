@@ -1,11 +1,9 @@
 'use strict';
-const originalChains=[['ethereum',1],['arbitrum',42161],['optimism',10],['base',8453],['polygon',137],['bnb',56],['avalanche',43114],['linea',59144],['scroll',534352],['mantle',5000],['zksync',324],['gnosis',100],['metis',1088],['sonic',146],['celo',42220]];
-const additionalChains=[['solana',null],['monad',143],['unichain',130],['cronos',25],['hyperevm',999],['berachain',80094],['sei',1329],['sui',null],['abstract',2741],['ronin',2020]];
-const originalCex=['binance','coinbase','kraken','kucoin','bybit','okx','gateio','htx','bitfinex','gemini','bitstamp','mexc','cryptocom','bitget','bullish'];
-const additionalCex=['bingx','bitmart','bitvavo','coinex','bitrue','lbank','backpack','bithumb','bitflyer','woox'];
-const inchClassic=new Set([1,42161,10,8453,137,56,43114,59144,324,100,146,143,130,25,999]);
-const chains=[...originalChains.map(([id,chainId])=>({id,chainId,original:true})),...additionalChains.map(([id,chainId])=>({id,chainId,original:false}))].map(c=>({...c,kind:['solana','sui'].includes(c.id)?'non-evm':'evm',oneInchClassicDocumented:c.chainId!==null&&inchClassic.has(c.chainId),configured:false,verified:false,enabled:false}));
-const cexs=[...originalCex.map(id=>({id,original:true})),...additionalCex.map(id=>({id,original:false}))].map(x=>({...x,configured:false,verified:false,enabled:false,marketDataOnly:true,regionReviewRequired:true}));
-function inventory(){return {version:'25x25-registry-1.0',readOnly:true,automaticScanning:false,mainnetBroadcast:false,chains,cexs,targets:{chains:25,cexs:25,dexSources:500},notes:['Registry entries are candidates, not live connections','1inch documentation is not evidence of configured credentials or liquidity','CEX geographic eligibility and exact CCXT IDs must be validated','Solana and Sui require non-EVM adapters','Cross-chain swaps are not same-chain atomic flash loans']};}
-function mount(app){if(!app||typeof app.get!=='function')throw new Error('Express app required');app.get('/api/expansion/inventory',(_req,res)=>res.json(inventory()));app.get('/api/expansion/status',(_req,res)=>res.json({success:true,version:'25x25-registry-1.0',chainsRegistered:chains.length,cexsRegistered:cexs.length,liveConnectionsVerified:0,readOnly:true,automaticScanning:false,mainnetBroadcast:false}));}
-module.exports={chains,cexs,inventory,mount};
+// Registry metadata only. Inclusion does not imply live integration or tradability.
+const chains = [
+ ['ethereum','Ethereum',1,'evm'],['arbitrum','Arbitrum',42161,'evm'],['optimism','Optimism',10,'evm'],['base','Base',8453,'evm'],['polygon','Polygon',137,'evm'],['bnb','BNB Smart Chain',56,'evm'],['avalanche','Avalanche',43114,'evm'],['linea','Linea',59144,'evm'],['scroll','Scroll',534352,'evm'],['mantle','Mantle',5000,'evm'],['zksync','zkSync Era',324,'evm'],['gnosis','Gnosis',100,'evm'],['metis','Metis',1088,'evm'],['sonic','Sonic',146,'evm'],['celo','Celo',42220,'evm'],
+ ['solana','Solana',null,'solana'],['monad','Monad',null,'evm'],['unichain','Unichain',130,'evm'],['cronos','Cronos',25,'evm'],['hyperevm','HyperEVM',999,'evm'],['berachain','Berachain',80094,'evm'],['sei','Sei',1329,'evm'],['sui','Sui',null,'move'],['abstract','Abstract',2741,'evm'],['ronin','Ronin',2020,'evm']
+].map(([key,name,chainId,vm])=>Object.freeze({key,name,chainId,vm,status:'registry_only',enabled:false}));
+const cexNames = ['Binance','Coinbase','Kraken','KuCoin','Bybit','OKX','Gate.io','HTX','Bitfinex','Gemini','Bitstamp','MEXC','Crypto.com','Bitget','Bullish','BingX','BitMart','Bitvavo','CoinEx','Bitrue','LBank','Backpack','Bithumb','bitFlyer','WOO X'];
+const exchanges = cexNames.map(name=>Object.freeze({key:name.toLowerCase().replace(/[^a-z0-9]/g,''),name,status:'registry_only',enabled:false}));
+module.exports = Object.freeze({schemaVersion:1,chains:Object.freeze(chains),exchanges:Object.freeze(exchanges),safety:Object.freeze({readOnly:true,automaticScanning:false,mainnetBroadcast:false})});

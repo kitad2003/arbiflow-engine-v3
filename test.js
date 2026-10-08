@@ -1,10 +1,12 @@
 'use strict';
-const assert=require('node:assert/strict');const {chains,cexs,inventory,mount}=require('./registry');
-assert.equal(chains.length,25);assert.equal(cexs.length,25);
-assert.equal(chains.filter(c=>c.original).length,15);assert.equal(cexs.filter(c=>c.original).length,15);
-assert.equal(new Set(chains.map(c=>c.id)).size,25);assert.equal(new Set(cexs.map(c=>c.id)).size,25);
-assert.equal(new Set(chains.filter(c=>c.chainId!==null).map(c=>c.chainId)).size,23);
-assert.ok(chains.every(c=>!c.enabled&&!c.verified));assert.ok(cexs.every(c=>!c.enabled&&!c.verified));
-assert.equal(inventory().mainnetBroadcast,false);
-const routes={};mount({get:(p,h)=>{routes[p]=h}});assert.ok(routes['/api/expansion/status']);assert.ok(routes['/api/expansion/inventory']);
-console.log('PASS: 25 chains, 25 CEXs, original 15 preserved in each, unique identifiers, disabled by default, read-only endpoints registered');
+const assert = require('node:assert/strict');
+const registry = require('./registry');
+assert.equal(registry.chains.length,25,'expected 25 chains');
+assert.equal(registry.exchanges.length,25,'expected 25 exchanges');
+for (const [kind,entries] of [['chains',registry.chains],['exchanges',registry.exchanges]]) {
+ assert.equal(new Set(entries.map(x=>x.key)).size,25,`${kind} duplicate keys`);
+ assert.ok(entries.every(x=>x.status==='registry_only' && x.enabled===false),`${kind} must be disabled registry entries`);
+}
+assert.equal(registry.safety.mainnetBroadcast,false);
+assert.equal(registry.safety.automaticScanning,false);
+console.log('PASS: 25 chains, 25 CEXs, unique IDs, disabled integrations, read-only safety');
