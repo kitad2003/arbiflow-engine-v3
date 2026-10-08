@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.7";
+const VERSION = "4.78.8";
 
 /*
 =========================================================
@@ -9276,6 +9276,17 @@ app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
+// 4.78.8: preserve per-chain verified snapshots in process memory. A failed scan cannot erase them.
+// Snapshot pool state is historical, never an executable/current quote.
+const dexVerified4788=new Map();
+const DEX_SNAPSHOT_MAX_AGE_MS_4788=600000;
+function updateVerified4788(chainId,row,observedAt){
+ if(!row||row.status!=="MULTI_VENUE_POOLS_VERIFIED"||row.independentFactories<2)return false;
+ const venues=(row.venues||[]).filter(v=>v.status==="POOL_LIVE"&&v.pool&&v.liquidityEvidence?.nonzero);
+ if(new Set(venues.map(v=>String(v.factory).toLowerCase())).size<2)return false;
+ dexVerified4788.set(Number(chainId),{observedAt,discoveryStatus:row.status,independentFactories:row.independentFactories,venues:JSON.parse(JSON.stringify(venues))});
+ return true;
+}
 const dexFactory4780=new (require("ethers").Interface)([
  "function getPair(address,address) view returns (address)",
  "function getPool(address,address,uint24) view returns (address)"
@@ -9405,6 +9416,8 @@ async function runDex4780(){if(dex4780.running)return;dex4780.running=true;dex47
    await dexDiscover4780(c).catch(e=>({name:c.name,chainId:c.chainId,status:"ERROR",lastError:String(e.message),venues:[]}));
   dex4780.chains[row.chainId]=row;
   if(Date.now()<dexRpcGate4783.cooldownUntil)row.status="PARTIAL_RPC_RATE_LIMITED";
+  // Only commit a fully verified chain result; partial and skipped scans remain diagnostics only.
+  updateVerified4788(row.chainId,row,new Date().toISOString());
  }
  }finally{dex4780.running=false;dex4780.lastCompletedAt=new Date().toISOString();}}
 // 4.78.7: zero-additional-RPC indicative cross-venue price comparisons.
@@ -9428,22 +9441,25 @@ function dexSpot4787(c,v){
  return Number.isFinite(usdcPerWeth)&&usdcPerWeth>0?usdcPerWeth:null;
 }
 function dexPriceComparison4787(){
- const ageMs=dex4780.lastCompletedAt?Date.now()-Date.parse(dex4780.lastCompletedAt):null;
- const fresh=ageMs!==null&&ageMs>=0&&ageMs<=600000;
  const chains=MC4750_CHAINS.map(c=>{
   const row=dex4780.chains[c.chainId];
-  const observations=(row?.venues||[]).map(v=>({venue:v.name,factory:v.factory,pool:v.pool,kind:v.kind,feeTier:v.feeTier,spotUsdcPerWeth:dexSpot4787(c,v)})).filter(v=>v.spotUsdcPerWeth!==null);
+  const snap=dexVerified4788.get(Number(c.chainId));
+  const ageMs=snap?Math.max(0,Date.now()-Date.parse(snap.observedAt)):null;
+  const fresh=ageMs!==null&&ageMs<=DEX_SNAPSHOT_MAX_AGE_MS_4788;
+  const observations=(snap?.venues||[]).map(v=>({venue:v.name,factory:v.factory,pool:v.pool,kind:v.kind,feeTier:v.feeTier,spotUsdcPerWeth:dexSpot4787(c,v)})).filter(v=>v.spotUsdcPerWeth!==null);
   const comparisons=[];
-  for(let i=0;i<observations.length;i++)for(let j=i+1;j<observations.length;j++){
+  // Never present historical pool state as a current market opportunity.
+  if(fresh)for(let i=0;i<observations.length;i++)for(let j=i+1;j<observations.length;j++){
    const a=observations[i],b=observations[j];
    if(a.factory?.toLowerCase()===b.factory?.toLowerCase())continue;
    const low=a.spotUsdcPerWeth<=b.spotUsdcPerWeth?a:b,high=low===a?b:a;
-   comparisons.push({buyReferenceVenue:low.venue,sellReferenceVenue:high.venue,indicativeSpotDifferencePct:Number(((high.spotUsdcPerWeth/low.spotUsdcPerWeth)-1)*100).toFixed(6),warning:"SPOT_DIFFERENCE_ONLY_NOT_EXECUTABLE_OR_PROFITABLE"});
+   comparisons.push({buyReferenceVenue:low.venue,sellReferenceVenue:high.venue,indicativeSpotDifferencePct:Number(((high.spotUsdcPerWeth/low.spotUsdcPerWeth)-1)*100).toFixed(6),warning:"INDICATIVE_CACHED_SPOT_NOT_EXECUTABLE_OR_PROFITABLE"});
   }
   comparisons.sort((a,b)=>b.indicativeSpotDifferencePct-a.indicativeSpotDifferencePct);
-  return {chainId:c.chainId,name:c.name,discoveryStatus:row?.status||"NOT_SCANNED",observations,comparisons,independentFactories:row?.independentFactories||0};
+  return {chainId:c.chainId,name:c.name,discoveryStatus:row?.status||"NOT_SCANNED",snapshotStatus:!snap?"UNAVAILABLE":fresh?"FRESH":"STALE",snapshotObservedAt:snap?.observedAt||null,snapshotAgeMs:ageMs,observations,comparisons,independentFactories:snap?.independentFactories||0,requiresFreshScan:!fresh};
  });
- return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"CACHED_DISCOVERY_POOL_STATE",lastCompletedAt:dex4780.lastCompletedAt,ageMs,fresh,requiresFreshScan:!fresh,chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+ const fresh=chains.some(c=>c.snapshotStatus==="FRESH");
+ return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"LAST_VERIFIED_PER_CHAIN_SNAPSHOT_IN_MEMORY",lastCompletedAt:dex4780.lastCompletedAt,ageMs:null,fresh,allChainsFresh:chains.every(c=>c.snapshotStatus==="FRESH"),requiresFreshScan:chains.some(c=>c.requiresFreshScan),chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["SNAPSHOTS_IN_MEMORY_LOST_ON_PROCESS_RESTART","NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get("/api/dex-independent/prices",(req,res)=>res.json(dexPriceComparison4787()));
 app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,backgroundHeartbeatIntervalMs:mc4750.pollIntervalMs,autoDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DISCOVERY==="true",autoDexDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true",cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));

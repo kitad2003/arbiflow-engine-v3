@@ -1,0 +1,3 @@
+ArbiFlow 4.78.8 — Verified Snapshot Preservation
+Per-chain last verified in-memory pool snapshots survive rate-limited/partial scans; per-chain freshness and stale gating; no executable quotes or mainnet execution.
+Snapshots do not persist across Render restarts.
