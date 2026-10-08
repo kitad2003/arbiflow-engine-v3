@@ -9964,3 +9964,6 @@ require('./phase85-crossdex').mount(app,{
 
 // Phase 8.6 bounded, manual dynamic factory-event discovery
 require('./phase86-liquidity').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)});
+
+// Phase 8.7: manual indexed liquidity discovery; preserves Phase 8.6.1 and prior routes.
+require('./phase87-indexed-discovery').mount(app);
