@@ -3,6 +3,7 @@
 // No wallet access, signing, relay submission or transaction broadcasting.
 const {WebSocketProvider,Interface}=require('ethers');
 const WebSocket=require('ws');
+const phase92=require('./phase92-trigger');
 const ABI=new Interface(['event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)']);
 const POOLS=[
  {name:'UNISWAP_V3_500',address:'0xd0b53D9277642d899DF5C87A3966A349A798F224'},
@@ -48,7 +49,9 @@ function mount(app){
       const event={pool:pool.name,blockNumber:log.blockNumber,transactionHash:log.transactionHash,receivedAt:new Date().toISOString(),amount0:parsed.args.amount0.toString(),amount1:parsed.args.amount1.toString(),source:'CONFIRMED_LOG'};
       state.events++;state.lastEvent=event;record(event);
       // Candidate notification only; no unbounded automatic RPC scans.
-      state.triggeredRequotes++;state.lastCandidate={pair:'USDC/WETH',affectedPool:pool.name,status:'REQUOTE_REQUIRED',blockNumber:log.blockNumber};
+      const scheduled=phase92.notify(event);
+      if(scheduled)state.triggeredRequotes++;
+      state.lastCandidate={pair:'USDC/WETH',affectedPool:pool.name,status:scheduled?'REQUOTE_SCHEDULED':'REQUOTE_COALESCED',blockNumber:log.blockNumber};
      }catch(e){state.lastError=trim(e)}
     });
    }
