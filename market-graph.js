@@ -17,7 +17,7 @@ module.exports.mount=(app,{getChain,call})=>{
    const row={pair:a+'/'+b,venue:v.name,status:'UNTESTED',pool:null};
    try{
     const fn=v.fee?'getPool':'getPair';
-    const args=v.fee?[tokens[a],tokens[b],v.fee]:[tokens[a],tokens[b]];
+    const args=v.fee?[tokens[a].toLowerCase(),tokens[b].toLowerCase(),v.fee]:[tokens[a].toLowerCase(),tokens[b].toLowerCase()];
     const raw=await call(chain,v.factory,abi.encodeFunctionData(fn,args));
     const pool=abi.decodeFunctionResult(fn,raw)[0];
     if(!valid(pool)){row.status='NO_POOL';edges.push(row);continue;}
