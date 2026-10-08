@@ -1,0 +1,11 @@
+'use strict';
+const originalChains=[['ethereum',1],['arbitrum',42161],['optimism',10],['base',8453],['polygon',137],['bnb',56],['avalanche',43114],['linea',59144],['scroll',534352],['mantle',5000],['zksync',324],['gnosis',100],['metis',1088],['sonic',146],['celo',42220]];
+const additionalChains=[['solana',null],['monad',143],['unichain',130],['cronos',25],['hyperevm',999],['berachain',80094],['sei',1329],['sui',null],['abstract',2741],['ronin',2020]];
+const originalCex=['binance','coinbase','kraken','kucoin','bybit','okx','gateio','htx','bitfinex','gemini','bitstamp','mexc','cryptocom','bitget','bullish'];
+const additionalCex=['bingx','bitmart','bitvavo','coinex','bitrue','lbank','backpack','bithumb','bitflyer','woox'];
+const inchClassic=new Set([1,42161,10,8453,137,56,43114,59144,324,100,146,143,130,25,999]);
+const chains=[...originalChains.map(([id,chainId])=>({id,chainId,original:true})),...additionalChains.map(([id,chainId])=>({id,chainId,original:false}))].map(c=>({...c,kind:['solana','sui'].includes(c.id)?'non-evm':'evm',oneInchClassicDocumented:c.chainId!==null&&inchClassic.has(c.chainId),configured:false,verified:false,enabled:false}));
+const cexs=[...originalCex.map(id=>({id,original:true})),...additionalCex.map(id=>({id,original:false}))].map(x=>({...x,configured:false,verified:false,enabled:false,marketDataOnly:true,regionReviewRequired:true}));
+function inventory(){return {version:'25x25-registry-1.0',readOnly:true,automaticScanning:false,mainnetBroadcast:false,chains,cexs,targets:{chains:25,cexs:25,dexSources:500},notes:['Registry entries are candidates, not live connections','1inch documentation is not evidence of configured credentials or liquidity','CEX geographic eligibility and exact CCXT IDs must be validated','Solana and Sui require non-EVM adapters','Cross-chain swaps are not same-chain atomic flash loans']};}
+function mount(app){if(!app||typeof app.get!=='function')throw new Error('Express app required');app.get('/api/expansion/inventory',(_req,res)=>res.json(inventory()));app.get('/api/expansion/status',(_req,res)=>res.json({success:true,version:'25x25-registry-1.0',chainsRegistered:chains.length,cexsRegistered:cexs.length,liveConnectionsVerified:0,readOnly:true,automaticScanning:false,mainnetBroadcast:false}));}
+module.exports={chains,cexs,inventory,mount};
