@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.18";
+const VERSION = "4.78.19";
 
 /*
 =========================================================
@@ -9176,6 +9176,21 @@ if (!startupGate) {
 }
 console.log(`[ArbiFlow 4.72.0] WEB PROCESS STARTING :: fork verification state ${process.env.ARBIFLOW_FORK_VERIFIED || "PENDING"} :: execution remains fail-closed`);
 
+// 4.78.19: manual, read-only historical transaction evidence inspection.
+// No auto scans, private keys, loan requests, contract deployments, or broadcasts.
+const historicalLiquidations47819=require('./LiquidationInvestigator47819');
+let historicalInspectBusy47819=false;
+app.get('/api/investigator/status',(req,res)=>res.json({success:true,version:VERSION,stage:'HISTORICAL_RECEIPT_INSPECTION_ONLY',busy:historicalInspectBusy47819,supportedChains:['base','arbitrum','optimism'],automaticScanning:false,liveOpportunityDiscovery:false,verifiedProfits:0,safety:{readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
+app.get('/api/investigator/inspect',async(req,res)=>{
+ const chain=String(req.query.chain||'base').toLowerCase();
+ const hash=String(req.query.hash||'');
+ if(!['base','arbitrum','optimism'].includes(chain)||!/^0x[0-9a-fA-F]{64}$/.test(hash))return res.status(400).json({success:false,error:'VALID_CHAIN_AND_TRANSACTION_HASH_REQUIRED'});
+ if(historicalInspectBusy47819)return res.status(429).json({success:false,error:'ONE_MANUAL_INSPECTION_AT_A_TIME'});
+ historicalInspectBusy47819=true;
+ try {const result=await historicalLiquidations47819.inspect({chain,hash,rpcUrls:RPC_URLS});res.json({success:true,version:VERSION,...result});}
+ catch(e){res.status(502).json({success:false,version:VERSION,error:String(e.message||e).slice(0,130)});}
+ finally{historicalInspectBusy47819=false;}
+});
 app.listen(
   PORT,
   () => {
