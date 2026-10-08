@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.6";
+const VERSION = "4.78.7";
 
 /*
 =========================================================
@@ -9407,6 +9407,45 @@ async function runDex4780(){if(dex4780.running)return;dex4780.running=true;dex47
   if(Date.now()<dexRpcGate4783.cooldownUntil)row.status="PARTIAL_RPC_RATE_LIMITED";
  }
  }finally{dex4780.running=false;dex4780.lastCompletedAt=new Date().toISOString();}}
+// 4.78.7: zero-additional-RPC indicative cross-venue price comparisons.
+// Prices are pool-state observations, NOT executable quotes or net-profit estimates.
+function dexSpot4787(c,v){
+ if(v.status!=="POOL_LIVE"||!v.liquidityEvidence?.nonzero)return null;
+ const weth0=BigInt(c.tokens.WETH.toLowerCase())<BigInt(c.tokens.USDC.toLowerCase());
+ let token1PerToken0;
+ if(v.kind==="V2"){
+  const r0=Number(v.liquidityEvidence.reserve0),r1=Number(v.liquidityEvidence.reserve1);
+  if(!(r0>0&&r1>0))return null;
+  token1PerToken0=r1/r0;
+ }else if(v.kind==="V3"){
+  const q=Number(v.liquidityEvidence.sqrtPriceX96)/2**96;
+  token1PerToken0=q*q;
+ }else return null;
+ // All three configured pairs use WETH(18 decimals) and USDC(6 decimals).
+ // Verify token decimal metadata before using this output for any execution.
+ const rawUsdcPerWeth=weth0?token1PerToken0:1/token1PerToken0;
+ const usdcPerWeth=rawUsdcPerWeth*10**(18-6);
+ return Number.isFinite(usdcPerWeth)&&usdcPerWeth>0?usdcPerWeth:null;
+}
+function dexPriceComparison4787(){
+ const ageMs=dex4780.lastCompletedAt?Date.now()-Date.parse(dex4780.lastCompletedAt):null;
+ const fresh=ageMs!==null&&ageMs>=0&&ageMs<=600000;
+ const chains=MC4750_CHAINS.map(c=>{
+  const row=dex4780.chains[c.chainId];
+  const observations=(row?.venues||[]).map(v=>({venue:v.name,factory:v.factory,pool:v.pool,kind:v.kind,feeTier:v.feeTier,spotUsdcPerWeth:dexSpot4787(c,v)})).filter(v=>v.spotUsdcPerWeth!==null);
+  const comparisons=[];
+  for(let i=0;i<observations.length;i++)for(let j=i+1;j<observations.length;j++){
+   const a=observations[i],b=observations[j];
+   if(a.factory?.toLowerCase()===b.factory?.toLowerCase())continue;
+   const low=a.spotUsdcPerWeth<=b.spotUsdcPerWeth?a:b,high=low===a?b:a;
+   comparisons.push({buyReferenceVenue:low.venue,sellReferenceVenue:high.venue,indicativeSpotDifferencePct:Number(((high.spotUsdcPerWeth/low.spotUsdcPerWeth)-1)*100).toFixed(6),warning:"SPOT_DIFFERENCE_ONLY_NOT_EXECUTABLE_OR_PROFITABLE"});
+  }
+  comparisons.sort((a,b)=>b.indicativeSpotDifferencePct-a.indicativeSpotDifferencePct);
+  return {chainId:c.chainId,name:c.name,discoveryStatus:row?.status||"NOT_SCANNED",observations,comparisons,independentFactories:row?.independentFactories||0};
+ });
+ return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"CACHED_DISCOVERY_POOL_STATE",lastCompletedAt:dex4780.lastCompletedAt,ageMs,fresh,requiresFreshScan:!fresh,chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get("/api/dex-independent/prices",(req,res)=>res.json(dexPriceComparison4787()));
 app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,backgroundHeartbeatIntervalMs:mc4750.pollIntervalMs,autoDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DISCOVERY==="true",autoDexDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true",cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
 app.get("/api/dex-independent/run",(req,res)=>{if(dex4780.running||Date.now()<dexRpcGate4783.cooldownUntil)return res.json({success:false,version:VERSION,status:dex4780.running?"ALREADY_RUNNING":"RPC_COOLDOWN_ACTIVE",retryAfterMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now()),readOnly:true});setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
 // Free-tier mode: independent DEX discovery runs only on explicit request.
