@@ -1,6 +1,7 @@
 'use strict';
 // Phase 10.1: read-only pending-block classification. RPC pending view is not the full mempool.
 const {Interface}=require('ethers');
+const {simulateAerodrome}=require('./phase102-impact');
 const routerRegistry={
  UNISWAP_ROUTER_02:'0x2626664c2603336e57b271c5c0b26f421741e481',
  AERODROME_ROUTER:'0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43'
@@ -33,13 +34,13 @@ function decode(tx,routerName){
   if(parsed.name==='multicall')return {classification:'NESTED_MULTICALL_NOT_DECODED',method:parsed.name,innerCalls:parsed.args[parsed.args.length-1].length};
   if(parsed.name.startsWith('swapExact')){
    const routes=parsed.args[parsed.name==='swapExactTokensForTokens'?2:1];
-   return {...base,routeHops:routes.length,tokenIn:routes[0]?.from||null,tokenOut:routes[routes.length-1]?.to||null};
+   return {...base,routeHops:routes.length,routeDetails:routes.slice(0,3).map(r=>({from:r.from,to:r.to,stable:r.stable,factory:r.factory})),amountInRaw:parsed.name==='swapExactETHForTokens'?BigInt(tx.value||'0x0').toString():parsed.args[0].toString(),tokenIn:routes[0]?.from||null,tokenOut:routes[routes.length-1]?.to||null};
   }
   return base;
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'10.1.0',running:false,checks:0,lastResult:null};
+ const state={build:'10.2.0',running:false,checks:0,lastResult:null};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  app.get('/api/phase10/probe',async(_req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
@@ -59,11 +60,13 @@ function mount(app,{getBaseChain,rpc}){
     if(!name){counts.contractInteraction++;const selector=data.slice(0,10);unknownSelectors[selector]=(unknownSelectors[selector]||0)+1;continue;}
     counts.knownRouter++;routers[name]=(routers[name]||0)+1;
     const result=decode({...tx,input:data},name);
-    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED'});}
+    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED',_txValue:tx.value||'0x0'});}
     else if(result.classification==='NESTED_MULTICALL')counts.nestedMulticall++;
     else counts.unsupportedRouterMethod++;
    }
-   state.lastResult={success:true,build:state.build,chainId:8453,reportedPendingTransactions:transactions.length,inspectedTransactions:samples.length,counts,knownRouterHits:routers,topUnknownSelectors:Object.entries(unknownSelectors).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([selector,count])=>({selector,count})),decodedSupportedSwaps:swaps.length,swaps:swaps.slice(0,30),visibility:transactions.length?'RPC_PENDING_BLOCK_SAMPLE_NOT_FULL_MEMPOOL':'NO_PENDING_TRANSACTIONS_VISIBLE',limitations:['ROUTER_REGISTRY_PARTIAL','MULTICALL_INNER_CALLS_NOT_DECODED','NO_PRIVATE_ORDER_FLOW','NO_POST_SWAP_SIMULATION','NO_PROFIT_VALIDATION','NO_EXECUTION'],qualified:0,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+   for(const swap of swaps.filter(x=>x.router==='AERODROME_ROUTER').slice(0,2)){swap.impact=await simulateAerodrome({value:swap._txValue},swap,chain,rpc);}
+   for(const swap of swaps)delete swap._txValue;
+   state.lastResult={success:true,build:state.build,chainId:8453,reportedPendingTransactions:transactions.length,inspectedTransactions:samples.length,counts,knownRouterHits:routers,topUnknownSelectors:Object.entries(unknownSelectors).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([selector,count])=>({selector,count})),decodedSupportedSwaps:swaps.length,swaps:swaps.slice(0,30),visibility:transactions.length?'RPC_PENDING_BLOCK_SAMPLE_NOT_FULL_MEMPOOL':'NO_PENDING_TRANSACTIONS_VISIBLE',limitations:['ROUTER_REGISTRY_PARTIAL','MULTICALL_INNER_CALLS_NOT_DECODED','NO_PRIVATE_ORDER_FLOW','INDICATIVE_ZERO_FEE_VOLATILE_MODEL_ONLY','NO_CONCENTRATED_LIQUIDITY_SIMULATION','NO_PROFIT_VALIDATION','NO_EXECUTION'],qualified:0,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
   }catch(e){state.lastResult={success:false,build:state.build,error:safeError(e),visibility:'RPC_PENDING_BLOCK_UNAVAILABLE',safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
   finally{state.running=false;}
   res.json(state.lastResult);
