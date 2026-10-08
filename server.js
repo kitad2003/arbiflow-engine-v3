@@ -9191,6 +9191,26 @@ app.get('/api/investigator/inspect',async(req,res)=>{
  catch(e){res.status(502).json({success:false,version:VERSION,error:String(e.message||e).slice(0,130)});}
  finally{historicalInspectBusy47819=false;}
 });
+
+// 4.78.20: registry visibility only. No network requests, automatic scans,
+// credentials, trading adapters, contract calls, or execution paths.
+const expansionRegistry47820 = require('./registry');
+app.get('/api/expansion-25x25/status', (req, res) => {
+  res.json({
+    success: true,
+    engineVersion: VERSION,
+    integrationStage: 'REGISTRY_ONLY',
+    chainCount: expansionRegistry47820.chains.length,
+    exchangeCount: expansionRegistry47820.exchanges.length,
+    chains: expansionRegistry47820.chains,
+    exchanges: expansionRegistry47820.exchanges,
+    safety: expansionRegistry47820.safety,
+    activeScannerUnchanged: true,
+    liveAdaptersEnabled: 0,
+    liveConnectionsVerified: 0
+  });
+});
+
 app.listen(
   PORT,
   () => {
