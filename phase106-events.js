@@ -1,52 +1,77 @@
 'use strict';
-// Phase 10.6: confirmed Base USDC/WETH Uniswap V3 swap-event evidence.
-// This is confirmed-chain observation, not advance mempool visibility.
+// Phase 10.7: bounded confirmed swap monitoring; cursor is process-local, not durable storage.
 const {Interface,id}=require('ethers');
 const FACTORY='0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const WETH='0x4200000000000000000000000000000000000006';
-const factory=new Interface(['function getPool(address tokenA,address tokenB,uint24 fee) view returns(address)']);
+const factory=new Interface(['function getPool(address,address,uint24) view returns(address)']);
 const swap=new Interface(['event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)']);
+const TOPIC=id('Swap(address,address,int256,int256,uint160,uint128,int24)');
 const ZERO='0x0000000000000000000000000000000000000000';
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
-const err=e=>String(e?.shortMessage||e?.message||e).slice(0,480);
-async function run(chain,rpc){
- const latestHex=await rpc(chain,'eth_blockNumber',[]);
- const latest=Number(BigInt(latestHex));
- const from=Math.max(0,latest-12);
- const pools=[];
- for(const fee of [500,3000]){
-  try{
-   const data=factory.encodeFunctionData('getPool',[USDC,WETH,fee]);
-   const result=await rpc(chain,'eth_call',[{to:FACTORY,data},'latest']);
-   const [address]=factory.decodeFunctionResult('getPool',result);
-   if(address.toLowerCase()!==ZERO)pools.push({fee,address});
-  }catch(e){pools.push({fee,error:err(e)});}
- }
- const observations=[];let logFailures=0;const logDiagnostics=[];
- for(const pool of pools.filter(p=>p.address)){
-  try{
-   let logs,usedRange='13_BLOCKS';const topic=id('Swap(address,address,int256,int256,uint160,uint128,int24)');
-   try{logs=await rpc(chain,'eth_getLogs',[{address:pool.address,fromBlock:'0x'+from.toString(16),toBlock:'0x'+latest.toString(16),topics:[topic]}]);}
-   catch(first){logDiagnostics.push({fee:pool.fee,attempt:'13_BLOCKS',error:err(first)});usedRange='LATEST_SINGLE_BLOCK';try{logs=await rpc(chain,'eth_getLogs',[{address:pool.address,fromBlock:'0x'+latest.toString(16),toBlock:'0x'+latest.toString(16),topics:[topic]}]);}catch(second){logDiagnostics.push({fee:pool.fee,attempt:'LATEST_SINGLE_BLOCK',error:err(second)});throw second;}}
-   pool.logQuery=usedRange;
-   if(!Array.isArray(logs))throw Error('INVALID_LOGS');
-   for(const log of logs.slice(-15)){
-    const event=swap.parseLog(log);
-    observations.push({pool:pool.address,fee:pool.fee,transactionHash:log.transactionHash,blockNumber:Number(BigInt(log.blockNumber)),amount0Raw:event.args.amount0.toString(),amount1Raw:event.args.amount1.toString(),sqrtPriceX96After:event.args.sqrtPriceX96.toString(),status:'CONFIRMED_SWAP_EVENT_NOT_PREDICTED'});
-   }
-  }catch(e){logFailures++;pool.error=err(e);}
- }
- return {success:true,build:'10.6.1',chainId:8453,latestBlock:latest,fromBlock:from,pools,confirmedSwapEvents:observations.length,observations:observations.slice(-20),logFailures,logDiagnostics,predictionMatches:0,predictionMatchingImplemented:false,limitations:['CONFIRMED_EVENTS_ONLY','NO_PENDING_TRANSACTION_LINKAGE','NO_PRICE_PREDICTION_VALIDATION','NO_PROFIT_VALIDATION'],safety};
-}
+const err=e=>String(e?.shortMessage||e?.message||e).slice(0,400);
+const hex=n=>'0x'+n.toString(16);
 function mount(app,{getBaseChain,rpc}){
- const state={running:false,checks:0,lastResult:null};
- app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.6.1',...state,safety}));
+ const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0};
+ const seen=new Set();
+ app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.7.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,lastResult:state.lastResult,safety}));
  app.get('/api/phase10/events/probe',async(_req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
   state.running=true;state.checks++;
-  try{const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');state.lastResult=await run(chain,rpc);}
-  catch(e){state.lastResult={success:false,build:'10.6.0',error:err(e),safety};}
+  try{
+   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
+   const latest=Number(BigInt(await rpc(chain,'eth_blockNumber',[])));
+   const pools=[],observations=[],logDiagnostics=[];
+   let logFailures=0,duplicatesSkipped=0,scannedBlocks=0;
+   for(const fee of [500,3000]){
+    const pool={fee};
+    try{
+     const result=await rpc(chain,'eth_call',[{to:FACTORY,data:factory.encodeFunctionData('getPool',[USDC,WETH,fee])},'latest']);
+     const [address]=factory.decodeFunctionResult('getPool',result);
+     if(address.toLowerCase()===ZERO){pool.error='POOL_NOT_FOUND';pools.push(pool);continue;}
+     pool.address=address;
+     const key=address.toLowerCase();
+     // Initial probe: last ten blocks. Subsequent probes: resume after successful range.
+     const previous=state.cursors[key];
+     const from=previous===undefined?Math.max(0,latest-9):previous+1;
+     const to=Math.min(latest,from+9);
+     pool.fromBlock=from;pool.toBlock=to;
+     pool.remainingBlocks=Math.max(0,latest-to);
+     if(from>latest){pool.logQuery='UP_TO_DATE';pools.push(pool);continue;}
+     let logs;
+     try{
+      logs=await rpc(chain,'eth_getLogs',[{address,fromBlock:hex(from),toBlock:hex(to),topics:[TOPIC]}]);
+      pool.logQuery='UP_TO_10_BLOCKS';
+     }catch(e){
+      logDiagnostics.push({fee,attempt:'UP_TO_10_BLOCKS',error:err(e)});
+      // Only advance the cursor for the actual successfully queried range.
+      logs=await rpc(chain,'eth_getLogs',[{address,fromBlock:hex(from),toBlock:hex(from),topics:[TOPIC]}]);
+      pool.logQuery='SINGLE_BLOCK_FALLBACK';pool.toBlock=from;
+      pool.remainingBlocks=Math.max(0,latest-from);
+     }
+     if(!Array.isArray(logs))throw Error('INVALID_LOGS');
+     const parsed=[];
+     for(const log of logs){
+      const event=swap.parseLog(log);
+      if(!event)continue;
+      const unique=String(log.blockHash||log.blockNumber)+'|'+String(log.transactionHash)+'|'+String(log.logIndex??log.index??'0');
+      parsed.push({unique,record:{pool:address,fee,transactionHash:log.transactionHash,blockNumber:Number(BigInt(log.blockNumber)),logIndex:log.logIndex??log.index??null,amount0Raw:event.args.amount0.toString(),amount1Raw:event.args.amount1.toString(),sqrtPriceX96After:event.args.sqrtPriceX96.toString(),status:'CONFIRMED_SWAP_EVENT_NOT_PREDICTED'}});
+     }
+     // Successful response and parsing only: commit cursor and dedup state.
+     state.cursors[key]=pool.toBlock;
+     scannedBlocks+=pool.toBlock-from+1;
+     pool.eventsInRange=parsed.length;
+     for(const entry of parsed){
+      if(seen.has(entry.unique)){duplicatesSkipped++;continue;}
+      seen.add(entry.unique);state.recentKeys.push(entry.unique);
+      if(state.recentKeys.length>2000)seen.delete(state.recentKeys.shift());
+      state.totalUniqueEvents++;observations.push(entry.record);
+     }
+    }catch(e){logFailures++;pool.error=err(e);logDiagnostics.push({fee,attempt:'POOL_SCAN',error:err(e)});}
+    pools.push(pool);
+   }
+   state.lastResult={success:logFailures===0,build:'10.7.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','NO_PENDING_TRANSACTION_LINKAGE','NO_PROFIT_VALIDATION'],safety};
+  }catch(e){state.lastResult={success:false,build:'10.7.0',error:err(e),safety};}
   finally{state.running=false;}
   res.json(state.lastResult);
  });
