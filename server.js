@@ -9743,7 +9743,7 @@ async function dexCrossQuotes47813(chainId,size){
  if(!sushi||!unis.length)throw Error('LIVE_SUSHI_AND_UNISWAP_POOLS_REQUIRED');
  const configuredQuoter=UNISWAP_V3_QUOTER_V1_4490[c.key];
  if(!dexAddress4780(configuredQuoter))throw Error('UNISWAP_QUOTER_NOT_CONFIGURED');
- const quoter=dexNormalize47814(configuredQuoter);
+ const quoter=dexNormalize47814(chainId===42161?'0x61fFE014bA17989E743c5F6cB21bF9697530B21e':configuredQuoter);
  const reservesRaw=await dexCall4780(c,sushi.pool,dexV2Interface47813.encodeFunctionData('getReserves',[]));
  const reserves=dexV2Interface47813.decodeFunctionResult('getReserves',reservesRaw);
  const weth0=BigInt(c.tokens.WETH.toLowerCase())<BigInt(c.tokens.USDC.toLowerCase());
