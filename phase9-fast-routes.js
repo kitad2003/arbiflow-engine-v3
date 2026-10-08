@@ -1,7 +1,7 @@
 'use strict';
-// Phase 9: bounded parallel, read-only two-leg cross-venue Base quote diagnostics.
 const {Interface}=require('ethers');
 const phase92=require('./phase92-trigger');
+const phase91=require('./phase91-events');
 const TOKENS={USDC:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',WETH:'0x4200000000000000000000000000000000000006',DAI:'0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'};
 const VENUES=[
  {name:'UNISWAP_V3_500',factory:'0x33128a8fC17869897dcE68Ed026d694621f6FDfD',quoter:'0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',fee:500},
@@ -27,7 +27,7 @@ function mount(app,{getBaseChain,rpc}){
   const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]));
   const markets=['WETH','DAI'];
   const minUsd=500,maxUsd=50000;
-  const minReserveUsdc=BigInt(minUsd*10)*1000000n; // Conservative reserve gate: 10x probe size
+  const minReserveUsdc=BigInt(minUsd*10)*1000000n;
   const pools=await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
    const [addr]=v.kind==='AERODROME'?await call(v.factory,af,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.stable]):await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.fee]);
    if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
@@ -40,9 +40,9 @@ function mount(app,{getBaseChain,rpc}){
    const [usdcBalance]=await call(TOKENS.USDC,erc20,'balanceOf',[addr]);
    return {...v,pool:addr,liquidity:liq.toString(),reserveUsdcRaw:usdcBalance.toString(),status:liq===0n?'POOL_EMPTY':usdcBalance<minReserveUsdc?'INSUFFICIENT_USDC_RESERVE':'POOL_LIVE'};
   });
+  phase91.registerPools(pools);
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.asset===b.asset&&a.name!==b.name).map(b=>({buy:a,sell:b})));
-  // Adaptive bounded range: 3 coarse points, then up to 2 refinements per route.
   const initial=[minUsd,Math.round(Math.sqrt(minUsd*maxUsd)),maxUsd];
   let quoteCalls=0;
   const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
@@ -62,7 +62,6 @@ function mount(app,{getBaseChain,rpc}){
      samples.push(result);return result;
     }catch(e){const result={sizeUsdc,error:err(e)};samples.push(result);return result}
    }
-   // Screen the minimum size before expensive adaptive sampling.
    const screening=await sample(minUsd);
    const sane=buy.asset!=='DAI'||(BigInt(screening.wethOutputRaw||0)>0n&&Number(BigInt(screening.wethOutputRaw||0))/1e18>=minUsd*0.95&&Number(BigInt(screening.wethOutputRaw||0))/1e18<=minUsd*1.05);
    const promising=sane&&Number.isFinite(screening.grossSpreadPct)&&screening.grossSpreadPct>0;

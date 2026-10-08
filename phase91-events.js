@@ -10,15 +10,30 @@ const POOLS=[
  {name:'UNISWAP_V3_3000',address:'0x6c561B446416E1A00E8E93E221854d6eA4171372'},
  {name:'PANCAKE_V3_500',address:'0xB775272E537cc670C65DC852908aD47015244EaF'}
 ];
+const discoveredPools=new Map();
+let onPoolDiscovered=null;
+function registerPools(pools){
+ for(const p of pools){
+  if(!p.pool||p.status!=='POOL_LIVE'||p.kind==='AERODROME')continue;
+  const key=p.pool.toLowerCase();
+  if(!discoveredPools.has(key)){
+   const item={name:p.name,asset:p.asset||'WETH',address:p.pool,kind:'V3'};
+   discoveredPools.set(key,item);
+   if(onPoolDiscovered)onPoolDiscovered(item);
+  }
+ }
+}
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
 function mount(app){
  let provider=null,timer=null;
+ const activeFilters=new Set();
  const state={status:'STOPPED',events:0,blocks:0,lastEvent:null,lastBlock:null,lastError:null,reconnects:0,startedAt:null,triggeredRequotes:0};
  const history=[];let generation=0;const instanceId=require('crypto').randomBytes(6).toString('hex');
  const autoStart=!!process.env.ARBIFLOW_BASE_WSS_URL && process.env.ARBIFLOW_PHASE91_AUTOSTART!=='false';
  const trim=e=>String(e?.message||e).replace(/wss?:\/\/[^\s]+/gi,'[REDACTED]').slice(0,180);
  const record=e=>{history.push(e);if(history.length>50)history.shift()};
  async function disconnect(){
+  onPoolDiscovered=null;activeFilters.clear();
   if(timer){clearTimeout(timer);timer=null}
   const old=provider;provider=null;
   if(old){try{await old.destroy()}catch(_){}}
@@ -40,7 +55,10 @@ function mount(app){
    if(state.status==='CONNECTION_ERROR')throw Error(state.lastError||'WEBSOCKET_REJECTED');
    if(Number(network.chainId)!==8453)throw Error('WRONG_CHAIN');
    ws.on('block',number=>{if(epoch!==generation)return;state.blocks++;state.lastBlock={number,receivedAt:new Date().toISOString()}});
-   for(const pool of POOLS){
+   const subscribePool=pool=>{
+    const key=pool.address.toLowerCase();
+    if(activeFilters.has(key))return;
+    activeFilters.add(key);
     const filter={address:pool.address,topics:[ABI.getEvent('Swap').topicHash]};
     ws.on(filter,log=>{
      if(epoch!==generation)return;
@@ -51,10 +69,13 @@ function mount(app){
       // Candidate notification only; no unbounded automatic RPC scans.
       const scheduled=phase92.notify(event);
       if(scheduled)state.triggeredRequotes++;
-      state.lastCandidate={pair:'USDC/WETH',affectedPool:pool.name,status:scheduled?'REQUOTE_SCHEDULED':'REQUOTE_COALESCED',blockNumber:log.blockNumber};
+      state.lastCandidate={pair:'USDC/'+(pool.asset||'WETH'),affectedPool:pool.name,status:scheduled?'REQUOTE_SCHEDULED':'REQUOTE_COALESCED',blockNumber:log.blockNumber};
      }catch(e){state.lastError=trim(e)}
     });
-   }
+   };
+   for(const pool of POOLS)subscribePool(pool);
+   for(const pool of discoveredPools.values())subscribePool(pool);
+   onPoolDiscovered=pool=>{if(epoch===generation&&provider===ws)subscribePool(pool)};
    state.status='SUBSCRIBED';state.lastError=null;
    // Heartbeat checks transport, not chain freshness.
    timer=setTimeout(async()=>{if(epoch!==generation)return;try{await ws.getBlockNumber();timer=setTimeout(()=>heartbeat(epoch),30000)}catch(e){retry(epoch,e)}},30000);
@@ -71,7 +92,7 @@ function mount(app){
   state.lastError=trim(e);state.status='RECONNECTING';state.reconnects++;
   disconnect().finally(()=>{if(epoch===generation)timer=setTimeout(()=>connect(epoch),Math.min(30000,1000*Math.pow(2,Math.min(state.reconnects,5))))});
  }
- app.get('/api/phase91/status',(_req,res)=>res.json({success:true,instanceId,autoStart,uptimeSeconds:Math.floor(process.uptime()),configured:!!process.env.ARBIFLOW_BASE_WSS_URL,...state,pools:POOLS,eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
+ app.get('/api/phase91/status',(_req,res)=>res.json({success:true,instanceId,autoStart,uptimeSeconds:Math.floor(process.uptime()),configured:!!process.env.ARBIFLOW_BASE_WSS_URL,...state,pools:[...POOLS,...[...discoveredPools.values()].filter(p=>!POOLS.some(x=>x.address.toLowerCase()===p.address.toLowerCase()))],eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
  app.get('/api/phase91/start',(_req,res)=>{
   if(state.status==='SUBSCRIBED'||state.status==='CONNECTING'||state.status==='RECONNECTING')return res.json({success:true,status:state.status,safety});
   generation++;state.startedAt=new Date().toISOString();state.reconnects=0;connect(generation).catch(e=>{state.lastError=trim(e)});
@@ -81,4 +102,4 @@ function mount(app){
  // Start after server mounts, so a fresh Render process does not require a browser click.
  if(autoStart){state.startedAt=new Date().toISOString();setImmediate(()=>connect(++generation).catch(e=>{state.lastError=trim(e);state.status='ERROR'}));}
 }
-module.exports={mount};
+module.exports={mount,registerPools};
