@@ -1,16 +1,16 @@
-ArbiFlow Phase 6: final Sui identifier verification
+ArbiFlow Phase 7: Five CEX public quote probes (manual, read-only).
 
-Replace ONLY phase6-network-probe.js in your repository root.
-Do not replace server.js, package.json, scanner modules or contracts.
+1. Upload phase7-cex.js to the ROOT of the GitHub repo beside server.js.
+2. In your CURRENT server.js, find the existing Express app initialization (const app = express() or equivalent).
+3. Add exactly ONE line after app is initialized, before app.listen:
+   require('./phase7-cex').mount(app);
+4. Commit, deploy to Render. Do NOT replace server.js with an older version.
+5. Test https://arbiflow-engine-v3.onrender.com/api/phase7/status
+6. Test one at a time (avoid rate limits):
+   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=binance
+   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=coinbase
+   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=kraken
+   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=okx
+   https://arbiflow-engine-v3.onrender.com/api/phase7/quote?venue=bybit
 
-SUI_GRAPHQL_URL=https://graphql.mainnet.sui.io/graphql
-MONAD_RPC_URL=https://rpc.monad.xyz
-
-The Sui expected identifier is hardcoded from Mysten Labs' public Sui SDK
-reference; SUI_CHAIN_IDENTIFIER can override it if explicitly configured.
-If SUI_CHAIN_IDENTIFIER is set incorrectly in Render, remove it.
-
-Deploy to Render and manually visit:
-https://arbiflow-engine-v3.onrender.com/api/expansion-25x25/phase6-probe
-
-Read-only RPC checks only; no automatic scanning or mainnet broadcasting.
+Notes: No keys. No scheduled scan. No orders. Bid/ask are public indicative book-top prices, not executable size-aware quotes. Coinbase/Kraken use USD; others use USDT. Do NOT compare these as equal or calculate profit until normalized, with depth, fees, withdrawal/transfer constraints and latency. Public APIs can be geo-blocked or rate-limited. This addon does not activate the 25 CEX registry or DEX adapters.
