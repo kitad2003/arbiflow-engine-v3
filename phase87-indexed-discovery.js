@@ -1,12 +1,14 @@
 'use strict';
 // Phase 8.7: manually triggered, bounded indexed market inventory. No signing, transactions or auto-polling.
 const SAFETY=Object.freeze({readOnly:true,automaticScanning:false,mainnetBroadcast:false,executionEligible:false});
-const BUILD='8.7.1';
+const BUILD='8.7.2';
 const GECKO_GAP_MS=1500;
+const MIN_SCAN_INTERVAL_MS=90000;
+const MIN_429_COOLDOWN_MS=60000;
 const DEFAULT_429_COOLDOWN_MS=60000;
 const MAX_COOLDOWN_MS=15*60000;
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function retryAfterMs(value){if(!value)return DEFAULT_429_COOLDOWN_MS;const seconds=Number(value);const ms=Number.isFinite(seconds)?seconds*1000:Date.parse(value)-Date.now();return Number.isFinite(ms)?Math.max(1000,Math.min(MAX_COOLDOWN_MS,ms)):DEFAULT_429_COOLDOWN_MS;}
+function retryAfterMs(value){if(!value)return DEFAULT_429_COOLDOWN_MS;const seconds=Number(value);const ms=Number.isFinite(seconds)?seconds*1000:Date.parse(value)-Date.now();return Number.isFinite(ms)?Math.max(MIN_429_COOLDOWN_MS,Math.min(MAX_COOLDOWN_MS,ms)):DEFAULT_429_COOLDOWN_MS;}
 
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const ADDR=/^0x[a-fA-F0-9]{40}$/;
@@ -57,8 +59,8 @@ async function retrieve(source,fetchFn=globalThis.fetch){
  }finally{clearTimeout(timer)}
 }
 function mount(app,{fetchFn}={}){
- const state={running:false,runs:0,lastStartedAt:null,lastCompletedAt:null,lastResult:null,pools:[],lastSuccessfulAt:null,geckoCooldownUntil:0};
- const status=()=>({success:true,build:BUILD,running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,lastSuccessfulAt:state.lastSuccessfulAt,uniquePoolsInMemory:state.pools.length,lastResult:state.lastResult,geckoCooldownUntil:state.geckoCooldownUntil?new Date(state.geckoCooldownUntil).toISOString():null,safety:SAFETY});
+ const state={running:false,runs:0,lastStartedAt:null,lastCompletedAt:null,lastResult:null,pools:[],lastSuccessfulAt:null,geckoCooldownUntil:0,dexCooldownUntil:0,nextScanAt:0};
+ const status=()=>({success:true,build:BUILD,running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,lastSuccessfulAt:state.lastSuccessfulAt,uniquePoolsInMemory:state.pools.length,lastResult:state.lastResult,geckoCooldownUntil:state.geckoCooldownUntil?new Date(state.geckoCooldownUntil).toISOString():null,dexCooldownUntil:state.dexCooldownUntil?new Date(state.dexCooldownUntil).toISOString():null,nextScanAt:state.nextScanAt?new Date(state.nextScanAt).toISOString():null,safety:SAFETY});
  app.get('/api/liquidity87/status',(_req,res)=>res.json(status()));
  app.get('/api/liquidity87/sources',(_req,res)=>res.json({success:true,build:BUILD,sources:URLS.map(s=>({name:s.name,url:s.url})),safety:SAFETY}));
  app.get('/api/liquidity87/pools',(req,res)=>{const limit=Number(req.query.limit??50),offset=Number(req.query.offset??0),min=Number(req.query.minLiquidityUSD??0);
@@ -72,18 +74,21 @@ function mount(app,{fetchFn}={}){
   let lastGeckoRequestAt=0;
   for(const source of URLS){
    const isGecko=source.name.startsWith('gecko');
-   if(isGecko&&Date.now()<state.geckoCooldownUntil){failures.push({source:source.name,error:'RATE_LIMIT_COOLDOWN',retryAt:new Date(state.geckoCooldownUntil).toISOString()});continue;}
+   const cooldownUntil=isGecko?state.geckoCooldownUntil:state.dexCooldownUntil;
+   if(Date.now()<cooldownUntil){failures.push({source:source.name,error:'RATE_LIMIT_COOLDOWN',retryAt:new Date(cooldownUntil).toISOString()});continue;}
    if(isGecko&&lastGeckoRequestAt){const gap=GECKO_GAP_MS-(Date.now()-lastGeckoRequestAt);if(gap>0)await wait(gap);}
    if(isGecko)lastGeckoRequestAt=Date.now();
    try{const rows=await retrieve(source,fetchFn||globalThis.fetch);successes.push({source:source.name,records:rows.length});all.push(...rows)}
-   catch(e){if(isGecko&&e?.message==='HTTP_429')state.geckoCooldownUntil=Date.now()+(e.retryAfterMs||DEFAULT_429_COOLDOWN_MS);
-    failures.push({source:source.name,error:String(e?.message||e).slice(0,140),...(isGecko&&e?.message==='HTTP_429'?{retryAt:new Date(state.geckoCooldownUntil).toISOString()}:{})});}
+   catch(e){if(e?.message==='HTTP_429'){const until=Date.now()+Math.max(MIN_429_COOLDOWN_MS,e.retryAfterMs||DEFAULT_429_COOLDOWN_MS);if(isGecko)state.geckoCooldownUntil=until;else state.dexCooldownUntil=until;}
+    const retryAt=isGecko?state.geckoCooldownUntil:state.dexCooldownUntil;
+    failures.push({source:source.name,error:String(e?.message||e).slice(0,140),...(e?.message==='HTTP_429'?{retryAt:new Date(retryAt).toISOString()}:{})});}
   }
-  const deduped=merge(all);if(successes.length){state.pools=deduped;state.lastSuccessfulAt=new Date().toISOString()}
+  const deduped=merge(all);if(successes.length){state.pools=merge([...state.pools,...deduped]);state.lastSuccessfulAt=new Date().toISOString()}
   return {success:failures.length===0,scanStatus:failures.length?'INCOMPLETE':'COMPLETE',build:BUILD,chainId:8453,rawRecords:all.length,uniquePools:deduped.length,contractAddressPools:deduped.filter(x=>x.poolKind==='contractAddress').length,poolIdRecords:deduped.filter(x=>x.poolKind==='poolId').length,sourcesSucceeded:successes,sourcesFailed:failures,limitations:['BASE_ONLY','INDEXED_API_SNAPSHOTS_NOT_ON_CHAIN_VERIFIED','REPORTED_TVL_NOT_EXECUTABLE_DEPTH','NO_ROUTE_QUOTES','NO_PROFIT_VALIDATION','IN_MEMORY_ONLY','NO_AUTOMATIC_SCAN'],safety:SAFETY};
  }
  app.get('/api/liquidity87/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUN_IN_PROGRESS',safety:SAFETY});
-  state.running=true;state.runs++;state.lastStartedAt=new Date().toISOString();
+  if(Date.now()<state.nextScanAt)return res.status(429).json({success:false,error:'SCAN_COOLDOWN',retryAt:new Date(state.nextScanAt).toISOString(),safety:SAFETY});
+  state.nextScanAt=Date.now()+MIN_SCAN_INTERVAL_MS;state.running=true;state.runs++;state.lastStartedAt=new Date().toISOString();
   setImmediate(async()=>{try{state.lastResult=await run()}catch(e){state.lastResult={success:false,error:String(e?.message||e).slice(0,140),safety:SAFETY}}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}});
   res.json({success:true,status:'STARTED_BACKGROUND',build:BUILD,statusRoute:'/api/liquidity87/status',safety:SAFETY});
  });return {state};
