@@ -17,21 +17,22 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.1';
+const BUILD='9.9.2';
 const RPC_TIMEOUT_MS=12000;
 const SCAN_TIMEOUT_MS=180000;
 const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false,atomicSimulation:false};
-async function mapLimit(items,limit,fn){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
+async function mapLimit(items,limit,fn,shouldStop=()=>false){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length&&!shouldStop()){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
 function mount(app,{getBaseChain,rpc}){
  const state={running:false,runs:0,lastResult:null,lastCompletedAt:null,startedAt:null,progress:{stage:'IDLE',updatedAt:null}};
  const progress=(stage,details={})=>{state.progress={stage,updatedAt:new Date().toISOString(),...details}};
- async function execute(trigger){state.running=true;state.runs++;state.startedAt=new Date().toISOString();progress('STARTING');try{state.lastResult=await timeout(run(),SCAN_TIMEOUT_MS,'SCAN');if(trigger)state.lastResult.trigger=trigger;progress('COMPLETED')}catch(e){state.lastResult={success:false,error:err(e),stage:state.progress.stage,safety};progress('FAILED',{error:err(e)})}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}}
- async function run(){
+ async function execute(trigger){state.running=true;state.runs++;state.startedAt=new Date().toISOString();progress('STARTING');const signal={aborted:false};try{state.lastResult=await timeout(run(signal),SCAN_TIMEOUT_MS,'SCAN');if(trigger)state.lastResult.trigger=trigger;progress('COMPLETED')}catch(e){signal.aborted=true;state.lastResult={success:false,error:err(e),stage:state.progress.stage,safety};progress('FAILED',{error:err(e)})}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}}
+ async function run(signal){
+  const check=()=>{if(signal.aborted)throw Error('SCAN_ABORTED')};
   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
   progress('FETCH_BLOCK');
   const block=await timeout(rpc(chain,'eth_blockNumber',[]),RPC_TIMEOUT_MS,'RPC_BLOCK');
-  const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await timeout(rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]),RPC_TIMEOUT_MS,'RPC_ETH_CALL'));
+  const call=async(to,iface,fn,args)=>{check();const result=await timeout(rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]),RPC_TIMEOUT_MS,'RPC_ETH_CALL');check();return iface.decodeFunctionResult(fn,result)};
   const markets=['WETH','DAI','cbBTC','USDT'];
   progress('TOKEN_DECIMALS');
   const tokenDecimals={};
@@ -54,13 +55,11 @@ function mount(app,{getBaseChain,rpc}){
   // Phase 9.9: bounded, read-only triangular route experiment.
   // Uses existing verified Base token addresses; every leg is independently pool-discovered.
   const triangleAssets=['WETH','cbBTC'];
-  const triangleEdges=[
-   ['USDC','WETH'],['WETH','cbBTC'],['cbBTC','USDC'],
-   ['USDC','cbBTC'],['cbBTC','WETH'],['WETH','USDC']
-  ];
+  const triangleEdges=[['USDC','WETH'],['WETH','cbBTC'],['cbBTC','USDC']];
   const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
   progress('DISCOVER_TRIANGLE_POOLS');
-  const trianglePools=await mapLimit(triangleCandidates,2,async v=>{
+  let triangleDiscovered=0;
+  const trianglePools=await mapLimit(triangleCandidates,2,async v=>{check();triangleDiscovered++;progress('DISCOVER_TRIANGLE_POOLS',{checked:triangleDiscovered,total:triangleCandidates.length});
    const [addr]=v.kind==='AERODROME'
     ?await call(v.factory,af,'getPool',[TOKENS[v.from],TOKENS[v.to],v.stable])
     :await call(v.factory,f,'getPool',[TOKENS[v.from],TOKENS[v.to],v.fee]);
@@ -73,7 +72,9 @@ function mount(app,{getBaseChain,rpc}){
    if(![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.from].toLowerCase())||![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.to].toLowerCase()))throw Error('TRIANGLE_TOKEN_IDENTITY_MISMATCH');
    return {...v,pool:addr,status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};
   });
-  const triangleLive=trianglePools.filter(v=>v.status==='POOL_LIVE');
+  check();
+  const triangleLive=trianglePools.filter(v=>v&&v.status==='POOL_LIVE');
+  const oriented=(from,to)=>triangleLive.filter(v=>(v.from===from&&v.to===to)||(v.from===to&&v.to===from)).map(v=>({...v,from,to}));
   const triangleDirections=[['USDC','WETH','cbBTC','USDC'],['USDC','cbBTC','WETH','USDC']];
   const triangleRoutes=[];
   let triangleQuoteCalls=0;
@@ -88,7 +89,7 @@ function mount(app,{getBaseChain,rpc}){
   // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
   progress('QUOTE_TRIANGLES');
   for(const path of triangleDirections){
-   const legs=[0,1,2].map(i=>triangleLive.filter(v=>v.from===path[i]&&v.to===path[i+1]));
+   const legs=[0,1,2].map(i=>oriented(path[i],path[i+1]));
    const candidates=[];
    for(const a of legs[0])for(const b of legs[1])for(const c of legs[2]){
     if(candidates.length<24)candidates.push([a,b,c]);
@@ -111,6 +112,7 @@ function mount(app,{getBaseChain,rpc}){
   let quoteCalls=0;
   const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
   progress('QUOTE_TWO_LEG_ROUTES',{triangleRoutesChecked:triangleRoutes.length});
+  check();
   const routes=await mapLimit(combinations,2,async({buy,sell})=>{
    const base={route:'USDC>'+buy.asset+'>USDC',asset:buy.asset,venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],qualified:false,netProfitUsd:null,atomicSimulation:false};
    const samples=[];
