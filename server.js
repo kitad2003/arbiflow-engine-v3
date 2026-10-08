@@ -9242,6 +9242,32 @@ app.get('/api/expansion-25x25/phase3-probe', async (req,res) => {
   finally{phase3Busy=false;}
 });
 
+// Phase 4: manual, sequential checks for the next five registered EVM chains.
+// Existing scanner selection and transaction safeguards are unchanged.
+const phase4Targets = Object.freeze(['gnosis','metis','sonic','celo','unichain']);
+let phase4Busy = false;
+app.get('/api/expansion-25x25/phase4-config', (req,res) => {
+  res.json({success:true,stage:'PHASE4_RPC_ONBOARDING',targets:phase4Targets.map(key=>({key,expectedChainId:expansionRegistry47820.chains.find(c=>c.key===key).chainId,environmentVariable:rpcEnvironmentNames(key)[0],configured:rpcEnvironmentNames(key).some(n=>Boolean(process.env[n]))||Boolean(RPC_URLS[key])})),readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+});
+app.get('/api/expansion-25x25/phase4-probe', async (req,res) => {
+  if(phase4Busy)return res.status(409).json({success:false,error:'PHASE4_PROBE_ALREADY_RUNNING'});
+  phase4Busy=true;
+  try {
+    const results=[];
+    for(const key of phase4Targets){
+      const chain=expansionRegistry47820.chains.find(c=>c.key===key);
+      const envName=rpcEnvironmentNames(key).find(n=>Boolean(process.env[n]));
+      const url=envName?process.env[envName]:RPC_URLS[key];
+      if(!url){results.push({key,configured:false,status:'NOT_CONFIGURED'});continue;}
+      const result=await probeEvmChain({url,expectedChainId:chain.chainId});
+      results.push({key,configured:true,...result});
+      await new Promise(resolve=>setTimeout(resolve,1200));
+    }
+    res.json({success:true,stage:'PHASE4_MANUAL_SEQUENTIAL_RPC_PROBE',results,verified:results.filter(x=>x.status==='VERIFIED').length,readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+  }catch(e){res.status(500).json({success:false,error:'PHASE4_PROBE_FAILED'});}
+  finally{phase4Busy=false;}
+});
+
 app.get('/api/expansion-25x25/rpc-probe', async (req, res) => {
   const key = typeof req.query.chain==='string' ? req.query.chain.trim().toLowerCase() : '';
   const chain = expansionRegistry47820.chains.find(c=>c.key===key);
