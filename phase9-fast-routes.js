@@ -17,7 +17,7 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.8.1';
+const BUILD='9.9.0';
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false,atomicSimulation:false};
 async function mapLimit(items,limit,fn){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
 function mount(app,{getBaseChain,rpc}){
@@ -43,6 +43,57 @@ function mount(app,{getBaseChain,rpc}){
    const [usdcBalance]=await call(TOKENS.USDC,erc20,'balanceOf',[addr]);
    return {...v,pool:addr,liquidity:liq.toString(),reserveUsdcRaw:usdcBalance.toString(),status:liq===0n?'POOL_EMPTY':usdcBalance<minReserveUsdc?'INSUFFICIENT_USDC_RESERVE':'POOL_LIVE'};
   });
+  // Phase 9.9: bounded, read-only triangular route experiment.
+  // Uses existing verified Base token addresses; every leg is independently pool-discovered.
+  const triangleAssets=['WETH','cbBTC'];
+  const triangleEdges=[
+   ['USDC','WETH'],['WETH','cbBTC'],['cbBTC','USDC'],
+   ['USDC','cbBTC'],['cbBTC','WETH'],['WETH','USDC']
+  ];
+  const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
+  const trianglePools=await mapLimit(triangleCandidates,2,async v=>{
+   const [addr]=v.kind==='AERODROME'
+    ?await call(v.factory,af,'getPool',[TOKENS[v.from],TOKENS[v.to],v.stable])
+    :await call(v.factory,f,'getPool',[TOKENS[v.from],TOKENS[v.to],v.fee]);
+   if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
+   if(v.kind==='AERODROME'){
+    const [a,b]=await call(v.router,ar,'getReserves',[TOKENS[v.from],TOKENS[v.to],v.stable,v.factory]);
+    return {...v,pool:addr,status:a>0n&&b>0n?'POOL_LIVE':'POOL_EMPTY'};
+   }
+   const [[t0],[t1],[liq]]=await Promise.all([call(addr,p,'token0',[]),call(addr,p,'token1',[]),call(addr,p,'liquidity',[])]);
+   if(![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.from].toLowerCase())||![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.to].toLowerCase()))throw Error('TRIANGLE_TOKEN_IDENTITY_MISMATCH');
+   return {...v,pool:addr,status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};
+  });
+  const triangleLive=trianglePools.filter(v=>v.status==='POOL_LIVE');
+  const triangleDirections=[['USDC','WETH','cbBTC','USDC'],['USDC','cbBTC','WETH','USDC']];
+  const triangleRoutes=[];
+  let triangleQuoteCalls=0;
+  async function triangleQuote(v,amount){
+   if(v.kind==='AERODROME'){
+    const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[TOKENS[v.from],TOKENS[v.to],v.stable,v.factory]]]);
+    return amounts[amounts.length-1];
+   }
+   const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[TOKENS[v.from],TOKENS[v.to],amount,v.fee,0]]);
+   return output;
+  }
+  // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
+  for(const path of triangleDirections){
+   const legs=[0,1,2].map(i=>triangleLive.filter(v=>v.from===path[i]&&v.to===path[i+1]));
+   const candidates=[];
+   for(const a of legs[0])for(const b of legs[1])for(const c of legs[2]){
+    if(candidates.length<24)candidates.push([a,b,c]);
+   }
+   const results=await mapLimit(candidates,2,async trio=>{
+    const base={route:path.join('>'),venues:trio.map(v=>v.name),pools:trio.map(v=>v.pool),sizeUsdc:500,qualified:false,netProfitUsd:null,atomicSimulation:false,status:'INDICATIVE_ONLY'};
+    try{
+     let amount=500000000n;
+     for(const leg of trio){triangleQuoteCalls++;amount=await triangleQuote(leg,amount);if(amount<=0n)throw Error('ZERO_OUTPUT');}
+     const grossProfitUsd=Number(amount-500000000n)/1e6;
+     return {...base,grossProfitUsd,grossSpreadPct:grossProfitUsd/5,usdcReturnedRaw:amount.toString()};
+    }catch(e){return {...base,status:'QUOTE_FAILED',error:err(e),grossProfitUsd:null,grossSpreadPct:null}}
+   });
+   triangleRoutes.push(...results);
+  }
   phase91.registerPools(pools);
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.asset===b.asset&&a.name!==b.name).map(b=>({buy:a,sell:b})));
@@ -83,7 +134,7 @@ function mount(app,{getBaseChain,rpc}){
    const best=ranked()[0];
    return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
   });
-  return {success:true,stage:'PHASE981_CHECKSUM_CORRECTED_DIAGNOSTICS',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'PHASE990_TRIANGULAR_EXPERIMENT',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,triangleExperiment:{readOnly:true,assets:triangleAssets,poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:triangleRoutes.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:triangleRoutes.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NO_TOKEN_SAFETY_VERIFICATION','NOT_EXECUTION_ELIGIBLE']},tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){
   if(state.running)return;
