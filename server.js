@@ -18,6 +18,40 @@ const {
   id
 } = require("ethers");
 
+// 4.78.9: one account-level Alchemy RPC gate for native fetch and ethers fetch.
+// CU costs vary by method/provider. This is deliberately a conservative request
+// pacing safeguard, NOT a certified CU/s meter or guaranteed account-wide limit.
+const rpcBudget4789={tail:Promise.resolve(),nextAt:0,blockedUntil:0,requests:0,rateLimited:0,methods:{},last429:null,minimumSpacingMs:Math.max(1000,Number(process.env.ARBIFLOW_ALCHEMY_SPACING_MS)||1500)};
+const nativeFetch4789=globalThis.fetch.bind(globalThis);
+const delay4789=ms=>new Promise(r=>setTimeout(r,ms));
+function isAlchemy4789(url){try{return new URL(String(url)).hostname.endsWith('.g.alchemy.com')}catch{return false}}
+function rpcMethods4789(body){try{const payload=JSON.parse(typeof body==='string'?body:Buffer.isBuffer(body)?body.toString('utf8'):'');return (Array.isArray(payload)?payload:[payload]).map(x=>String(x?.method||'unknown'))}catch{return ['unknown']}}
+// All RPC users of fetch, including ethers' FetchRequest in supported runtimes,
+// are protected when they use global fetch. Other transports need separate audit.
+globalThis.fetch=async function guardedAlchemyFetch4789(url,opts={}){
+ if(!isAlchemy4789(url))return nativeFetch4789(url,opts);
+ const prev=rpcBudget4789.tail;let release;
+ rpcBudget4789.tail=new Promise(r=>release=r);
+ await prev.catch(()=>{});
+ try{
+  if(Date.now()<rpcBudget4789.blockedUntil)throw new Error('ALCHEMY_SHARED_COOLDOWN_ACTIVE');
+  await delay4789(Math.max(0,rpcBudget4789.nextAt-Date.now()));
+  if(Date.now()<rpcBudget4789.blockedUntil)throw new Error('ALCHEMY_SHARED_COOLDOWN_ACTIVE');
+  rpcBudget4789.nextAt=Date.now()+rpcBudget4789.minimumSpacingMs;
+  const methods=rpcMethods4789(opts?.body);
+  rpcBudget4789.requests++;
+  for(const m of methods)rpcBudget4789.methods[m]=(rpcBudget4789.methods[m]||0)+1;
+  const response=await nativeFetch4789(url,opts);
+  if(response.status===429){
+   rpcBudget4789.rateLimited++;rpcBudget4789.last429=new Date().toISOString();
+   const retry=response.headers.get('retry-after');const n=Number(retry);const date=Date.parse(retry);
+   const wait=Number.isFinite(n)&&n>0?n*1000:Number.isFinite(date)?Math.max(0,date-Date.now()):0;
+   rpcBudget4789.blockedUntil=Math.max(rpcBudget4789.blockedUntil,Date.now()+Math.max(120000,Math.min(600000,wait)));
+  }
+  return response;
+ }finally{release()}
+};
+
 const app = express();
 
 app.use(cors());
@@ -44,7 +78,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.8";
+const VERSION = "4.78.9";
 
 /*
 =========================================================
@@ -9276,7 +9310,7 @@ app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
 const dex4780={startedAt:new Date().toISOString(),running:false,runs:0,lastRunAt:null,lastCompletedAt:null,chains:{}};
-// 4.78.8: preserve per-chain verified snapshots in process memory. A failed scan cannot erase them.
+// 4.78.9: preserve per-chain verified snapshots in process memory. A failed scan cannot erase them.
 // Snapshot pool state is historical, never an executable/current quote.
 const dexVerified4788=new Map();
 const DEX_SNAPSHOT_MAX_AGE_MS_4788=600000;
@@ -9462,6 +9496,7 @@ function dexPriceComparison4787(){
  return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"LAST_VERIFIED_PER_CHAIN_SNAPSHOT_IN_MEMORY",lastCompletedAt:dex4780.lastCompletedAt,ageMs:null,fresh,allChainsFresh:chains.every(c=>c.snapshotStatus==="FRESH"),requiresFreshScan:chains.some(c=>c.requiresFreshScan),chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["SNAPSHOTS_IN_MEMORY_LOST_ON_PROCESS_RESTART","NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get("/api/dex-independent/prices",(req,res)=>res.json(dexPriceComparison4787()));
+app.get("/api/rpc-budget/status",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",monthlyQuotaMeasured:false,cuPerSecondMeasured:false,requests:rpcBudget4789.requests,rateLimited:rpcBudget4789.rateLimited,methods:rpcBudget4789.methods,minimumSpacingMs:rpcBudget4789.minimumSpacingMs,last429:rpcBudget4789.last429,cooldownRemainingMs:Math.max(0,rpcBudget4789.blockedUntil-Date.now()),note:"Other RPC transports and external apps are not covered",safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,backgroundHeartbeatIntervalMs:mc4750.pollIntervalMs,autoDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DISCOVERY==="true",autoDexDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true",cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
 app.get("/api/dex-independent/run",(req,res)=>{if(dex4780.running||Date.now()<dexRpcGate4783.cooldownUntil)return res.json({success:false,version:VERSION,status:dex4780.running?"ALREADY_RUNNING":"RPC_COOLDOWN_ACTIVE",retryAfterMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now()),readOnly:true});setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
 // Free-tier mode: independent DEX discovery runs only on explicit request.

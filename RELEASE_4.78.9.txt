@@ -1,0 +1,5 @@
+4.78.9 Alchemy fetch traffic gate
+Global fetch requests to *.g.alchemy.com are serialized and paced at >=1500ms by default; 429 initiates 120s+ shared cooldown.
+/api/rpc-budget/status reports requests by method.
+Limitations: ethers may use other transport paths; CU/s cannot be measured from request count; other apps share the Alchemy quota. No persistent snapshot storage yet.
+Read-only safety remains unchanged.
