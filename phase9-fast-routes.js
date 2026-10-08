@@ -17,16 +17,19 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.2';
+const BUILD='9.9.3';
 const RPC_TIMEOUT_MS=12000;
 const SCAN_TIMEOUT_MS=180000;
 const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false,atomicSimulation:false};
 async function mapLimit(items,limit,fn,shouldStop=()=>false){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length&&!shouldStop()){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
 function mount(app,{getBaseChain,rpc}){
- const state={running:false,runs:0,lastResult:null,lastCompletedAt:null,startedAt:null,progress:{stage:'IDLE',updatedAt:null}};
+ const state={running:false,runs:0,lastResult:null,lastCompletedAt:null,startedAt:null,progress:{stage:'IDLE',updatedAt:null},partial:null};
+ const poolCache=new Map();
+ const cacheTtlMs=30*60*1000;
+ let activePromise=null;
  const progress=(stage,details={})=>{state.progress={stage,updatedAt:new Date().toISOString(),...details}};
- async function execute(trigger){state.running=true;state.runs++;state.startedAt=new Date().toISOString();progress('STARTING');const signal={aborted:false};try{state.lastResult=await timeout(run(signal),SCAN_TIMEOUT_MS,'SCAN');if(trigger)state.lastResult.trigger=trigger;progress('COMPLETED')}catch(e){signal.aborted=true;state.lastResult={success:false,error:err(e),stage:state.progress.stage,safety};progress('FAILED',{error:err(e)})}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}}
+ async function execute(trigger){if(activePromise)return;state.running=true;state.runs++;state.startedAt=new Date().toISOString();state.partial={triangleRoutes:[],triangleQuote:{completed:0,total:0,failed:0},poolDiscovery:{completed:0,total:0},twoLegRoutes:[]};progress('STARTING');const signal={aborted:false};const work=run(signal);activePromise=work;try{state.lastResult=await timeout(work,SCAN_TIMEOUT_MS,'SCAN');if(trigger)state.lastResult.trigger=trigger;progress('COMPLETED')}catch(e){signal.aborted=true;state.lastResult={success:false,error:err(e),stage:state.progress.stage,partial:state.partial,safety};progress('FAILED',{error:err(e)})}finally{if(signal.aborted){await Promise.race([work.catch(()=>{}),new Promise(resolve=>setTimeout(resolve,RPC_TIMEOUT_MS+1000))])}activePromise=null;state.running=false;state.lastCompletedAt=new Date().toISOString()}}
  async function run(signal){
   const check=()=>{if(signal.aborted)throw Error('SCAN_ABORTED')};
   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
@@ -59,19 +62,24 @@ function mount(app,{getBaseChain,rpc}){
   const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
   progress('DISCOVER_TRIANGLE_POOLS');
   let triangleDiscovered=0;
-  const trianglePools=await mapLimit(triangleCandidates,2,async v=>{check();triangleDiscovered++;progress('DISCOVER_TRIANGLE_POOLS',{checked:triangleDiscovered,total:triangleCandidates.length});
+  state.partial.poolDiscovery.total=triangleCandidates.length;
+  const trianglePools=await mapLimit(triangleCandidates,2,async v=>{check();
+   const cacheKey=[v.from,v.to,v.name].join(':');const cached=poolCache.get(cacheKey);
+   if(cached&&Date.now()-cached.at<cacheTtlMs){triangleDiscovered++;state.partial.poolDiscovery.completed=triangleDiscovered;progress('DISCOVER_TRIANGLE_POOLS',{completed:triangleDiscovered,total:triangleCandidates.length,cached:true});return cached.value;}
+   try{
    const [addr]=v.kind==='AERODROME'
     ?await call(v.factory,af,'getPool',[TOKENS[v.from],TOKENS[v.to],v.stable])
     :await call(v.factory,f,'getPool',[TOKENS[v.from],TOKENS[v.to],v.fee]);
-   if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
+   if(!addr||/^0x0{40}$/i.test(addr)){const value={...v,status:'NO_POOL'};poolCache.set(cacheKey,{at:Date.now(),value});return value;}
    if(v.kind==='AERODROME'){
     const [a,b]=await call(v.router,ar,'getReserves',[TOKENS[v.from],TOKENS[v.to],v.stable,v.factory]);
-    return {...v,pool:addr,status:a>0n&&b>0n?'POOL_LIVE':'POOL_EMPTY'};
+    const value={...v,pool:addr,status:a>0n&&b>0n?'POOL_LIVE':'POOL_EMPTY'};poolCache.set(cacheKey,{at:Date.now(),value});return value;
    }
    const [[t0],[t1],[liq]]=await Promise.all([call(addr,p,'token0',[]),call(addr,p,'token1',[]),call(addr,p,'liquidity',[])]);
    if(![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.from].toLowerCase())||![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS[v.to].toLowerCase()))throw Error('TRIANGLE_TOKEN_IDENTITY_MISMATCH');
-   return {...v,pool:addr,status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};
-  });
+   const value={...v,pool:addr,status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};poolCache.set(cacheKey,{at:Date.now(),value});return value;
+   }finally{triangleDiscovered++;state.partial.poolDiscovery.completed=triangleDiscovered;progress('DISCOVER_TRIANGLE_POOLS',{completed:triangleDiscovered,total:triangleCandidates.length});}
+  },()=>signal.aborted);
   check();
   const triangleLive=trianglePools.filter(v=>v&&v.status==='POOL_LIVE');
   const oriented=(from,to)=>triangleLive.filter(v=>(v.from===from&&v.to===to)||(v.from===to&&v.to===from)).map(v=>({...v,from,to}));
@@ -88,21 +96,24 @@ function mount(app,{getBaseChain,rpc}){
   }
   // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
   progress('QUOTE_TRIANGLES');
+  const triangleQuoteBudget=12;
   for(const path of triangleDirections){
    const legs=[0,1,2].map(i=>oriented(path[i],path[i+1]));
    const candidates=[];
    for(const a of legs[0])for(const b of legs[1])for(const c of legs[2]){
-    if(candidates.length<24)candidates.push([a,b,c]);
+    if(candidates.length<triangleQuoteBudget)candidates.push([a,b,c]);
    }
-   const results=await mapLimit(candidates,2,async trio=>{
+   state.partial.triangleQuote.total+=candidates.length;
+   const results=await mapLimit(candidates,2,async trio=>{check();
     const base={route:path.join('>'),venues:trio.map(v=>v.name),pools:trio.map(v=>v.pool),sizeUsdc:500,qualified:false,netProfitUsd:null,atomicSimulation:false,status:'INDICATIVE_ONLY'};
     try{
      let amount=500000000n;
      for(const leg of trio){triangleQuoteCalls++;amount=await triangleQuote(leg,amount);if(amount<=0n)throw Error('ZERO_OUTPUT');}
      const grossProfitUsd=Number(amount-500000000n)/1e6;
-     return {...base,grossProfitUsd,grossSpreadPct:grossProfitUsd/5,usdcReturnedRaw:amount.toString()};
-    }catch(e){return {...base,status:'QUOTE_FAILED',error:err(e),grossProfitUsd:null,grossSpreadPct:null}}
-   });
+     const value={...base,grossProfitUsd,grossSpreadPct:grossProfitUsd/5,usdcReturnedRaw:amount.toString()};state.partial.triangleRoutes.push(value);return value;
+    }catch(e){const value={...base,status:'QUOTE_FAILED',error:err(e),grossProfitUsd:null,grossSpreadPct:null};state.partial.triangleRoutes.push(value);state.partial.triangleQuote.failed++;return value}
+    finally{state.partial.triangleQuote.completed++;progress('QUOTE_TRIANGLES',{...state.partial.triangleQuote})}
+   },()=>signal.aborted);
    triangleRoutes.push(...results);
   }
   phase91.registerPools(pools);
@@ -113,7 +124,7 @@ function mount(app,{getBaseChain,rpc}){
   const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
   progress('QUOTE_TWO_LEG_ROUTES',{triangleRoutesChecked:triangleRoutes.length});
   check();
-  const routes=await mapLimit(combinations,2,async({buy,sell})=>{
+  const routes=await mapLimit(combinations,2,async({buy,sell})=>{check();
    const base={route:'USDC>'+buy.asset+'>USDC',asset:buy.asset,venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],qualified:false,netProfitUsd:null,atomicSimulation:false};
    const samples=[];
    async function sample(sizeUsdc){
@@ -145,14 +156,14 @@ function mount(app,{getBaseChain,rpc}){
     }
    }
    const best=ranked()[0];
-   return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
-  });
+   const output={...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};state.partial.twoLegRoutes.push(output);return output;
+  },()=>signal.aborted);
   return {success:true,stage:'PHASE990_TRIANGULAR_EXPERIMENT',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,triangleExperiment:{readOnly:true,assets:triangleAssets,poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:triangleRoutes.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:triangleRoutes.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NO_TOKEN_SAFETY_VERIFICATION','NOT_EXECUTION_ELIGIBLE']},tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){if(state.running)return;await execute({type:'CONFIRMED_SWAP',pool:event.pool,blockNumber:event.blockNumber,transactionHash:event.transactionHash})}
  phase92.register(eventRequote);
  app.get('/api/phase92/status',(_req,res)=>res.json({success:true,...phase92.status(),quoteEngineRunning:state.running,lastCompletedAt:state.lastCompletedAt,lastResultSummary:state.lastResult?{success:state.lastResult.success,blockNumber:state.lastResult.blockNumber,routeCount:state.lastResult.routeCount,positiveIndicativeRoutes:state.lastResult.positiveIndicativeRoutes,qualified:state.lastResult.qualified,trigger:state.lastResult.trigger,error:state.lastResult.error}:null,safety}));
- app.get('/api/phase9/status',(_req,res)=>res.json({success:true,build:BUILD,...state,safety}));
- app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',progress:state.progress,startedAt:state.startedAt,safety});state.running=true;setImmediate(()=>execute());res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
+ app.get('/api/phase9/status',(_req,res)=>res.json({success:true,build:BUILD,...state,cache:{trianglePools:poolCache.size,ttlMinutes:30,scope:'PROCESS_MEMORY'},safety}));
+ app.get('/api/phase9/run',(_req,res)=>{if(state.running||activePromise)return res.status(409).json({success:false,error:'RUNNING',progress:state.progress,startedAt:state.startedAt,safety});state.running=true;setImmediate(()=>execute());res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
 }
 module.exports={mount,mapLimit};
