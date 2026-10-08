@@ -1,0 +1,1 @@
+Phase 8.5: Upload the eight .js files to repository root. Manual GET /api/phase85/run?amountUsdc=1, then GET /api/phase85/status. 8 bounded two-leg quotes, same pinned block, no gas or loan premium, no execution. Read-only. Existing files retained. Run syntax checks before deploying.

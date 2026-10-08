@@ -9955,3 +9955,9 @@ require('./phase84-multidex').mount(app,{
  getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),
  rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)
 });
+
+// Phase 8.5 manual, read-only cross-DEX cycle quotation.
+require('./phase85-crossdex').mount(app,{
+ getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),
+ rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)
+});
