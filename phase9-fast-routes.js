@@ -10,6 +10,7 @@ const VENUES=[
 ];
 const AERO={name:'AERODROME_VOLATILE',kind:'AERODROME',factory:'0x420DD381b31aEf6683db6B902084cB0FFECe40Da',router:'0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43',stable:false};
 VENUES.push(AERO);
+VENUES.push({...AERO,name:'AERODROME_STABLE',stable:true});
 const af=new Interface(['function getPool(address,address,bool) view returns(address)']);
 const ar=new Interface(['function getReserves(address,address,bool,address) view returns(uint256,uint256)','function getAmountsOut(uint256,(address from,address to,bool stable,address factory)[]) view returns(uint256[])']);
 const f=new Interface(['function getPool(address,address,uint24) view returns(address)']);
@@ -17,7 +18,7 @@ const erc20=new Interface(['function balanceOf(address) view returns(uint256)','
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.9.6';
+const BUILD='9.9.7';
 const RPC_TIMEOUT_MS=12000;
 const SCAN_TIMEOUT_MS=180000;
 const timeout=(promise,ms,label)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(label+'_TIMEOUT_'+ms+'MS')),ms)})]).finally(()=>clearTimeout(timer))};
@@ -42,8 +43,7 @@ function mount(app,{getBaseChain,rpc}){
   for(const asset of markets){const [decimals]=await call(TOKENS[asset],erc20,'decimals',[]);const d=Number(decimals);if(!Number.isInteger(d)||d<0||d>36)throw Error('INVALID_TOKEN_DECIMALS_'+asset);tokenDecimals[asset]=d;}
   const minUsd=500,maxUsd=50000;
   const minReserveUsdc=BigInt(minUsd*10)*1000000n;
-  progress('DISCOVER_TWO_LEG_POOLS');
-  const pools=await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
+  const pools=triangleOnly?[]:await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
    const [addr]=v.kind==='AERODROME'?await call(v.factory,af,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.stable]):await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS[v.asset],v.fee]);
    if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
    if(v.kind==='AERODROME'){
@@ -60,6 +60,7 @@ function mount(app,{getBaseChain,rpc}){
   const triangleAssets=['WETH','LINK'];
   const triangleEdges=[['USDC','LINK'],['LINK','WETH'],['WETH','USDC']];
   const triangleCandidates=triangleEdges.flatMap(([from,to])=>VENUES.map(v=>({from,to,...v})));
+  const triangleOnly=true;
   progress('DISCOVER_TRIANGLE_POOLS');
   let triangleDiscovered=0;
   state.partial.poolDiscovery.total=triangleCandidates.length;
@@ -101,7 +102,7 @@ function mount(app,{getBaseChain,rpc}){
   }
   // Limit permutations and RPC usage; one $500 quote per route at a pinned block.
   progress('QUOTE_TRIANGLES');
-  const triangleQuoteBudget=2;
+  const triangleQuoteBudget=3;
   for(const path of triangleDirections){
    const legs=[0,1,2].map(i=>oriented(path[i],path[i+1]));
    const candidates=[];
@@ -144,6 +145,11 @@ function mount(app,{getBaseChain,rpc}){
   const triangleSizing={method:'BOUNDED_GROSS_SIZE_SEARCH',testedSizesUsd:triangleTradeSizesUsd,bestGrossRoute:bestTriangle,bestPositiveGrossRoute:validTriangle.filter(r=>r.grossProfitUsd>0).sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd)[0]??null,netOptimalSizeUsd:null,breakEvenSizeUsd:null,reason:'GAS_AND_ATOMIC_EXECUTION_NOT_VERIFIED'};
   state.partial.triangleSizing=triangleSizing;
   state.partial.splitComparison={tested:splitComparisons.length,comparisons:splitComparisons,limitation:splitComparisons.length?'GAS_AND_ATOMIC_EXECUTION_UNVERIFIED':'NO_FULLY_DISJOINT_POOL_ROUTE_PAIRS_WITH_COMPLETE_50_AND_100_USD_QUOTES'};
+  state.partial.triangleCompleted=true;
+  state.partial.triangleQuoteTiming={...quoteTiming,averageMs:quoteTiming.calls?Math.round(quoteTiming.totalMs/quoteTiming.calls):null};
+  if(triangleOnly){
+   return {success:true,stage:'PHASE997_TRIANGULAR_ONLY',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),triangleExperiment:{readOnly:true,assets:triangleAssets,tradeSizesUsd:triangleTradeSizesUsd,sizing:triangleSizing,splitComparison:state.partial.splitComparison,quoteTiming:state.partial.triangleQuoteTiming,poolsDiscovered:trianglePools.length,livePools:triangleLive.length,routeCount:validTriangle.length,quoteCalls:triangleQuoteCalls,positiveIndicativeRoutes:validTriangle.filter(r=>r.grossProfitUsd>0).length,routes:triangleRoutes,limitations:['NO_GAS_NETTING','NOT_ATOMIC','NOT_EXECUTION_ELIGIBLE']},qualified:0,alertsEmitted:0,safety};
+  }
   phase91.registerPools(pools);
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.asset===b.asset&&a.name!==b.name).map(b=>({buy:a,sell:b})));
