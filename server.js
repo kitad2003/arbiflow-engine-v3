@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.4";
+const VERSION = "4.78.5";
 
 /*
 =========================================================
@@ -9288,7 +9288,7 @@ const dexPool4780=new (require("ethers").Interface)([
 ]);
 const dexAddress4780=a=>typeof a==="string"&&/^0x[0-9a-fA-F]{40}$/.test(a)&&!/^0x0{40}$/i.test(a);
 // Alchemy throughput is account-wide. Serialize DEX probes across all chains.
-const dexRpcGate4783={tail:Promise.resolve(),nextAt:0,cooldownUntil:0,requests:0,rateLimited:0,retries:0,cacheHits:0};
+const dexRpcGate4783={tail:Promise.resolve(),nextAt:0,cooldownUntil:0,requests:0,rateLimited:0,retries:0,cacheHits:0,abortedScans:0,lastRateLimitAt:null};
 const dexImmutableCache4783=new Map();
 const sleep4783=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function dexCall4780(c,to,data){
@@ -9301,16 +9301,21 @@ async function dexCall4780(c,to,data){
  dexRpcGate4783.tail=prev.catch(()=>{}).then(()=>next);
  await prev.catch(()=>{});
  try{
-  for(let attempt=0;attempt<3;attempt++){
-   await sleep4783(Math.max(0,dexRpcGate4783.cooldownUntil-Date.now(),dexRpcGate4783.nextAt-Date.now()));
-   dexRpcGate4783.nextAt=Date.now()+350;
-   try{const result=await dexRpcRequest4783(c,to,data);if(immutable)dexImmutableCache4783.set(key,result);return result;}
-   catch(e){
-    if(!/RPC_HTTP_429|RPC_HTTP_503|RPC_TIMEOUT|RPC_429/.test(String(e.message))||attempt===2)throw e;
-    dexRpcGate4783.retries++;
-    const delay=Math.max(e.retryAfterMs||0,Math.min(16000,2000*(2**attempt)+Math.floor(Math.random()*1000)));
-    dexRpcGate4783.cooldownUntil=Math.max(dexRpcGate4783.cooldownUntil,Date.now()+delay);
+  // Free-tier fail-fast: never retry 429 within the same discovery run.
+  if(Date.now()<dexRpcGate4783.cooldownUntil)throw new Error('RPC_COOLDOWN_ACTIVE');
+  await sleep4783(Math.max(0,dexRpcGate4783.nextAt-Date.now()));
+  dexRpcGate4783.nextAt=Date.now()+1200;
+  try{
+   const result=await dexRpcRequest4783(c,to,data);
+   if(immutable)dexImmutableCache4783.set(key,result);
+   return result;
+  }catch(e){
+   if(/RPC_HTTP_429|RPC_429/.test(String(e.message))){
+    dexRpcGate4783.lastRateLimitAt=new Date().toISOString();
+    dexRpcGate4783.cooldownUntil=Math.max(dexRpcGate4783.cooldownUntil,Date.now()+Math.max(120000,e.retryAfterMs||0));
+    throw new Error('RPC_RATE_LIMIT_SCAN_SUSPENDED');
    }
+   throw e;
   }
  }finally{release();}
 }
@@ -9358,6 +9363,7 @@ async function dexDiscover4780(c){
  for(const venue of dexVenues4780(c)){
   const v={name:venue.name,kind:venue.kind,feeTier:venue.fee??null,status:"NOT_CONFIGURED",factory:venue.factory||null,configurationSource:venue.factory?venue.source:"NOT_CONFIGURED",pool:null,liquidityEvidence:null,error:null};
   result.venues.push(v);
+  if(Date.now()<dexRpcGate4783.cooldownUntil){v.status="SKIPPED_RPC_COOLDOWN";continue;}
   if(!venue.factory)continue;
   if(!dexAddress4780(venue.factory)){v.status="INVALID_FACTORY_ADDRESS";continue;}
   try{
@@ -9382,18 +9388,25 @@ async function dexDiscover4780(c){
    }
    v.status=v.liquidityEvidence.nonzero?"POOL_LIVE":"POOL_EMPTY";
    if(v.status==="POOL_LIVE"){verified.add(venue.factory.toLowerCase());result.independentPools++;}
-  }catch(e){v.status="PROBE_ERROR";v.error=e?.name==="AbortError"?"RPC_TIMEOUT":String(e?.message||e).slice(0,180);}
+  }catch(e){v.status=/RPC_RATE_LIMIT_SCAN_SUSPENDED|RPC_COOLDOWN_ACTIVE/.test(String(e.message))?"SKIPPED_RPC_COOLDOWN":"PROBE_ERROR";v.error=e?.name==="AbortError"?"RPC_TIMEOUT":String(e?.message||e).slice(0,180);}
  }
  result.independentFactories=verified.size;
  result.status=result.independentPools>=2&&result.independentFactories>=2?"MULTI_VENUE_POOLS_VERIFIED":"INSUFFICIENT_INDEPENDENT_VENUES";
  return result;
 }
 async function runDex4780(){if(dex4780.running)return;dex4780.running=true;dex4780.runs++;dex4780.lastRunAt=new Date().toISOString();try{
- const rows=await Promise.all(MC4750_CHAINS.map(async c=>{
-  if(!c.rpc)return {name:c.name,chainId:c.chainId,status:"RPC_NOT_CONFIGURED",venues:[]};
-  try{return await dexDiscover4780(c);}catch(e){return {name:c.name,chainId:c.chainId,status:"ERROR",lastError:String(e?.message||e),venues:[]};}
- }));for(const row of rows)dex4780.chains[row.chainId]=row;
+ for(const c of MC4750_CHAINS){
+  if(Date.now()<dexRpcGate4783.cooldownUntil){
+   dexRpcGate4783.abortedScans++;
+   dex4780.chains[c.chainId]={name:c.name,chainId:c.chainId,status:"SKIPPED_RPC_COOLDOWN",venues:[],lastError:"ALCHEMY_FREE_TIER_COOLDOWN"};
+   continue;
+  }
+  const row=!c.rpc?{name:c.name,chainId:c.chainId,status:"RPC_NOT_CONFIGURED",venues:[]}:
+   await dexDiscover4780(c).catch(e=>({name:c.name,chainId:c.chainId,status:"ERROR",lastError:String(e.message),venues:[]}));
+  dex4780.chains[row.chainId]=row;
+  if(Date.now()<dexRpcGate4783.cooldownUntil)row.status="PARTIAL_RPC_RATE_LIMITED";
+ }
  }finally{dex4780.running=false;dex4780.lastCompletedAt=new Date().toISOString();}}
-app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
-app.get("/api/dex-independent/run",(req,res)=>{setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
+app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
+app.get("/api/dex-independent/run",(req,res)=>{if(dex4780.running||Date.now()<dexRpcGate4783.cooldownUntil)return res.json({success:false,version:VERSION,status:dex4780.running?"ALREADY_RUNNING":"RPC_COOLDOWN_ACTIVE",retryAfterMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now()),readOnly:true});setImmediate(()=>runDex4780().catch(()=>{}));res.json({success:true,version:VERSION,status:"STARTED_BACKGROUND",statusRoute:"/api/dex-independent/status",readOnly:true});});
 setTimeout(()=>runDex4780().catch(()=>{}),15000);

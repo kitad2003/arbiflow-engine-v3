@@ -1,0 +1,1 @@
+ArbiFlow 4.78.5: free-tier fail-fast Alchemy RPC circuit breaker, 120-second cooldown on HTTP 429, sequential chain discovery, 1200ms DEX pacing, explicit partial/cooldown status. No executable trading enabled. Legacy RPC consumers not yet centrally governed.
