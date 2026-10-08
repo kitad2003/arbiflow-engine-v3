@@ -1,11 +1,14 @@
-ArbiFlow Phase 7.1 — integrated read-only CEX update
+ARBIFLOW PHASE 7.2 — FULL INTEGRATED UPDATE
 
-Upload BOTH server.js and phase7-cex.js into your GitHub repository root. Replace existing files with these names. Keep ALL other repository files unchanged, especially phase6-network-probe.js and prior phase modules. No manual server.js edits or new Render variables required.
+1. Extract ZIP.
+2. Upload server.js and phase7-cex.js to GitHub repository ROOT, replacing the existing versions.
+3. Leave all other files untouched.
+4. Deploy Render. Do not change environment variables.
+5. Check /api/phase7/status: stage must read PHASE7_2_MANUAL_PUBLIC_CEX_MARKET_DATA and build 7.2.0.
+6. Test /api/phase7/quote?venue=gemini and ?venue=bitstamp.
+7. Test /api/phase7/compare. It now includes depthSizedCandidates for $100/$500/$1000.
 
-Manual routes:
-/api/phase7/status
-/api/phase7/quote?venue=gemini
-/api/phase7/quote?venue=bitstamp
-/api/phase7/compare
+If UNKNOWN_VENUE still appears with an older build, Render is serving an old deployment or another service/instance. Confirm the deployed commit and restart.
 
-Notes: Binance HTTP 451 and Bybit HTTP 403 are treated as access restrictions with 1-hour local cooldown, not bypassed. /compare sequentially checks Coinbase, Kraken, Gemini, Bitstamp, OKX; compares USD quotes only, never assumes USDT=USD. Depth is top 10 price levels where available; quote timestamps are observation times, not exchange event times. No verified executable profit, no trading, no background scans.
+No automated scans, orders, broadcasts or real money execution. Gross spreads are NOT profit.
+Exchange fees, inventory, settlement and transfer costs are not verified.

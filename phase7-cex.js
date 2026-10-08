@@ -10,6 +10,7 @@ const VENUES=Object.freeze({
  bitstamp:{currency:'USD',url:'https://www.bitstamp.net/api/v2/order_book/btcusd/?limit=10',parse:d=>[d.bids?.[0]?.[0],d.asks?.[0]?.[0]],depth:d=>({bids:d.bids,asks:d.asks})}
 });
 const names=Object.keys(VENUES);
+const PHASE7_BUILD='7.2.0';
 const safe=n=>{const x=Number(n);return Number.isFinite(x)&&x>0?x:null};
 const cooldown=new Map();
 function levels(raw){return (Array.isArray(raw)?raw:[]).slice(0,10).map(x=>({price:safe(x?.[0]),quantityBTC:safe(x?.[1])})).filter(x=>x.price&&x.quantityBTC);}
@@ -36,9 +37,32 @@ async function compare(fetcher=globalThis.fetch){
  candidates.sort((a,b)=>b.rawSpreadUSDPerBTC-a.rawSpreadUSDPerBTC);
  return {success:true,stage:'MANUAL_INDICATIVE_CEX_COMPARISON',quotes,candidates,quoteCurrenciesCompared:['USD'],usdtExcludedFromUsdComparison:true,simultaneousQuotes:false,executionEligible:false,profitVerified:false,automaticScanning:false,readOnly:true,mainnetBroadcast:false};
 }
-function mount(app){
- app.get('/api/phase7/status',(_req,res)=>res.json({success:true,stage:'PHASE7_1_MANUAL_PUBLIC_CEX_MARKET_DATA',venues:names,restrictedVenues:['binance','bybit'],depthVenues:names.filter(n=>!!VENUES[n].depth),automaticScanning:false,readOnly:true,mainnetBroadcast:false,tradeExecution:false}));
- app.get('/api/phase7/quote',async(req,res)=>{const name=String(req.query.venue||'').toLowerCase();if(!Object.hasOwn(VENUES,name))return res.status(400).json({success:false,error:'UNKNOWN_VENUE',venues:names});res.json(await probe(name));});
- app.get('/api/phase7/compare',async(_req,res)=>{if(comparisonBusy)return res.status(409).json({success:false,error:'COMPARISON_ALREADY_RUNNING'});comparisonBusy=true;try{res.json(await compare());}catch(e){res.status(500).json({success:false,error:'COMPARISON_FAILED'});}finally{comparisonBusy=false;}});
+function weightedFill(levels,btcAmount){
+ if(!Array.isArray(levels)||!levels.length)return null;
+ let remaining=btcAmount,total=0;
+ for(const level of levels){const qty=Number(level.quantityBTC),price=Number(level.price);if(!(qty>0&&price>0))continue;const used=Math.min(remaining,qty);total+=used*price;remaining-=used;if(remaining<1e-10)break;}
+ return remaining<1e-10?total:null;
 }
-module.exports={mount,probe,compare,VENUES};
+function analyzeDepth(quotes,usdNotionals=[100,500,1000]){
+ const usd=quotes.filter(q=>q.success&&q.quoteCurrency==='USD'&&q.depth?.bids?.length&&q.depth?.asks?.length);
+ const rows=[];
+ for(const capitalUSD of usdNotionals){
+  for(const buy of usd)for(const sell of usd){
+   if(buy.venue===sell.venue)continue;
+   const btcAmount=capitalUSD/buy.ask;
+   const buyCost=weightedFill(buy.depth.asks,btcAmount);
+   const sellProceeds=weightedFill(sell.depth.bids,btcAmount);
+   if(buyCost===null||sellProceeds===null)continue;
+   const grossUSD=Number((sellProceeds-buyCost).toFixed(6));
+   if(grossUSD<=0)continue;
+   rows.push({capitalUSD,btcAmount:Number(btcAmount.toFixed(9)),buyVenue:buy.venue,sellVenue:sell.venue,buyCostUSD:Number(buyCost.toFixed(6)),sellProceedsUSD:Number(sellProceeds.toFixed(6)),grossBeforeFeesUSD:grossUSD,feeEstimateUSD:null,netProfitUSD:null,profitVerified:false,executionEligible:false,reason:'TRADING_FEES_BALANCES_TRANSFER_COSTS_AND_EXECUTION_UNVERIFIED'});
+  }
+ }
+ return rows.sort((a,b)=>a.capitalUSD-b.capitalUSD||b.grossBeforeFeesUSD-a.grossBeforeFeesUSD);
+}
+function mount(app){
+ app.get('/api/phase7/status',(_req,res)=>res.json({success:true,stage:'PHASE7_2_MANUAL_PUBLIC_CEX_MARKET_DATA',build:PHASE7_BUILD,venues:names,restrictedVenues:['binance','bybit'],depthVenues:names.filter(n=>!!VENUES[n].depth),automaticScanning:false,readOnly:true,mainnetBroadcast:false,tradeExecution:false}));
+ app.get('/api/phase7/quote',async(req,res)=>{const name=String(req.query.venue||'').toLowerCase();if(!Object.hasOwn(VENUES,name))return res.status(400).json({success:false,error:'UNKNOWN_VENUE',build:PHASE7_BUILD,venues:names});res.json({...await probe(name),build:PHASE7_BUILD});});
+ app.get('/api/phase7/compare',async(_req,res)=>{if(comparisonBusy)return res.status(409).json({success:false,error:'COMPARISON_ALREADY_RUNNING'});comparisonBusy=true;try{const result=await compare();res.json({...result,build:PHASE7_BUILD,depthSizedCandidates:analyzeDepth(result.quotes),depthSizesUSD:[100,500,1000],feesEstimated:false});}catch(e){res.status(500).json({success:false,error:'COMPARISON_FAILED'});}finally{comparisonBusy=false;}});
+}
+module.exports={mount,probe,compare,VENUES,analyzeDepth,weightedFill,PHASE7_BUILD};
