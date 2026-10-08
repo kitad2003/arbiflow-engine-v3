@@ -12,7 +12,8 @@ const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
 function mount(app){
  let provider=null,timer=null;
  const state={status:'STOPPED',events:0,blocks:0,lastEvent:null,lastBlock:null,lastError:null,reconnects:0,startedAt:null,triggeredRequotes:0};
- const history=[];let generation=0;
+ const history=[];let generation=0;const instanceId=require('crypto').randomBytes(6).toString('hex');
+ const autoStart=!!process.env.ARBIFLOW_BASE_WSS_URL && process.env.ARBIFLOW_PHASE91_AUTOSTART!=='false';
  const trim=e=>String(e?.message||e).replace(/wss?:\/\/[^\s]+/gi,'[REDACTED]').slice(0,180);
  const record=e=>{history.push(e);if(history.length>50)history.shift()};
  async function disconnect(){
@@ -60,12 +61,14 @@ function mount(app){
   state.lastError=trim(e);state.status='RECONNECTING';state.reconnects++;
   disconnect().finally(()=>{if(epoch===generation)timer=setTimeout(()=>connect(epoch),Math.min(30000,1000*Math.pow(2,Math.min(state.reconnects,5))))});
  }
- app.get('/api/phase91/status',(_req,res)=>res.json({success:true,...state,pools:POOLS,eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
+ app.get('/api/phase91/status',(_req,res)=>res.json({success:true,instanceId,autoStart,uptimeSeconds:Math.floor(process.uptime()),configured:!!process.env.ARBIFLOW_BASE_WSS_URL,...state,pools:POOLS,eventsRecent:history.slice(-10),pendingMempoolSupported:false,automaticTrading:false,safety}));
  app.get('/api/phase91/start',(_req,res)=>{
   if(state.status==='SUBSCRIBED'||state.status==='CONNECTING'||state.status==='RECONNECTING')return res.json({success:true,status:state.status,safety});
   generation++;state.startedAt=new Date().toISOString();state.reconnects=0;connect(generation).catch(e=>{state.lastError=trim(e)});
   res.json({success:true,status:'CONNECTING',configured:!!process.env.ARBIFLOW_BASE_WSS_URL,safety});
  });
- app.get('/api/phase91/stop',(_req,res)=>{generation++;state.status='STOPPED';disconnect().catch(()=>{});res.json({success:true,status:'STOPPED',safety})});
+ app.get('/api/phase91/stop',(_req,res)=>{generation++;state.status='STOPPED';disconnect().catch(()=>{});res.json({success:true,status:'STOPPED',note:autoStart?'AUTO_START_ON_NEXT_RESTART':'MANUAL_START',safety})});
+ // Start after server mounts, so a fresh Render process does not require a browser click.
+ if(autoStart){state.startedAt=new Date().toISOString();setImmediate(()=>connect(++generation).catch(e=>{state.lastError=trim(e);state.status='ERROR'}));}
 }
 module.exports={mount};
