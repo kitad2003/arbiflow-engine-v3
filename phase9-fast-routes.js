@@ -1,6 +1,7 @@
 'use strict';
 // Phase 9: bounded parallel, read-only two-leg cross-venue Base quote diagnostics.
 const {Interface}=require('ethers');
+const phase92=require('./phase92-trigger');
 const TOKENS={USDC:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',WETH:'0x4200000000000000000000000000000000000006'};
 const VENUES=[
  {name:'UNISWAP_V3_500',factory:'0x33128a8fC17869897dcE68Ed026d694621f6FDfD',quoter:'0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',fee:500},
@@ -39,6 +40,15 @@ function mount(app,{getBaseChain,rpc}){
   });
   return {success:true,stage:'PARALLEL_TWO_SWAP_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:3},venuesChecked:VENUES.length,pools,routeCount:routes.length,quoteCalls,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
+ async function eventRequote(event){
+  if(state.running)return;
+  state.running=true;state.runs++;
+  try{state.lastResult=await run();state.lastResult.trigger={type:'CONFIRMED_SWAP',pool:event.pool,blockNumber:event.blockNumber,transactionHash:event.transactionHash};}
+  catch(e){state.lastResult={success:false,error:err(e),safety}}
+  finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}
+ }
+ phase92.register(eventRequote);
+ app.get('/api/phase92/status',(_req,res)=>res.json({success:true,...phase92.status(),quoteEngineRunning:state.running,lastCompletedAt:state.lastCompletedAt,lastResultSummary:state.lastResult?{success:state.lastResult.success,blockNumber:state.lastResult.blockNumber,routeCount:state.lastResult.routeCount,positiveIndicativeRoutes:state.lastResult.positiveIndicativeRoutes,qualified:state.lastResult.qualified,trigger:state.lastResult.trigger,error:state.lastResult.error}:null,safety}));
  app.get('/api/phase9/status',(_req,res)=>res.json({success:true,...state,safety}));
  app.get('/api/phase9/run',(_req,res)=>{if(state.running)return res.status(409).json({success:false,error:'RUNNING',safety});state.running=true;state.runs++;setImmediate(async()=>{try{state.lastResult=await run()}catch(e){state.lastResult={success:false,error:err(e),safety}}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}});res.json({success:true,status:'STARTED_BACKGROUND',statusRoute:'/api/phase9/status',safety})});
 }
