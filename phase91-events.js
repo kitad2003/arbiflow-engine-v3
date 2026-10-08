@@ -2,6 +2,7 @@
 // Phase 9.1 event-driven read-only Base scanner. Requires ARBIFLOW_BASE_WSS_URL.
 // No wallet access, signing, relay submission or transaction broadcasting.
 const {WebSocketProvider,Interface}=require('ethers');
+const WebSocket=require('ws');
 const ABI=new Interface(['event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)']);
 const POOLS=[
  {name:'UNISWAP_V3_500',address:'0xd0b53D9277642d899DF5C87A3966A349A798F224'},
@@ -28,9 +29,14 @@ function mount(app){
   state.status='CONNECTING';
   let ws;
   try{
-   ws=new WebSocketProvider(url,8453,{staticNetwork:true});provider=ws;
-   const network=await ws.getNetwork();
+   // Supply a raw socket with an error handler BEFORE the provider attaches listeners.
+   // This prevents HTTP 401 upgrade rejections from becoming uncaught process errors.
+   const socket=new WebSocket(url);
+   socket.on('error',error=>{if(epoch===generation){state.lastError=/401|403/.test(trim(error))?'WEBSOCKET_AUTH_REJECTED_401_OR_403':trim(error);state.status='CONNECTION_ERROR';}});
+   ws=new WebSocketProvider(socket,8453,{staticNetwork:true});provider=ws;
+   const network=await Promise.race([ws.getNetwork(),new Promise((_,reject)=>setTimeout(()=>reject(Error('WEBSOCKET_CONNECT_TIMEOUT')),12000))]);
    if(epoch!==generation)return;
+   if(state.status==='CONNECTION_ERROR')throw Error(state.lastError||'WEBSOCKET_REJECTED');
    if(Number(network.chainId)!==8453)throw Error('WRONG_CHAIN');
    ws.on('block',number=>{if(epoch!==generation)return;state.blocks++;state.lastBlock={number,receivedAt:new Date().toISOString()}});
    for(const pool of POOLS){
@@ -58,6 +64,7 @@ function mount(app){
  }
  function retry(epoch,e){
   if(epoch!==generation)return;
+  if(/401|403|unauthoriz|forbidden/i.test(trim(e))){state.lastError='WEBSOCKET_AUTH_REJECTED_401_OR_403';state.status='AUTH_ERROR';disconnect().catch(()=>{});return;}
   state.lastError=trim(e);state.status='RECONNECTING';state.reconnects++;
   disconnect().finally(()=>{if(epoch===generation)timer=setTimeout(()=>connect(epoch),Math.min(30000,1000*Math.pow(2,Math.min(state.reconnects,5))))});
  }
