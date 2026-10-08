@@ -9,8 +9,8 @@ const safe={readOnly:true,automaticScanning:false,mainnetBroadcast:false,executi
 const error=e=>String(e?.shortMessage||e?.message||e).replace(/https?:\/\/[^\s]+/g,'[REDACTED_URL]').slice(0,180);
 function mount(app,{getBaseChain,rpc}){
  const state={running:false,runs:0,lastStartedAt:null,lastCompletedAt:null,lastResult:null,discovered:new Map(),cursor:null};
- app.get('/api/liquidity86/status',(_req,res)=>res.json({success:true,build:'8.6.0',running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,cursor:state.cursor,uniquePools:state.discovered.size,lastResult:state.lastResult,safety:safe}));
- app.get('/api/liquidity86/pools',(req,res)=>{const limit=Math.min(100,Math.max(1,Number(req.query.limit)||50));res.json({success:true,build:'8.6.0',total:state.discovered.size,pools:Array.from(state.discovered.values()).slice(-limit),safety:safe})});
+ app.get('/api/liquidity86/status',(_req,res)=>res.json({success:true,build:'8.6.1',running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,cursor:state.cursor,uniquePools:state.discovered.size,lastResult:state.lastResult,safety:safe}));
+ app.get('/api/liquidity86/pools',(req,res)=>{const limit=Math.min(100,Math.max(1,Number(req.query.limit)||50));res.json({success:true,build:'8.6.1',total:state.discovered.size,pools:Array.from(state.discovered.values()).slice(-limit),safety:safe})});
  async function scan(windowSize,fromOverride){
   const chain=getBaseChain();if(!chain||Number(chain.chainId)!==8453)throw Error('BASE_NOT_CONFIGURED');
   if(Number(BigInt(await rpc(chain,'eth_chainId',[])))!==8453)throw Error('WRONG_CHAIN');
@@ -45,8 +45,8 @@ function mount(app,{getBaseChain,rpc}){
    }
    if(logs.length>30)failures.push({venue:venue.name,stage:'bounded_scan',error:'LOG_CAP_30_PER_VENUE_REACHED'});
   }
-  state.cursor=to+1;
-  return {success:true,build:'8.6.0',chainId:8453,fromBlock:from,toBlock:to,latestBlock:latest,venueDeployments:VENUES.length,eventsFound:logsCount,verifiedNewOrUpdated:discovered.length,totalUniquePoolsInMemory:state.discovered.size,pools:discovered,failures,limitations:['RECENT_OR_MANUALLY_SELECTED_BLOCK_RANGE_ONLY','MAX_30_EVENTS_PER_VENUE_PER_RUN','V3_FACTORY_EVENTS_ONLY','IN_MEMORY_NOT_PERSISTENT','NO_DEPTH_QUOTES','NO_FLASH_LOAN','NO_PROFIT_VALIDATION'],safety:safe};
+  if(failures.length===0)state.cursor=to+1;
+  return {success:failures.length===0,scanStatus:failures.length?'INCOMPLETE':'COMPLETE',build:'8.6.1',chainId:8453,fromBlock:from,toBlock:to,latestBlock:latest,venueDeployments:VENUES.length,eventsFound:logsCount,verifiedNewOrUpdated:discovered.length,totalUniquePoolsInMemory:state.discovered.size,pools:discovered,failures,limitations:['RECENT_OR_MANUALLY_SELECTED_BLOCK_RANGE_ONLY','MAX_30_EVENTS_PER_VENUE_PER_RUN','V3_FACTORY_EVENTS_ONLY','IN_MEMORY_NOT_PERSISTENT','NO_DEPTH_QUOTES','NO_FLASH_LOAN','NO_PROFIT_VALIDATION'],safety:safe};
  }
  app.get('/api/liquidity86/run',(req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'RUN_IN_PROGRESS',safety:safe});
@@ -56,7 +56,7 @@ function mount(app,{getBaseChain,rpc}){
   if(from!==null&&(!Number.isSafeInteger(from)||from<0))return res.status(400).json({success:false,error:'INVALID_FROM_BLOCK',safety:safe});
   state.running=true;state.runs++;state.lastStartedAt=new Date().toISOString();
   setImmediate(async()=>{try{state.lastResult=await scan(blocks,from)}catch(e){state.lastResult={success:false,error:error(e),safety:safe}}finally{state.running=false;state.lastCompletedAt=new Date().toISOString()}});
-  res.json({success:true,status:'STARTED_BACKGROUND',build:'8.6.0',statusRoute:'/api/liquidity86/status',safety:safe});
+  res.json({success:true,status:'STARTED_BACKGROUND',build:'8.6.1',statusRoute:'/api/liquidity86/status',safety:safe});
  });
  return {state};
 }

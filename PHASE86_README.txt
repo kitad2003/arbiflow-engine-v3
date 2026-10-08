@@ -7,3 +7,5 @@ NOTE: recent windows can contain ZERO new pools; this is not necessarily an erro
 This is a bounded factory-event proof of discovery, not a complete historical index.
 Pool registry is in memory and will reset on redeployment/restart.
 No flash loans, transactions, or profit claims. Keep safety flags OFF for execution.
+
+8.6.1 FIX: Shared RPC helper now accepts eth_getLogs arrays while retaining hex validation for other methods. Failed/incomplete scans do not advance cursor; result success reflects failures. Manual read-only operation. Note HTTP 400 may still reflect provider limitations.
