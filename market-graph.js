@@ -72,10 +72,12 @@ module.exports.mount=(app,{getChain,call})=>{
    routes.push(record);
    return record;
   }
-  // Never let the shallowest unrelated V2 pool set every route's size.
-  // Each candidate has an independent reserve-based ceiling. V3 liquidity
-  // is not directly USD-denominated, so V3 sizing remains probe-based.
-  function routeSizeLimit(legs,combo){
+  // Larger-trade experiment: exclude all probes at or below $500.
+  // Use each route's own V2 reserve depth when available. V3 liquidity()
+  // is not directly USD-denominated; V3-only paths use a bounded probe.
+  const minimumTradeUsdc=1000;
+  const maxProbeUsdc=100000;
+  function routeDepth(legs,combo){
    const ceilings=[];
    for(let i=0;i<3;i++){
     const e=combo[i],from=legs[i][0];
@@ -84,36 +86,34 @@ module.exports.mount=(app,{getChain,call})=>{
     const reserve=Number(BigInt(e.reserves[idx]))/10**decimals[from];
     if(Number.isFinite(reserve)&&reserve>0&&from==='USDC')ceilings.push(reserve*0.02);
    }
-   return Math.min(25000,...ceilings);
+   return ceilings.length?Math.min(...ceilings):null;
   }
-  const baselineSize=1;
-  const refinementSizes=[5,25,100,500,2500,10000];
-  const sizes=[baselineSize,...refinementSizes];
-  // All 27 venue combinations in both triangular directions, with one
-  // baseline probe each. Refine only the strongest gross-return candidates.
   const candidates=[];
   for(const legs of cycles){
    const options=legs.map(([a,b])=>live.filter(e=>e.pair===a+'/'+b||e.pair===b+'/'+a));
    if(!options.every(o=>o.length))continue;
    for(const a of options[0])for(const b of options[1])for(const c of options[2])candidates.push({legs,combo:[a,b,c]});
   }
-  const baseline=[];
+  const baseline=[],perRouteSizing=[],skippedShallowRoutes=[];
   for(const candidate of candidates){
-   if(quoteCalls>=capQuotes)break;
-   const row=await probe(candidate.legs,candidate.combo,sizes[0]);
-   if(row.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE')baseline.push({...candidate,score:row.grossProfitUsd});
+   if(quoteCalls+3>capQuotes)break;
+   const depth=routeDepth(candidate.legs,candidate.combo);
+   if(depth!==null&&depth<minimumTradeUsdc){
+    skippedShallowRoutes.push({route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reason:'V2_RESERVE_TOO_SHALLOW',estimatedSafeUsdc:depth});
+    continue;
+   }
+   const size=depth===null?minimumTradeUsdc:Math.max(minimumTradeUsdc,Math.min(maxProbeUsdc,Math.round(depth*0.25)));
+   const result=await probe(candidate.legs,candidate.combo,size);
+   if(result.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE')baseline.push({...candidate,score:result.grossProfitUsd,initialSize:size,depth});
   }
   baseline.sort((a,b)=>b.score-a.score);
-  // Spend remaining quote budget on the strongest routes, independently
-  // sized. Larger sizes are screened only if the prior size has not shown
-  // extreme deterioration. Never label these probes an optimized optimum.
-  const perRouteSizing=[];
   for(const candidate of baseline.slice(0,8)){
-   const limit=routeSizeLimit(candidate.legs,candidate.combo);
-   const row={route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reserveBasedLimitUsdc:limit,sizesTested:[baselineSize],stoppedReason:null};
-   for(const size of refinementSizes){
+   const row={route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reserveBasedLimitUsdc:candidate.depth,sizesTested:[candidate.initialSize],stoppedReason:null};
+   for(const multiplier of [2,4,8]){
+    const size=Math.round(candidate.initialSize*multiplier);
+    if(size>maxProbeUsdc){row.stoppedReason='PROBE_SAFETY_CAP';break;}
+    if(candidate.depth!==null&&size>candidate.depth){row.stoppedReason='V2_RESERVE_SCREEN';break;}
     if(quoteCalls+3>capQuotes){row.stoppedReason='QUOTE_BUDGET';break;}
-    if(size>limit){row.stoppedReason='V2_RESERVE_SCREEN';break;}
     const result=await probe(candidate.legs,candidate.combo,size);
     row.sizesTested.push(size);
     if(result.status!=='INDICATIVE_QUOTED_NOT_EXECUTABLE'){row.stoppedReason='QUOTE_FAILED';break;}
@@ -121,9 +121,10 @@ module.exports.mount=(app,{getChain,call})=>{
    }
    perRouteSizing.push(row);
   }
+  const sizes=[...new Set(routes.map(r=>r.sizeUsdc))].sort((a,b)=>a-b);
   const bestByGross=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE').sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd).slice(0,10);
   const quoted=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE');
-  return {success:true,stage:'DYNAMIC_BIDIRECTIONAL_TRIANGULAR_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,sizeCandidatesUsdc:sizes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','ROUTE_SPECIFIC_RESERVE_SCREEN_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  return {success:true,stage:'LARGE_TRADE_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,minimumTradeUsdc,maximumProbeUsdc:maxProbeUsdc,sizeCandidatesUsdc:sizes,skippedShallowRoutes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','V3_ONLY_ROUTES_HAVE_NO_USD_DEPTH_VERIFICATION','LARGE_TRADE_PROBES_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
  }
  app.get('/api/market-graph/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false}}));
  app.get('/api/market-graph/run',(req,res)=>{
