@@ -1,0 +1,1 @@
+4.78.18: Manual Base V3 size sweep, $100/$250/$500/$1000. Uses lowest-fee live Uniswap and Pancake pools; 8 two-leg routes maximum, 16 quoter calls. Rank gross before gas; no gas/net-profit claims. Discover, await completion, /api/dex-independent/v3-size-sweep/run then /status. No trading.

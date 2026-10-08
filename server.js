@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.17";
+const VERSION = "4.78.18";
 
 /*
 =========================================================
@@ -9687,6 +9687,53 @@ async function dexV3Cross47817(size){
  }
  return {success:true,version:VERSION,stage:'BASE_V3_TO_V3_READ_ONLY_TWO_LEG_QUOTER_SCREEN',chainId:8453,sizeUsd:size,snapshotAgeMs:age,uniswapQuoter:quoterUni,pancakeQuoter:quoterPancake,results:rows,successfulTwoLegQuotes:rows.filter(x=>x.bothQuotersReturned).length,qualified:0,alertsEmitted:0,limitations:['PANCAKE_QUOTER_ABI_NOT_YET_LIVE_VERIFIED','QUOTER_CONTRACT_IDENTITIES_NOT_INDEPENDENTLY_VERIFIED','NO_ATOMIC_SIMULATION','NO_GAS_COST','NO_NET_PROFIT_VALIDATION','QUOTES_NOT_BLOCK_PINNED','IN_MEMORY_DISCOVERY_EXPIRES'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
+
+// 4.78.18 manual multi-size quote sweep. Gas/net profit remain unverified.
+const dexSizeSweep47818={running:false,runs:0,lastCompletedAt:null,result:null};
+async function dexSizeSweepRun47818(){
+ const c=MC4750_CHAINS.find(x=>x.chainId===8453);
+ const snap=dexVerified4788.get(8453),age=snap?Date.now()-Date.parse(snap.observedAt):null;
+ if(!snap||age<0||age>DEX_SNAPSHOT_MAX_AGE_MS_4788)throw Error('FRESH_BASE_DISCOVERY_REQUIRED');
+ const uni=snap.venues.filter(v=>v.status==='POOL_LIVE'&&v.name.startsWith('UNISWAP_V3'));
+ const pancake=snap.venues.filter(v=>v.status==='POOL_LIVE'&&v.name.startsWith('PANCAKESWAP_V3'));
+ if(!uni.length||!pancake.length)throw Error('LIVE_V3_POOLS_REQUIRED');
+ const uq=dexNormalize47814(UNISWAP_V3_QUOTER_V1_4490[c.key]);
+ const pq=dexNormalize47814(PANCAKESWAP_V3_BASE.quoter);
+ const sizes=[100,250,500,1000],rows=[];
+ // Keep requests bounded on the free tier: compare the lowest-fee live pool on each venue.
+ const u=uni.slice().sort((a,b)=>Number(a.feeTier)-Number(b.feeTier))[0];
+ const p=pancake.slice().sort((a,b)=>Number(a.feeTier)-Number(b.feeTier))[0];
+ let aborted=false;
+ for(const size of sizes){
+  for(const direction of ['UNISWAP_BUY_PANCAKE_SELL','PANCAKE_BUY_UNISWAP_SELL']){
+   const buy=direction.startsWith('UNISWAP')?{v:u,q:uq}:{v:p,q:pq};
+   const sell=direction.startsWith('UNISWAP')?{v:p,q:pq}:{v:u,q:uq};
+   const amount=BigInt(size)*1000000n;
+   const row={sizeUsd:size,direction,uniswapPool:u.pool,uniswapFeeTier:Number(u.feeTier),pancakePool:p.pool,pancakeFeeTier:Number(p.feeTier),gasUsd:null,netProfitUsd:null,qualified:false,atomicSimulationVerified:false};
+   try{
+    const weth=await dexV3PairQuote47817(c,buy.q,c.tokens.USDC,c.tokens.WETH,buy.v.feeTier,amount);
+    const usdc=await dexV3PairQuote47817(c,sell.q,c.tokens.WETH,c.tokens.USDC,sell.v.feeTier,weth);
+    Object.assign(row,{bothQuotersReturned:true,firstLegWethOut:weth.toString(),finalUsdcBeforeGas:Number(usdc)/1e6,grossBeforeGasUsd:Number(usdc-amount)/1e6});
+   }catch(e){Object.assign(row,{bothQuotersReturned:false,error:String(e.shortMessage||e.message||e).slice(0,200)});}
+   rows.push(row);
+   if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil){aborted=true;break;}
+  }
+  if(aborted)break;
+ }
+ const successful=rows.filter(r=>r.bothQuotersReturned);
+ const ranked=successful.slice().sort((a,b)=>b.grossBeforeGasUsd-a.grossBeforeGasUsd);
+ return {success:true,version:VERSION,stage:'MANUAL_BASE_V3_SIZE_SWEEP_PRE_GAS',chainId:8453,sizesUsd:sizes,requestedRoutes:8,completedRoutes:rows.length,successfulTwoLegQuotes:successful.length,abortedForRpcCooldown:aborted,snapshotAgeMs:age,selectionPolicy:'LOWEST_FEE_LIVE_POOL_PER_VENUE',results:rows,rankedByGrossBeforeGas:ranked,positiveGrossCandidates:ranked.filter(r=>r.grossBeforeGasUsd>0).length,qualified:0,alertsEmitted:0,gasEstimateStatus:'NOT_AVAILABLE_ATOMIC_TRANSACTION_NOT_BUILT',limitations:['GAS_AND_L2_DATA_FEE_NOT_ESTIMATED','NO_NET_PROFIT_VALIDATION','QUOTES_NOT_BLOCK_PINNED','NO_ATOMIC_SIMULATION','CONTRACT_IDENTITIES_NOT_INDEPENDENTLY_VERIFIED','NO_EXECUTABLE_TRADE'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get('/api/dex-independent/v3-size-sweep/status',(req,res)=>res.json({success:true,version:VERSION,...dexSizeSweep47818,safety:{readOnly:true,mainnetBroadcast:false}}));
+app.get('/api/dex-independent/v3-size-sweep/run',(req,res)=>{
+ if(dexSizeSweep47818.running)return res.status(409).json({success:false,error:'SWEEP_ALREADY_RUNNING'});
+ const snap=dexVerified4788.get(8453);
+ if(!snap||Date.now()-Date.parse(snap.observedAt)>DEX_SNAPSHOT_MAX_AGE_MS_4788)return res.status(409).json({success:false,error:'RUN_DISCOVERY_FIRST_SNAPSHOT_MUST_BE_UNDER_10_MINUTES'});
+ dexSizeSweep47818.running=true;dexSizeSweep47818.runs++;
+ setImmediate(async()=>{try{dexSizeSweep47818.result=await dexSizeSweepRun47818();}catch(e){dexSizeSweep47818.result={success:false,version:VERSION,error:String(e.message||e).slice(0,200)};}finally{dexSizeSweep47818.running=false;dexSizeSweep47818.lastCompletedAt=new Date().toISOString();}});
+ res.json({success:true,version:VERSION,status:'STARTED_BACKGROUND',statusRoute:'/api/dex-independent/v3-size-sweep/status',readOnly:true});
+});
+
 app.get('/api/dex-independent/v3-cross-dex/status',(req,res)=>res.json({success:true,version:VERSION,...dexV3Pairs47817,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get('/api/dex-independent/v3-cross-dex/run',(req,res)=>{
  if(dexV3Pairs47817.running)return res.status(409).json({success:false,error:'QUOTE_CHECK_ALREADY_RUNNING'});
