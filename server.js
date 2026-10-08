@@ -9977,3 +9977,6 @@ require('./flash-loan-discovery').mount(app,{getChain:id=>MC4750_CHAINS.find(c=>
 
 // Read-only block builder comparison and net-profit review; no transaction submission.
 require('./block-builder-matrix').mount(app);
+
+// Phase 9: bounded parallel two-swap discovery, diagnostic only.
+require('./phase9-fast-routes').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)});
