@@ -9,7 +9,7 @@ const factory=new Interface(['function getPool(address tokenA,address tokenB,uin
 const swap=new Interface(['event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)']);
 const ZERO='0x0000000000000000000000000000000000000000';
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
-const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
+const err=e=>String(e?.shortMessage||e?.message||e).slice(0,480);
 async function run(chain,rpc){
  const latestHex=await rpc(chain,'eth_blockNumber',[]);
  const latest=Number(BigInt(latestHex));
@@ -23,10 +23,13 @@ async function run(chain,rpc){
    if(address.toLowerCase()!==ZERO)pools.push({fee,address});
   }catch(e){pools.push({fee,error:err(e)});}
  }
- const observations=[];let logFailures=0;
+ const observations=[];let logFailures=0;const logDiagnostics=[];
  for(const pool of pools.filter(p=>p.address)){
   try{
-   const logs=await rpc(chain,'eth_getLogs',[{address:pool.address,fromBlock:'0x'+from.toString(16),toBlock:'0x'+latest.toString(16),topics:[id('Swap(address,address,int256,int256,uint160,uint128,int24)')]}]);
+   let logs,usedRange='13_BLOCKS';const topic=id('Swap(address,address,int256,int256,uint160,uint128,int24)');
+   try{logs=await rpc(chain,'eth_getLogs',[{address:pool.address,fromBlock:'0x'+from.toString(16),toBlock:'0x'+latest.toString(16),topics:[topic]}]);}
+   catch(first){logDiagnostics.push({fee:pool.fee,attempt:'13_BLOCKS',error:err(first)});usedRange='LATEST_SINGLE_BLOCK';try{logs=await rpc(chain,'eth_getLogs',[{address:pool.address,fromBlock:'0x'+latest.toString(16),toBlock:'0x'+latest.toString(16),topics:[topic]}]);}catch(second){logDiagnostics.push({fee:pool.fee,attempt:'LATEST_SINGLE_BLOCK',error:err(second)});throw second;}}
+   pool.logQuery=usedRange;
    if(!Array.isArray(logs))throw Error('INVALID_LOGS');
    for(const log of logs.slice(-15)){
     const event=swap.parseLog(log);
@@ -34,11 +37,11 @@ async function run(chain,rpc){
    }
   }catch(e){logFailures++;pool.error=err(e);}
  }
- return {success:true,build:'10.6.0',chainId:8453,latestBlock:latest,fromBlock:from,pools,confirmedSwapEvents:observations.length,observations:observations.slice(-20),logFailures,predictionMatches:0,predictionMatchingImplemented:false,limitations:['CONFIRMED_EVENTS_ONLY','NO_PENDING_TRANSACTION_LINKAGE','NO_PRICE_PREDICTION_VALIDATION','NO_PROFIT_VALIDATION'],safety};
+ return {success:true,build:'10.6.1',chainId:8453,latestBlock:latest,fromBlock:from,pools,confirmedSwapEvents:observations.length,observations:observations.slice(-20),logFailures,logDiagnostics,predictionMatches:0,predictionMatchingImplemented:false,limitations:['CONFIRMED_EVENTS_ONLY','NO_PENDING_TRANSACTION_LINKAGE','NO_PRICE_PREDICTION_VALIDATION','NO_PROFIT_VALIDATION'],safety};
 }
 function mount(app,{getBaseChain,rpc}){
  const state={running:false,checks:0,lastResult:null};
- app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.6.0',...state,safety}));
+ app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.6.1',...state,safety}));
  app.get('/api/phase10/events/probe',async(_req,res)=>{
   if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
   state.running=true;state.checks++;
