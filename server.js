@@ -9293,6 +9293,26 @@ app.get('/api/expansion-25x25/phase5-probe', async (req,res) => {
   finally{phase5Busy=false;}
 });
 
+// Phase 6: four network-specific, manually triggered read-only connectivity checks.
+const { phase6Probe, phase6Config } = require('./phase6-network-probe');
+let phase6Busy = false;
+app.get('/api/expansion-25x25/phase6-config', (req,res) => {
+  res.json({success:true,stage:'PHASE6_RPC_ONBOARDING',targets:phase6Config(),readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+});
+app.get('/api/expansion-25x25/phase6-probe', async (req,res) => {
+  if (phase6Busy) return res.status(409).json({success:false,error:'PHASE6_PROBE_ALREADY_RUNNING'});
+  phase6Busy=true;
+  try {
+    const results=[];
+    for (const key of ['ronin','monad','solana','sui']) {
+      results.push(await phase6Probe(key));
+      await new Promise(resolve=>setTimeout(resolve,1200));
+    }
+    res.json({success:true,stage:'PHASE6_MANUAL_SEQUENTIAL_RPC_PROBE',results,verified:results.filter(r=>r.status==='VERIFIED').length,readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+  } catch(e) { res.status(500).json({success:false,error:'PHASE6_PROBE_FAILED'}); }
+  finally { phase6Busy=false; }
+});
+
 app.get('/api/expansion-25x25/rpc-probe', async (req, res) => {
   const key = typeof req.query.chain==='string' ? req.query.chain.trim().toLowerCase() : '';
   const chain = expansionRegistry47820.chains.find(c=>c.key===key);
