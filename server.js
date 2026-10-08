@@ -9961,3 +9961,6 @@ require('./phase85-crossdex').mount(app,{
  getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),
  rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)
 });
+
+// Phase 8.6 bounded, manual dynamic factory-event discovery
+require('./phase86-liquidity').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)});
