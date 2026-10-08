@@ -1,12 +1,11 @@
-ArbiFlow Phase 7 — fully integrated server.js + phase7-cex.js
+ArbiFlow Phase 7.1 — integrated read-only CEX update
 
-Based on the exact server (1).js supplied by the user on October 8, 2026.
+Upload BOTH server.js and phase7-cex.js into your GitHub repository root. Replace existing files with these names. Keep ALL other repository files unchanged, especially phase6-network-probe.js and prior phase modules. No manual server.js edits or new Render variables required.
 
-1. Back up the current GitHub server.js.
-2. Upload BOTH server.js and phase7-cex.js from this folder into the same repository root, replacing server.js.
-3. Do not remove existing Phase 2–6 files, especially phase6-network-probe.js and the 25x25 registry files.
-4. Commit; allow Render to redeploy.
-5. Visit /api/phase7/status then manually visit /api/phase7/quote?venue=binance (also coinbase, kraken, okx, bybit).
+Manual routes:
+/api/phase7/status
+/api/phase7/quote?venue=gemini
+/api/phase7/quote?venue=bitstamp
+/api/phase7/compare
 
-No manual code edits required. No API keys required. This is public read-only market-data probing; it is NOT execution or profit verification.
-This ZIP contains only changed/new files, NOT all existing dependencies. Keep package.json, startup files, registry, and other modules as they are.
+Notes: Binance HTTP 451 and Bybit HTTP 403 are treated as access restrictions with 1-hour local cooldown, not bypassed. /compare sequentially checks Coinbase, Kraken, Gemini, Bitstamp, OKX; compares USD quotes only, never assumes USDT=USD. Depth is top 10 price levels where available; quote timestamps are observation times, not exchange event times. No verified executable profit, no trading, no background scans.
