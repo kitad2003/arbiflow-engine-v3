@@ -9970,3 +9970,6 @@ require('./phase87-indexed-discovery').mount(app);
 
 // Phase 8.8: independent manual on-chain Base pool inventory.
 require('./phase88-onchain-inventory').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)});
+
+// Read-only multi-token graph discovery; no trades or alerts.
+require('./market-graph').mount(app,{getChain:id=>MC4750_CHAINS.find(c=>c.chainId===id),call:(chain,to,data)=>dexCall4780(chain,to,data)});
