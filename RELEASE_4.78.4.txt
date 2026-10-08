@@ -1,0 +1,9 @@
+ArbiFlow 4.78.4: SushiSwap V2 factory discovery
+
+Adds default SushiSwap V2 factory candidates for Base, Arbitrum, and Optimism. Each candidate is tested through getPair(WETH,USDC), pool token identity and reserve evidence. A missing pool reports NO_POOL; a failed RPC reports PROBE_ERROR; zero reserves reports POOL_EMPTY. Do not interpret configured factories as proven pools.
+
+PancakeSwap V3 remains configured on Base only. Arbitrum/Optimism factory addresses are NOT guessed or enabled without independent verification. Existing environment overrides remain supported.
+
+All independent discovery is read-only; no flash liquidity, independent executable quotes, atomic simulation, or mainnet execution are enabled.
+
+After Render deployment: GET /api/dex-independent/run then GET /api/dex-independent/status. Verify SushiSwap status and independentFactories on each chain.

@@ -44,7 +44,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.3";
+const VERSION = "4.78.4";
 
 /*
 =========================================================
@@ -9330,6 +9330,14 @@ const VERIFIED_UNISWAP_V3_FACTORIES_4781=Object.freeze({
  42161:"0x1F98431c8aD98523631AE4a59f267346ea31F984",
  10:"0x1F98431c8aD98523631AE4a59f267346ea31F984"
 });
+// SushiSwap V2 factory registry. Independently validate returned pairs and reserves at runtime.
+// Sources: github.com/vaipakam/vaipakam/blob/main/contracts/script/ConfigureV2Factories.s.sol
+// Factory configuration does NOT establish that a liquid WETH/USDC pool exists.
+const SUSHI_V2_FACTORY_REGISTRY_4784=Object.freeze({
+ 8453:"0x71524B4f93c58fcbF659783284E38825f0622859",
+ 42161:"0xc35DADB65012eC5796536bD9864eD8773aBc74C4",
+ 10:"0xFbc12984689e5f15626Bad03Ad60160Fe98B303C"
+});
 // Official Uniswap V3 deployments: developers.uniswap.org/docs/protocols/v3/deployments
 // Other factories intentionally remain unconfigured until separately verified.
 function dexVenues4780(c){
@@ -9339,7 +9347,7 @@ function dexVenues4780(c){
  return [
  {name:"UNISWAP_V3",kind:"V3",factory:uniswap,fee:500,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
  {name:"UNISWAP_V3_3000",kind:"V3",factory:uniswap,fee:3000,source:process.env[prefix+"UNISWAP_V3_FACTORY"]?"ENV_OVERRIDE":"OFFICIAL_REGISTRY"},
- {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"],source:"ENV_ONLY"},
+ {name:"SUSHISWAP_V2",kind:"V2",factory:process.env[prefix+"SUSHISWAP_V2_FACTORY"]||SUSHI_V2_FACTORY_REGISTRY_4784[c.chainId],source:process.env[prefix+"SUSHISWAP_V2_FACTORY"]?"ENV_OVERRIDE":"SUSHI_V2_REGISTRY_PENDING_ONCHAIN_VERIFICATION"},
  {name:"PANCAKESWAP_V3",kind:"V3",factory:pancake,fee:500,source:process.env[prefix+"PANCAKESWAP_V3_FACTORY"]?"ENV_OVERRIDE":"BASE_EXISTING_ADAPTER"},
  {name:"PANCAKESWAP_V3_3000",kind:"V3",factory:pancake,fee:2500,source:process.env[prefix+"PANCAKESWAP_V3_FACTORY"]?"ENV_OVERRIDE":"BASE_EXISTING_ADAPTER"}
  ];
