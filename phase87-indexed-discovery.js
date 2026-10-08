@@ -1,7 +1,13 @@
 'use strict';
 // Phase 8.7: manually triggered, bounded indexed market inventory. No signing, transactions or auto-polling.
 const SAFETY=Object.freeze({readOnly:true,automaticScanning:false,mainnetBroadcast:false,executionEligible:false});
-const BUILD='8.7.0';
+const BUILD='8.7.1';
+const GECKO_GAP_MS=1500;
+const DEFAULT_429_COOLDOWN_MS=60000;
+const MAX_COOLDOWN_MS=15*60000;
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function retryAfterMs(value){if(!value)return DEFAULT_429_COOLDOWN_MS;const seconds=Number(value);const ms=Number.isFinite(seconds)?seconds*1000:Date.parse(value)-Date.now();return Number.isFinite(ms)?Math.max(1000,Math.min(MAX_COOLDOWN_MS,ms)):DEFAULT_429_COOLDOWN_MS;}
+
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const ADDR=/^0x[a-fA-F0-9]{40}$/;
 const POOL_ID=/^0x[a-fA-F0-9]{64}$/;
@@ -44,14 +50,15 @@ function merge(records){
 async function retrieve(source,fetchFn=globalThis.fetch){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);
  try{const response=await fetchFn(source.url,{method:'GET',headers:{accept:'application/json'},signal:controller.signal});
+  if(response.status===429){const err=Error('HTTP_429');err.retryAfterMs=retryAfterMs(response.headers?.get?.('retry-after'));throw err;}
   if(!response.ok)throw Error(`HTTP_${response.status}`);
   const raw=await response.text();if(raw.length>2000000)throw Error('RESPONSE_TOO_LARGE');
   const body=JSON.parse(raw);return source.name.startsWith('gecko')?normalizeGecko(body,source.name):normalizeDex(body,source.name);
  }finally{clearTimeout(timer)}
 }
 function mount(app,{fetchFn}={}){
- const state={running:false,runs:0,lastStartedAt:null,lastCompletedAt:null,lastResult:null,pools:[],lastSuccessfulAt:null};
- const status=()=>({success:true,build:BUILD,running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,lastSuccessfulAt:state.lastSuccessfulAt,uniquePoolsInMemory:state.pools.length,lastResult:state.lastResult,safety:SAFETY});
+ const state={running:false,runs:0,lastStartedAt:null,lastCompletedAt:null,lastResult:null,pools:[],lastSuccessfulAt:null,geckoCooldownUntil:0};
+ const status=()=>({success:true,build:BUILD,running:state.running,runs:state.runs,lastStartedAt:state.lastStartedAt,lastCompletedAt:state.lastCompletedAt,lastSuccessfulAt:state.lastSuccessfulAt,uniquePoolsInMemory:state.pools.length,lastResult:state.lastResult,geckoCooldownUntil:state.geckoCooldownUntil?new Date(state.geckoCooldownUntil).toISOString():null,safety:SAFETY});
  app.get('/api/liquidity87/status',(_req,res)=>res.json(status()));
  app.get('/api/liquidity87/sources',(_req,res)=>res.json({success:true,build:BUILD,sources:URLS.map(s=>({name:s.name,url:s.url})),safety:SAFETY}));
  app.get('/api/liquidity87/pools',(req,res)=>{const limit=Number(req.query.limit??50),offset=Number(req.query.offset??0),min=Number(req.query.minLiquidityUSD??0);
@@ -62,7 +69,16 @@ function mount(app,{fetchFn}={}){
  app.get('/api/liquidity87/tokens',(_req,res)=>{const tokens=new Map();for(const p of state.pools)for(const t of [p.token0,p.token1])if(t)tokens.set(t.address,{...tokens.get(t.address),...t});res.json({success:true,build:BUILD,total:tokens.size,tokens:[...tokens.values()].slice(0,250),safety:SAFETY})});
  async function run(){const successes=[],failures=[],all=[];
   // Sequential requests limit API pressure; partial results are explicitly marked incomplete.
-  for(const source of URLS){try{const rows=await retrieve(source,fetchFn||globalThis.fetch);successes.push({source:source.name,records:rows.length});all.push(...rows)}catch(e){failures.push({source:source.name,error:String(e?.message||e).slice(0,140)})}}
+  let lastGeckoRequestAt=0;
+  for(const source of URLS){
+   const isGecko=source.name.startsWith('gecko');
+   if(isGecko&&Date.now()<state.geckoCooldownUntil){failures.push({source:source.name,error:'RATE_LIMIT_COOLDOWN',retryAt:new Date(state.geckoCooldownUntil).toISOString()});continue;}
+   if(isGecko&&lastGeckoRequestAt){const gap=GECKO_GAP_MS-(Date.now()-lastGeckoRequestAt);if(gap>0)await wait(gap);}
+   if(isGecko)lastGeckoRequestAt=Date.now();
+   try{const rows=await retrieve(source,fetchFn||globalThis.fetch);successes.push({source:source.name,records:rows.length});all.push(...rows)}
+   catch(e){if(isGecko&&e?.message==='HTTP_429')state.geckoCooldownUntil=Date.now()+(e.retryAfterMs||DEFAULT_429_COOLDOWN_MS);
+    failures.push({source:source.name,error:String(e?.message||e).slice(0,140),...(isGecko&&e?.message==='HTTP_429'?{retryAt:new Date(state.geckoCooldownUntil).toISOString()}:{})});}
+  }
   const deduped=merge(all);if(successes.length){state.pools=deduped;state.lastSuccessfulAt=new Date().toISOString()}
   return {success:failures.length===0,scanStatus:failures.length?'INCOMPLETE':'COMPLETE',build:BUILD,chainId:8453,rawRecords:all.length,uniquePools:deduped.length,contractAddressPools:deduped.filter(x=>x.poolKind==='contractAddress').length,poolIdRecords:deduped.filter(x=>x.poolKind==='poolId').length,sourcesSucceeded:successes,sourcesFailed:failures,limitations:['BASE_ONLY','INDEXED_API_SNAPSHOTS_NOT_ON_CHAIN_VERIFIED','REPORTED_TVL_NOT_EXECUTABLE_DEPTH','NO_ROUTE_QUOTES','NO_PROFIT_VALIDATION','IN_MEMORY_ONLY','NO_AUTOMATIC_SCAN'],safety:SAFETY};
  }
