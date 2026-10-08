@@ -1,8 +1,10 @@
-ArbiFlow Phase 8.0 Foundation — integrated update
+ArbiFlow Phase 8.1 — DEX evidence coverage audit
 
-Upload server.js, phase7-cex.js, phase73-net.js, phase8-flashloan.js to the repository root. Replace matching files; retain ALL other existing modules. Deploy on Render. No environment or automatic scan changes.
+Upload ALL FIVE JS files to the GitHub repository root. Replace same-named files, keep all other repository files unchanged. Render deploy.
 
-GET /api/phase8/status
-GET /api/phase8/preflight?loanAmount=100000&swapProceeds=100600&loanFeeBps=5&gasUSD=35&extraCostsUSD=0&minimumNetProfitUSD=1
+/api/phase81/status
+/api/phase81/dex-coverage
 
-IMPORTANT: This is an arithmetic preflight ONLY. It is not an atomic flash-loan execution or a blockchain-fork simulation. It does not verify 500 DEXs, live liquidity, or profitability. It will NEVER broadcast a trade. Loan principal is not wallet capital; user pays gas.
+Audit reads existing in-memory DEX discovery evidence. It makes no RPC calls and does not pretend 500 DEXs are active. To populate existing discovery evidence, use the existing manual /api/dex-independent/run endpoint sparingly and check /api/dex-independent/status. Respect RPC cooldowns.
+
+No auto scanning, live trade execution, or mainnet broadcast added. Phase 8.1 is an audit, NOT atomic flash-loan execution.

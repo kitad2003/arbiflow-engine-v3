@@ -9474,6 +9474,27 @@ app.get("/api/global-coverage/status",(req,res)=>res.json(coverage4730Summary())
 app.get("/api/global-coverage/targets",(req,res)=>res.json({success:true,version:VERSION,...COVERAGE4730.target,policy:"Targets are not counted as live coverage until runtime telemetry proves them."}));
 
 
+// === Phase 8.1 DEX coverage audit: existing evidence only, zero new RPC calls ===
+app.get('/api/phase81/dex-coverage',(_req,res)=>{
+ const now=Date.now();
+ const chains=Object.values(dex4780.chains||{}).map(row=>{
+  const venues=Array.isArray(row.venues)?row.venues:[];
+  const configured=venues.filter(v=>v.factory&&v.status!=='NOT_CONFIGURED');
+  const pools=venues.filter(v=>v.status==='POOL_LIVE'&&v.pool&&v.liquidityEvidence?.nonzero);
+  const uniquePools=new Set(pools.map(v=>String(v.pool).toLowerCase()));
+  const uniqueFactories=new Set(pools.map(v=>String(v.factory).toLowerCase()));
+  const statusCounts={};for(const v of venues)statusCounts[v.status||'UNKNOWN']=(statusCounts[v.status||'UNKNOWN']||0)+1;
+  const chainId=Number(row.chainId);
+  const snap=dexVerified4788.get(chainId);
+  const ageMs=snap?now-Date.parse(snap.observedAt):null;
+  return {name:row.name||null,chainId,status:row.status||'UNKNOWN',configuredVenueEntries:configured.length,livePoolEntries:pools.length,uniqueLivePools:uniquePools.size,uniqueLiveFactories:uniqueFactories.size,venueStatuses:statusCounts,snapshotObservedAt:snap?.observedAt||null,snapshotAgeMs:Number.isFinite(ageMs)?ageMs:null,snapshotFresh:Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=DEX_SNAPSHOT_MAX_AGE_MS_4788,executableQuotes:Number(row.executableQuotes)||0,qualified:Number(row.qualified)||0};
+ });
+ const sums=k=>chains.reduce((n,c)=>n+c[k],0);
+ const known=chains.length;
+ res.json({success:true,build:'8.1.0',stage:'DEX_COVERAGE_EVIDENCE_AUDIT',targetLiquiditySources:500,chainsWithDiscoveryEvidence:known,chainRpcConnectivityNotDexCoverage:true,counts:{configuredVenueEntries:sums('configuredVenueEntries'),livePoolEntries:sums('livePoolEntries'),uniqueLivePoolsPerChainSummed:sums('uniqueLivePools'),uniqueLiveFactoriesPerChainSummed:sums('uniqueLiveFactories'),freshSnapshots:chains.filter(c=>c.snapshotFresh).length,executableQuotesReported:sums('executableQuotes'),qualifiedReported:sums('qualified')},chains,coverageVerified500:false,limitations:['VENUE_ENTRIES_ARE_NOT_UNIQUE_DEX_PROTOCOLS','COUNTS_REFLECT_EXISTING_IN_MEMORY_DISCOVERY_ONLY','NO_NEW_RPC_CALLS','POOL_LIQUIDITY_IS_NOT_EXECUTABLE_PROFIT','500_SOURCE_TARGET_NOT_VERIFIED','NO_ATOMIC_FLASH_LOAN_SIMULATION'],readOnly:true,automaticScanning:false,mainnetBroadcast:false,executionEligible:false});
+});
+app.get('/api/phase81/status',(_req,res)=>res.json({success:true,build:'8.1.0',stage:'DEX_COVERAGE_AUDIT_ONLY',auditRoute:'/api/phase81/dex-coverage',existingDiscoveryRoute:'/api/dex-independent/run',existingDiscoveryStatusRoute:'/api/dex-independent/status',targetLiquiditySources:500,coverageVerified500:false,flashLoanAtomicSimulationVerified:false,readOnly:true,automaticScanning:false,mainnetBroadcast:false}));
+
 // === 4.78.3 Independent DEX pool evidence (READ ONLY) ===
 // Explicit per-chain venue factories: no guessed addresses, no aggregator aliases.
 // This layer verifies pool identity and liquidity evidence; it does NOT claim executable arbitrage.
