@@ -1,0 +1,1 @@
+ArbiFlow 4.78.15: read-only manual Base Uniswap quoter identity and ABI diagnostic. Run /api/dex-independent/quoter-verification/run then /status. Checks eth_getCode and probes V1/V2 quoteExactInputSingle with 1 USDC, serialized using DEX RPC pacing. No execution or net profit claims. No discovery code changes. A successful quote is not proof of full arbitrage execution.

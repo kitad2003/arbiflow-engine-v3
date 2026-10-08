@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.14";
+const VERSION = "4.78.15";
 
 /*
 =========================================================
@@ -9598,6 +9598,59 @@ async function dexCrossQuotes47813(chainId,size){
  }
  return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_CONTRACT_IDENTITY_AND_ABI_NOT_VERIFIED_BY_THIS_ENDPOINT','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
+
+// 4.78.15: read-only, manually initiated Base quoter contract/ABI diagnostic.
+// No assumption that a deployed contract at a configured address is a valid Uniswap quoter.
+const dexQuoterProbe47815={running:false,runs:0,lastCompletedAt:null,result:null};
+async function dexRpcDiagnostic47815(c,method,params){
+ const prev=dexRpcGate4783.tail;let release;const next=new Promise(resolve=>release=resolve);
+ dexRpcGate4783.tail=prev.catch(()=>{}).then(()=>next);
+ await prev.catch(()=>{});
+ try{
+  if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)throw Error('RPC_COOLDOWN_ACTIVE');
+  await sleep4783(Math.max(0,dexRpcGate4783.nextAt-Date.now()));dexRpcGate4783.nextAt=Date.now()+1500;
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),12000);
+  try{
+   dexRpcGate4783.requests++;
+   const r=await fetch(c.rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:ctl.signal});
+   if(!r.ok){if(r.status===429){dexRpcGate4783.rateLimited++;dexRpcGate4783.lastRateLimitAt=new Date().toISOString();dexRpcGate4783.cooldownUntil=Date.now()+120000;}throw Error('RPC_HTTP_'+r.status);}
+   const j=await r.json();if(j.error)throw Error('RPC_'+j.error.code+':'+String(j.error.message).slice(0,140));
+   if(typeof j.result!=='string'||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error('INVALID_RPC_RESULT');return j.result;
+  }finally{clearTimeout(timer);}
+ }finally{release();}
+}
+async function dexProbeQuoter47815(){
+ const c=MC4750_CHAINS.find(x=>x.chainId===8453);
+ const quoter=dexNormalize47814(UNISWAP_V3_QUOTER_V1_4490[c.key]);
+ const row={chainId:8453,quoterAddress:quoter,bytecodePresent:null,bytecodeBytes:null,abiProbes:[],warning:'BYTECODE_PRESENCE_DOES_NOT_PROVE_QUOTER_IDENTITY'};
+ const code=await dexRpcDiagnostic47815(c,'eth_getCode',[quoter,'latest']);
+ row.bytecodePresent=code.length>2;row.bytecodeBytes=(code.length-2)/2;
+ if(!row.bytecodePresent){row.conclusion='NO_CONTRACT_CODE_AT_CONFIGURED_ADDRESS';return row;}
+ const ethers=require('ethers');
+ const tokenIn=dexNormalize47814(c.tokens.USDC),tokenOut=dexNormalize47814(c.tokens.WETH),amountIn=1000000n;
+ for(const variant of ['V1','V2']){
+  const iface=new ethers.Interface(variant==='V1'?QUOTER_V1_ABI_4490:QUOTER_V2_ABI_4501);
+  const params=variant==='V1'?[tokenIn,tokenOut,500,amountIn,0]:[{tokenIn,tokenOut,amountIn,fee:500,sqrtPriceLimitX96:0}];
+  const entry={variant,feeTier:500,inputUsdc:1,selector:iface.getFunction('quoteExactInputSingle').selector,returned:false};
+  try{
+   const data=iface.encodeFunctionData('quoteExactInputSingle',params);
+   const raw=await dexRpcDiagnostic47815(c,'eth_call',[{to:quoter,data},'latest']);
+   const decoded=iface.decodeFunctionResult('quoteExactInputSingle',raw);
+   entry.returned=true;entry.wethOutRaw=decoded[0].toString();
+  }catch(e){entry.error=String(e.message||e).slice(0,180);}
+  row.abiProbes.push(entry);
+  if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)break;
+ }
+ row.conclusion=row.abiProbes.some(x=>x.returned)?'QUOTE_ABI_PROBE_SUCCEEDED':'NO_SUCCESSFUL_ABI_PROBE';
+ return row;
+}
+app.get('/api/dex-independent/quoter-verification/status',(req,res)=>res.json({success:true,version:VERSION,running:dexQuoterProbe47815.running,runs:dexQuoterProbe47815.runs,lastCompletedAt:dexQuoterProbe47815.lastCompletedAt,result:dexQuoterProbe47815.result,safety:{readOnly:true,mainnetBroadcast:false}}));
+app.get('/api/dex-independent/quoter-verification/run',(req,res)=>{
+ if(dexQuoterProbe47815.running)return res.status(409).json({success:false,error:'PROBE_ALREADY_RUNNING'});
+ dexQuoterProbe47815.running=true;dexQuoterProbe47815.runs++;
+ setImmediate(async()=>{try{dexQuoterProbe47815.result=await dexProbeQuoter47815();}catch(e){dexQuoterProbe47815.result={error:String(e.message||e).slice(0,200)};}finally{dexQuoterProbe47815.running=false;dexQuoterProbe47815.lastCompletedAt=new Date().toISOString();}});
+ res.json({success:true,version:VERSION,status:'STARTED_BACKGROUND',statusRoute:'/api/dex-independent/quoter-verification/status',readOnly:true});
+});
 app.get('/api/dex-independent/cross-dex-quotes/status',(req,res)=>res.json({success:true,version:VERSION,running:dexQuotes47813.running,runs:dexQuotes47813.runs,lastCompletedAt:dexQuotes47813.lastCompletedAt,result:dexQuotes47813.lastResult,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get('/api/dex-independent/cross-dex-quotes/run',(req,res)=>{
  if(dexQuotes47813.running)return res.status(409).json({success:false,error:'QUOTE_CHECK_ALREADY_RUNNING'});
