@@ -59,10 +59,10 @@ module.exports.mount=(app,{getChain,call})=>{
    return feeAdjusted*reserveOut/(reserveIn*1000n+feeAdjusted);
   }
   async function probe(legs,combo,size){
-   const record={sizeUsdc:size,route:['USDC',...legs.map(l=>l[1])].join('>'),venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',netProfitUsd:null,qualified:false};
+   const record={sizeUsdc:size,route:['USDC',...legs.map(l=>l[1])].join('>'),venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',flashLoan:{status:'NOT_VERIFIED',provider:null,availableUsdc:null,premiumBps:null,feeUsd:null,atomicSimulation:false},netProfitUsd:null,qualified:false};
    try{
     let amount=BigInt(Math.round(size*1e6));
-    for(let j=0;j<3;j++){amount=await quote(combo[j],legs[j][0],legs[j][1],amount);if(amount<=0n)throw Error('ZERO_LEG_OUTPUT');}
+    for(let j=0;j<3;j++){const inputRaw=amount.toString();amount=await quote(combo[j],legs[j][0],legs[j][1],amount);record.legs=record.legs||[];record.legs.push({from:legs[j][0],to:legs[j][1],venue:combo[j].venue,pool:combo[j].pool,inputRaw,outputRaw:amount.toString()});if(amount<=0n)throw Error('ZERO_LEG_OUTPUT');}
     const input=BigInt(Math.round(size*1e6));
     record.outputUsdcRaw=amount.toString();
     record.grossProfitUsd=Number(amount-input)/1e6;
@@ -72,10 +72,10 @@ module.exports.mount=(app,{getChain,call})=>{
    routes.push(record);
    return record;
   }
-  // Larger-trade experiment: exclude all probes at or below $500.
+  // Read-only $10,000+ flash-loan-sized probes; loan availability is NOT assumed.
   // Use each route's own V2 reserve depth when available. V3 liquidity()
   // is not directly USD-denominated; V3-only paths use a bounded probe.
-  const minimumTradeUsdc=1000;
+  const minimumTradeUsdc=10000;
   const maxProbeUsdc=100000;
   function routeDepth(legs,combo){
    const ceilings=[];
@@ -109,7 +109,7 @@ module.exports.mount=(app,{getChain,call})=>{
   baseline.sort((a,b)=>b.score-a.score);
   for(const candidate of baseline.slice(0,8)){
    const row={route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reserveBasedLimitUsdc:candidate.depth,sizesTested:[candidate.initialSize],stoppedReason:null};
-   for(const multiplier of [2,4,8]){
+   for(const multiplier of [2,5,10]){
     const size=Math.round(candidate.initialSize*multiplier);
     if(size>maxProbeUsdc){row.stoppedReason='PROBE_SAFETY_CAP';break;}
     if(candidate.depth!==null&&size>candidate.depth){row.stoppedReason='V2_RESERVE_SCREEN';break;}
@@ -124,7 +124,7 @@ module.exports.mount=(app,{getChain,call})=>{
   const sizes=[...new Set(routes.map(r=>r.sizeUsdc))].sort((a,b)=>a-b);
   const bestByGross=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE').sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd).slice(0,10);
   const quoted=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE');
-  return {success:true,stage:'LARGE_TRADE_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,minimumTradeUsdc,maximumProbeUsdc:maxProbeUsdc,sizeCandidatesUsdc:sizes,skippedShallowRoutes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','V3_ONLY_ROUTES_HAVE_NO_USD_DEPTH_VERIFICATION','LARGE_TRADE_PROBES_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  return {success:true,stage:'LARGE_TRADE_FLASH_LOAN_DIAGNOSTICS',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,minimumTradeUsdc,maximumProbeUsdc:maxProbeUsdc,sizeCandidatesUsdc:sizes,skippedShallowRoutes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['FLASH_LOAN_PROVIDER_AND_CAPACITY_NOT_VERIFIED','FLASH_LOAN_PREMIUM_NOT_VERIFIED','NO_FLASH_LOAN_EXECUTOR_INTEGRATION','QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','V3_ONLY_ROUTES_HAVE_NO_USD_DEPTH_VERIFICATION','LARGE_TRADE_PROBES_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
  }
  app.get('/api/market-graph/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false}}));
  app.get('/api/market-graph/run',(req,res)=>{
