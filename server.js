@@ -9974,3 +9974,6 @@ require('./phase88-onchain-inventory').mount(app,{getBaseChain:()=>MC4750_CHAINS
 // Read-only multi-token graph discovery; no trades or alerts.
 require('./market-graph').mount(app,{getChain:id=>MC4750_CHAINS.find(c=>c.chainId===id),call:(chain,to,data)=>dexCall4780(chain,to,data)});
 require('./flash-loan-discovery').mount(app,{getChain:id=>MC4750_CHAINS.find(c=>c.chainId===id),call:(chain,to,data)=>dexCall4780(chain,to,data)});
+
+// Read-only block builder comparison and net-profit review; no transaction submission.
+require('./block-builder-matrix').mount(app);
