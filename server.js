@@ -9789,7 +9789,7 @@ async function dexRpcDiagnostic47815(c,method,params){
   try{
    dexRpcGate4783.requests++;
    const r=await fetch(c.rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:ctl.signal});
-   if(!r.ok){if(r.status===429){dexRpcGate4783.rateLimited++;dexRpcGate4783.lastRateLimitAt=new Date().toISOString();dexRpcGate4783.cooldownUntil=Date.now()+120000;}throw Error('RPC_HTTP_'+r.status);}
+   if(!r.ok){if(r.status===429){dexRpcGate4783.rateLimited++;dexRpcGate4783.lastRateLimitAt=new Date().toISOString();dexRpcGate4783.cooldownUntil=Date.now()+120000;}{const body=(await r.text().catch(()=>'' )).slice(0,400).replace(/[\r\n]+/g,' ');throw Error('RPC_HTTP_'+r.status+(body?':'+body:''));}}
    const j=await r.json();if(j.error)throw Error('RPC_'+j.error.code+':'+String(j.error.message).slice(0,140));
    if(method==='eth_getLogs'){if(!Array.isArray(j.result))throw Error('INVALID_RPC_LOGS_RESULT');return j.result;}if(method==='eth_getBlockByNumber'){if(j.result===null)return null;if(!j.result||typeof j.result!=='object'||Array.isArray(j.result)||!Array.isArray(j.result.transactions))throw Error('INVALID_RPC_BLOCK_RESULT');return j.result;}if(typeof j.result!=='string'||!/^0x[0-9a-fA-F]*$/.test(j.result))throw Error('INVALID_RPC_RESULT');return j.result;
   }finally{clearTimeout(timer);}
