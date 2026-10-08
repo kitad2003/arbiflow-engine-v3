@@ -8,6 +8,10 @@ const VENUES=[
  {name:'UNISWAP_V3_3000',factory:'0x33128a8fC17869897dcE68Ed026d694621f6FDfD',quoter:'0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',fee:3000},
  {name:'PANCAKE_V3_500',factory:'0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',quoter:'0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997',fee:500}
 ];
+const AERO={name:'AERODROME_VOLATILE',kind:'AERODROME',factory:'0x420DD381b31aEf6683db6B902084cB0FFECe40Da',router:'0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43',stable:false};
+VENUES.push(AERO);
+const af=new Interface(['function getPool(address,address,bool) view returns(address)']);
+const ar=new Interface(['function getReserves(address,address,bool,address) view returns(uint256,uint256)','function getAmountsOut(uint256,(address from,address to,bool stable,address factory)[]) view returns(uint256[])']);
 const f=new Interface(['function getPool(address,address,uint24) view returns(address)']);
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
@@ -21,8 +25,12 @@ function mount(app,{getBaseChain,rpc}){
   const block=await rpc(chain,'eth_blockNumber',[]);
   const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]));
   const pools=await mapLimit(VENUES,2,async v=>{
-   const [addr]=await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS.WETH,v.fee]);
+   const [addr]=v.kind==='AERODROME'?await call(v.factory,af,'getPool',[TOKENS.USDC,TOKENS.WETH,v.stable]):await call(v.factory,f,'getPool',[TOKENS.USDC,TOKENS.WETH,v.fee]);
    if(!addr||/^0x0{40}$/i.test(addr))return {...v,status:'NO_POOL'};
+   if(v.kind==='AERODROME'){
+    const [reserveA,reserveB]=await call(v.router,ar,'getReserves',[TOKENS.USDC,TOKENS.WETH,v.stable,v.factory]);
+    return {...v,pool:addr,reserveUsdcRaw:reserveA.toString(),reserveWethRaw:reserveB.toString(),status:reserveA>0n&&reserveB>0n?'POOL_LIVE':'POOL_EMPTY'};
+   }
    const [[t0],[t1],[liq]]=await Promise.all([call(addr,p,'token0',[]),call(addr,p,'token1',[]),call(addr,p,'liquidity',[])]);
    if(![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS.USDC.toLowerCase())||![t0.toLowerCase(),t1.toLowerCase()].includes(TOKENS.WETH.toLowerCase()))throw Error('TOKEN_IDENTITY_MISMATCH');
    return {...v,pool:addr,liquidity:liq.toString(),status:liq>0n?'POOL_LIVE':'POOL_EMPTY'};
@@ -33,6 +41,7 @@ function mount(app,{getBaseChain,rpc}){
   const minUsd=500,maxUsd=50000;
   const initial=[minUsd,Math.round(Math.sqrt(minUsd*maxUsd)),maxUsd];
   let quoteCalls=0;
+  const quote=async(v,from,to,amount)=>{if(v.kind==='AERODROME'){const [amounts]=await call(v.router,ar,'getAmountsOut',[amount,[[from,to,v.stable,v.factory]]]);return amounts[amounts.length-1]}const [output]=await call(v.quoter,q,'quoteExactInputSingle',[[from,to,amount,v.fee,0]]);return output};
   const routes=await mapLimit(combinations,2,async({buy,sell})=>{
    const base={route:'USDC>WETH>USDC',venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],qualified:false,netProfitUsd:null,atomicSimulation:false};
    const samples=[];
@@ -40,10 +49,10 @@ function mount(app,{getBaseChain,rpc}){
     try{
      const input=BigInt(Math.round(sizeUsdc*1e6));
      quoteCalls++;
-     const [weth]=await call(buy.quoter,q,'quoteExactInputSingle',[[TOKENS.USDC,TOKENS.WETH,input,buy.fee,0]]);
+     const weth=await quote(buy,TOKENS.USDC,TOKENS.WETH,input);
      if(weth<=0n)throw Error('ZERO_WETH_QUOTE');
      quoteCalls++;
-     const [usdc]=await call(sell.quoter,q,'quoteExactInputSingle',[[TOKENS.WETH,TOKENS.USDC,weth,sell.fee,0]]);
+     const usdc=await quote(sell,TOKENS.WETH,TOKENS.USDC,weth);
      const grossProfitUsd=Number(usdc-input)/1e6;
      const result={sizeUsdc,grossProfitUsd,grossSpreadPct:100*grossProfitUsd/sizeUsdc,wethOutputRaw:weth.toString(),usdcReturnedRaw:usdc.toString()};
      samples.push(result);return result;
@@ -64,7 +73,7 @@ function mount(app,{getBaseChain,rpc}){
    const best=ranked()[0];
    return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'ADAPTIVE_COARSE_PLUS_REFINEMENT'},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
   });
-  return {success:true,stage:'ADAPTIVE_SIZE_TWO_SWAP_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:3},venuesChecked:VENUES.length,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'ADAPTIVE_COARSE_PLUS_REFINEMENT'},positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'MULTI_DEX_ADAPTIVE_SIZE_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'ADAPTIVE_COARSE_PLUS_REFINEMENT'},positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){
   if(state.running)return;
