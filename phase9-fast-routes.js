@@ -29,16 +29,42 @@ function mount(app,{getBaseChain,rpc}){
   });
   const live=pools.filter(x=>x.status==='POOL_LIVE');
   const combinations=live.flatMap(a=>live.filter(b=>a.name!==b.name).map(b=>({buy:a,sell:b})));
+  // Adaptive bounded range: 3 coarse points, then up to 2 refinements per route.
+  const minUsd=500,maxUsd=50000;
+  const initial=[minUsd,Math.round(Math.sqrt(minUsd*maxUsd)),maxUsd];
   let quoteCalls=0;
-  const routes=await mapLimit(combinations,3,async({buy,sell})=>{
-   const base={route:'USDC>WETH>USDC',venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],sizeUsdc:10000,qualified:false,netProfitUsd:null,atomicSimulation:false};
-   const [weth]=await call(buy.quoter,q,'quoteExactInputSingle',[[TOKENS.USDC,TOKENS.WETH,10000000000n,buy.fee,0]]);quoteCalls++;
-   if(weth<=0n)return {...base,status:'INVALID_FIRST_QUOTE'};
-   const [usdc]=await call(sell.quoter,q,'quoteExactInputSingle',[[TOKENS.WETH,TOKENS.USDC,weth,sell.fee,0]]);quoteCalls++;
-   const gross=(Number(usdc)-1e10)/1e6;
-   return {...base,status:'INDICATIVE_ONLY',wethOutputRaw:weth.toString(),usdcReturnedRaw:usdc.toString(),grossProfitUsd:gross,grossSpreadPct:gross/100,loanFeeEstimateUsd:5,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
+  const routes=await mapLimit(combinations,2,async({buy,sell})=>{
+   const base={route:'USDC>WETH>USDC',venues:[buy.name,sell.name],pools:[buy.pool,sell.pool],qualified:false,netProfitUsd:null,atomicSimulation:false};
+   const samples=[];
+   async function sample(sizeUsdc){
+    try{
+     const input=BigInt(Math.round(sizeUsdc*1e6));
+     quoteCalls++;
+     const [weth]=await call(buy.quoter,q,'quoteExactInputSingle',[[TOKENS.USDC,TOKENS.WETH,input,buy.fee,0]]);
+     if(weth<=0n)throw Error('ZERO_WETH_QUOTE');
+     quoteCalls++;
+     const [usdc]=await call(sell.quoter,q,'quoteExactInputSingle',[[TOKENS.WETH,TOKENS.USDC,weth,sell.fee,0]]);
+     const grossProfitUsd=Number(usdc-input)/1e6;
+     const result={sizeUsdc,grossProfitUsd,grossSpreadPct:100*grossProfitUsd/sizeUsdc,wethOutputRaw:weth.toString(),usdcReturnedRaw:usdc.toString()};
+     samples.push(result);return result;
+    }catch(e){const result={sizeUsdc,error:err(e)};samples.push(result);return result}
+   }
+   for(const size of initial)await sample(size);
+   const ranked=()=>samples.filter(s=>Number.isFinite(s.grossProfitUsd)).sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd);
+   const bestCoarse=ranked()[0];
+   if(bestCoarse){
+    const sizes=initial.slice().sort((a,b)=>a-b);
+    const index=sizes.indexOf(bestCoarse.sizeUsdc);
+    const neighbors=[sizes[index-1],sizes[index+1]].filter(Number.isFinite);
+    for(const n of neighbors.slice(0,2)){
+     const refined=Math.round(Math.sqrt(n*bestCoarse.sizeUsdc));
+     if(refined>minUsd&&refined<maxUsd&&!samples.some(s=>s.sizeUsdc===refined))await sample(refined);
+    }
+   }
+   const best=ranked()[0];
+   return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'ADAPTIVE_COARSE_PLUS_REFINEMENT'},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
   });
-  return {success:true,stage:'PARALLEL_TWO_SWAP_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:3},venuesChecked:VENUES.length,pools,routeCount:routes.length,quoteCalls,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'ADAPTIVE_SIZE_TWO_SWAP_DIAGNOSTICS',chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:3},venuesChecked:VENUES.length,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'ADAPTIVE_COARSE_PLUS_REFINEMENT'},positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['NO_V3_USD_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){
   if(state.running)return;
