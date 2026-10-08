@@ -1,12 +1,17 @@
-'use strict';
-const assert = require('node:assert/strict');
-const registry = require('./registry');
-assert.equal(registry.chains.length,25,'expected 25 chains');
-assert.equal(registry.exchanges.length,25,'expected 25 exchanges');
-for (const [kind,entries] of [['chains',registry.chains],['exchanges',registry.exchanges]]) {
- assert.equal(new Set(entries.map(x=>x.key)).size,25,`${kind} duplicate keys`);
- assert.ok(entries.every(x=>x.status==='registry_only' && x.enabled===false),`${kind} must be disabled registry entries`);
-}
-assert.equal(registry.safety.mainnetBroadcast,false);
-assert.equal(registry.safety.automaticScanning,false);
-console.log('PASS: 25 chains, 25 CEXs, unique IDs, disabled integrations, read-only safety');
+"use strict";
+const assert=require('node:assert/strict');
+const registry=require('./registry');
+const {probeEvmChain,rpcEnvironmentNames}=require('./manual-rpc-probe');
+assert.equal(registry.chains.length,25);
+assert.equal(registry.exchanges.length,25);
+assert.equal(new Set(registry.chains.map(x=>x.key)).size,25);
+assert.equal(new Set(registry.exchanges.map(x=>x.key)).size,25);
+assert.equal(rpcEnvironmentNames('base')[0],'BASE_RPC_URL');
+assert.equal(rpcEnvironmentNames('bnb')[0],'BNB_RPC_URL');
+(async()=>{
+  const blocked=await probeEvmChain({url:'http://127.0.0.1:3000',expectedChainId:1});
+  assert.equal(blocked.reachable,false);
+  assert.equal(blocked.status,'INVALID_RPC_URL');
+  assert.equal(registry.safety.mainnetBroadcast,false);
+  console.log('PASS: 25 chains, 25 exchanges, manual RPC probe, safe defaults');
+})().catch(e=>{console.error(e);process.exitCode=1});

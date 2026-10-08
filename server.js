@@ -9211,6 +9211,23 @@ app.get('/api/expansion-25x25/status', (req, res) => {
   });
 });
 
+// Phase 2: explicit one-chain, read-only RPC probe. No background polling.
+const { probeEvmChain, rpcEnvironmentNames } = require('./manual-rpc-probe');
+app.get('/api/expansion-25x25/rpc-config', (req, res) => {
+  res.json({success:true, stage:'MANUAL_RPC_PROBE', chains:expansionRegistry47820.chains.map(c=>({key:c.key,vm:c.vm,expectedChainId:c.chainId,rpcConfigured:c.vm==='evm' && rpcEnvironmentNames(c.key).some(name=>Boolean(process.env[name])) || (c.vm==='evm' && Boolean(RPC_URLS[c.key])), probeSupported:c.vm==='evm' && Number.isInteger(c.chainId)})), automaticScanning:false, mainnetBroadcast:false});
+});
+app.get('/api/expansion-25x25/rpc-probe', async (req, res) => {
+  const key = typeof req.query.chain==='string' ? req.query.chain.trim().toLowerCase() : '';
+  const chain = expansionRegistry47820.chains.find(c=>c.key===key);
+  if(!chain) return res.status(400).json({success:false,error:'UNKNOWN_CHAIN'});
+  if(chain.vm!=='evm' || !Number.isInteger(chain.chainId)) return res.status(400).json({success:false,error:'NON_EVM_OR_UNVERIFIED_CHAIN_ID',chain:key});
+  const envName=rpcEnvironmentNames(key).find(name=>Boolean(process.env[name]));
+  const rpcUrl=envName ? process.env[envName] : RPC_URLS[key];
+  if(!rpcUrl) return res.json({success:true,chain:key,configured:false,reachable:false,chainIdMatches:false,status:'NOT_CONFIGURED',readOnly:true});
+  const result=await probeEvmChain({url:rpcUrl,expectedChainId:chain.chainId});
+  return res.json({success:true,chain:key,configured:true,...result,readOnly:true,automaticScanning:false,mainnetBroadcast:false});
+});
+
 app.listen(
   PORT,
   () => {
