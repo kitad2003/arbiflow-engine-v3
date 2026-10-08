@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.13";
+const VERSION = "4.78.14";
 
 /*
 =========================================================
@@ -9554,6 +9554,9 @@ app.get('/api/dex-independent/quote-readiness',(req,res)=>res.json(dexQuoteReadi
 // Exact-input quote outputs are observations, NOT executable atomic arbitrage.
 const dexQuoterInterface47813=new (require('ethers').Interface)(QUOTER_V1_ABI_4490);
 const dexV2Interface47813=new (require('ethers').Interface)(['function getReserves() view returns (uint112,uint112,uint32)']);
+// Normalize hex addresses before ABI encoding. Ethers rejects invalid mixed-case checksums.
+// This does not establish whether a configured address is the correct on-chain contract.
+const dexNormalize47814 = value => require('ethers').getAddress(String(value).toLowerCase());
 const dexQuotes47813={running:false,lastCompletedAt:null,lastResult:null,runs:0};
 async function dexCrossQuotes47813(chainId,size){
  const c=MC4750_CHAINS.find(x=>x.chainId===chainId);
@@ -9563,8 +9566,9 @@ async function dexCrossQuotes47813(chainId,size){
  const sushi=snap.venues.find(v=>v.name==='SUSHISWAP_V2'&&v.status==='POOL_LIVE');
  const unis=snap.venues.filter(v=>v.kind==='V3'&&v.name.startsWith('UNISWAP_V3')&&v.status==='POOL_LIVE');
  if(!sushi||!unis.length)throw Error('LIVE_SUSHI_AND_UNISWAP_POOLS_REQUIRED');
- const quoter=UNISWAP_V3_QUOTER_V1_4490[c.key];
- if(!dexAddress4780(quoter))throw Error('UNISWAP_QUOTER_NOT_CONFIGURED');
+ const configuredQuoter=UNISWAP_V3_QUOTER_V1_4490[c.key];
+ if(!dexAddress4780(configuredQuoter))throw Error('UNISWAP_QUOTER_NOT_CONFIGURED');
+ const quoter=dexNormalize47814(configuredQuoter);
  const reservesRaw=await dexCall4780(c,sushi.pool,dexV2Interface47813.encodeFunctionData('getReserves',[]));
  const reserves=dexV2Interface47813.decodeFunctionResult('getReserves',reservesRaw);
  const weth0=BigInt(c.tokens.WETH.toLowerCase())<BigInt(c.tokens.USDC.toLowerCase());
@@ -9576,8 +9580,8 @@ async function dexCrossQuotes47813(chainId,size){
  for(const uni of unis){
   const fee=Number(uni.feeTier);
   for(const direction of ['SUSHI_BUY_UNI_SELL','UNI_BUY_SUSHI_SELL']){
-   const tokenIn=direction==='SUSHI_BUY_UNI_SELL'?c.tokens.WETH:c.tokens.USDC;
-   const tokenOut=direction==='SUSHI_BUY_UNI_SELL'?c.tokens.USDC:c.tokens.WETH;
+   const tokenIn=dexNormalize47814(direction==='SUSHI_BUY_UNI_SELL'?c.tokens.WETH:c.tokens.USDC);
+   const tokenOut=dexNormalize47814(direction==='SUSHI_BUY_UNI_SELL'?c.tokens.USDC:c.tokens.WETH);
    const amountIn=direction==='SUSHI_BUY_UNI_SELL'?sushiBuyWeth:usdcIn;
    try{
     if(amountIn<=0n)throw Error('ZERO_FIRST_LEG_OUTPUT');
@@ -9592,7 +9596,7 @@ async function dexCrossQuotes47813(chainId,size){
   }
   if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)break;
  }
- return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_CONTRACT_IDENTITY_NOT_VERIFIED_BY_THIS_ENDPOINT','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+ return {success:true,version:VERSION,stage:'MANUAL_ONCHAIN_UNISWAP_QUOTER_VS_SUSHI_V2_MATH',chainId,name:c.name,sizeUsd:size,snapshotAgeMs:age,sushiFeeBpsAssumed:30,sushiFeeVerified:false,quoterAddress:quoter,results:rows,qualified:0,alertsEmitted:0,limitations:['QUOTER_CONTRACT_IDENTITY_AND_ABI_NOT_VERIFIED_BY_THIS_ENDPOINT','SUSHI_FEE_ASSUMED','NO_ATOMIC_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_NET_PROFIT_VALIDATION','SNAPSHOT_POOL_IDENTITIES_FROM_RECENT_DISCOVERY'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get('/api/dex-independent/cross-dex-quotes/status',(req,res)=>res.json({success:true,version:VERSION,running:dexQuotes47813.running,runs:dexQuotes47813.runs,lastCompletedAt:dexQuotes47813.lastCompletedAt,result:dexQuotes47813.lastResult,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get('/api/dex-independent/cross-dex-quotes/run',(req,res)=>{
