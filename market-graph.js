@@ -38,16 +38,15 @@ module.exports.mount=(app,{getChain,call})=>{
   const byPair=Object.fromEntries(pairs.map(([a,b])=>[a+'/'+b,live.filter(x=>x.pair===a+'/'+b).length]));
   // Bounded read-only triangular quote probes. V2 uses an assumed 30 bps fee.
   // Quote outputs are indicative and NOT atomically executable.
-  const routes=[],liveBy=(a,b)=>live.filter(e=>e.pair===[a,b].sort().join('/')||e.pair===[b,a].sort().join('/'));
-  const legs=[['USDC','WETH'],['WETH','DAI'],['DAI','USDC']];
-  const options=legs.map(([a,b])=>live.filter(e=>e.pair===a+'/'+b||e.pair===b+'/'+a));
-  const combos=[];
-  if(options.every(o=>o.length)){
-   for(let i=0;i<3;i++)combos.push([options[0][i],options[1][i],options[2][i]]);
-   combos.push([options[0][0],options[1][1],options[2][2]],[options[0][2],options[1][0],options[2][1]]);
-  }
+  const routes=[];
+  const cycles=[
+   [['USDC','WETH'],['WETH','DAI'],['DAI','USDC']],
+   [['USDC','DAI'],['DAI','WETH'],['WETH','USDC']]
+  ];
   const decimals={USDC:6,WETH:18,DAI:18};
+  const capQuotes=240;let quoteCalls=0;
   async function quote(edge,from,to,amount){
+   if(++quoteCalls>capQuotes)throw Error('RPC_QUOTE_BUDGET_REACHED');
    if(edge.fee){
     const raw=await call(chain,quoters[chainId],quoteAbi.encodeFunctionData('quoteExactInputSingle',[{tokenIn:tokens[from].toLowerCase(),tokenOut:tokens[to].toLowerCase(),amountIn:amount,fee:edge.fee,sqrtPriceLimitX96:0}]));
     return BigInt(quoteAbi.decodeFunctionResult('quoteExactInputSingle',raw)[0]);
@@ -59,23 +58,53 @@ module.exports.mount=(app,{getChain,call})=>{
    const feeAdjusted=amount*997n;
    return feeAdjusted*reserveOut/(reserveIn*1000n+feeAdjusted);
   }
-  for(const size of [100,500]){
-   for(const combo of combos){
-    const record={sizeUsdc:size,route:'USDC>WETH>DAI>USDC',venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',netProfitUsd:null,qualified:false};
-    try{
-     let amount=BigInt(size)*10n**6n;
-     for(let j=0;j<3;j++){amount=await quote(combo[j],legs[j][0],legs[j][1],amount);if(amount<=0n)throw Error('ZERO_LEG_OUTPUT');}
-     const input=BigInt(size)*10n**6n;
-     record.outputUsdcRaw=amount.toString();
-     record.grossProfitUsd=Number(amount-input)/1e6;
-     record.grossReturnPct=Number((amount-input)*1000000n/input)/10000;
-     record.status='INDICATIVE_QUOTED_NOT_EXECUTABLE';
-    }catch(e){record.status='QUOTE_ERROR';record.error=String(e.message||e).slice(0,180);}
-    routes.push(record);
+  async function probe(legs,combo,size){
+   const record={sizeUsdc:size,route:['USDC',...legs.map(l=>l[1])].join('>'),venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',netProfitUsd:null,qualified:false};
+   try{
+    let amount=BigInt(Math.round(size*1e6));
+    for(let j=0;j<3;j++){amount=await quote(combo[j],legs[j][0],legs[j][1],amount);if(amount<=0n)throw Error('ZERO_LEG_OUTPUT');}
+    const input=BigInt(Math.round(size*1e6));
+    record.outputUsdcRaw=amount.toString();
+    record.grossProfitUsd=Number(amount-input)/1e6;
+    record.grossReturnPct=Number((amount-input)*1000000n/input)/10000;
+    record.status='INDICATIVE_QUOTED_NOT_EXECUTABLE';
+   }catch(e){record.status='QUOTE_ERROR';record.error=String(e.message||e).slice(0,180);}
+   routes.push(record);
+   return record;
+  }
+  // Dynamic candidate sizes are derived from observed USDC-side V2 reserves.
+  // They are screening bounds, not a wallet cap or verified optimum.
+  const usdcV2=live.filter(e=>!e.fee&&e.pair.includes('USDC')).map(e=>{
+   const index=e.token0===tokens.USDC.toLowerCase()?0:1;
+   return Number(BigInt(e.reserves[index]))/1e6;
+  }).filter(n=>Number.isFinite(n)&&n>0);
+  const smallestReserve=usdcV2.length?Math.min(...usdcV2):10000;
+  const sizeCandidates=[0.001,0.005,0.02].map(f=>Math.max(1,Math.min(25000,Math.round(smallestReserve*f*100)/100)));
+  const sizes=[...new Set(sizeCandidates)].sort((a,b)=>a-b);
+  // All 27 venue combinations in both triangular directions, with one
+  // baseline probe each. Refine only the strongest gross-return candidates.
+  const candidates=[];
+  for(const legs of cycles){
+   const options=legs.map(([a,b])=>live.filter(e=>e.pair===a+'/'+b||e.pair===b+'/'+a));
+   if(!options.every(o=>o.length))continue;
+   for(const a of options[0])for(const b of options[1])for(const c of options[2])candidates.push({legs,combo:[a,b,c]});
+  }
+  const baseline=[];
+  for(const candidate of candidates){
+   if(quoteCalls>=capQuotes)break;
+   const row=await probe(candidate.legs,candidate.combo,sizes[0]);
+   if(row.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE')baseline.push({...candidate,score:row.grossProfitUsd});
+  }
+  baseline.sort((a,b)=>b.score-a.score);
+  for(const candidate of baseline.slice(0,8)){
+   for(const size of sizes.slice(1)){
+    if(quoteCalls>=capQuotes)break;
+    await probe(candidate.legs,candidate.combo,size);
    }
   }
+  const bestByGross=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE').sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd).slice(0,10);
   const quoted=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE');
-  return {success:true,stage:'MULTI_TOKEN_TRIANGULAR_INDICATIVE_QUOTES',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  return {success:true,stage:'DYNAMIC_BIDIRECTIONAL_TRIANGULAR_SCREENING',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,sizeCandidatesUsdc:sizes,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','DYNAMIC_SIZES_ARE_HEURISTIC_NOT_OPTIMIZED','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
  }
  app.get('/api/market-graph/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false}}));
  app.get('/api/market-graph/run',(req,res)=>{
