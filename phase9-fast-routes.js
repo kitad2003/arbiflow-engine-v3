@@ -2,7 +2,7 @@
 const {Interface}=require('ethers');
 const phase92=require('./phase92-trigger');
 const phase91=require('./phase91-events');
-const TOKENS={USDC:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',WETH:'0x4200000000000000000000000000000000000006',DAI:'0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'};
+const TOKENS={USDC:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',WETH:'0x4200000000000000000000000000000000000006',DAI:'0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',cbBTC:'0xcbB7C0000aB88B473b1f5aFD9ef808440eed33Bf',USDT:'0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'};
 const VENUES=[
  {name:'UNISWAP_V3_500',factory:'0x33128a8fC17869897dcE68Ed026d694621f6FDfD',quoter:'0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',fee:500},
  {name:'UNISWAP_V3_3000',factory:'0x33128a8fC17869897dcE68Ed026d694621f6FDfD',quoter:'0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',fee:3000},
@@ -13,11 +13,11 @@ VENUES.push(AERO);
 const af=new Interface(['function getPool(address,address,bool) view returns(address)']);
 const ar=new Interface(['function getReserves(address,address,bool,address) view returns(uint256,uint256)','function getAmountsOut(uint256,(address from,address to,bool stable,address factory)[]) view returns(uint256[])']);
 const f=new Interface(['function getPool(address,address,uint24) view returns(address)']);
-const erc20=new Interface(['function balanceOf(address) view returns(uint256)']);
+const erc20=new Interface(['function balanceOf(address) view returns(uint256)','function decimals() view returns(uint8)']);
 const p=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function liquidity() view returns(uint128)']);
 const q=new Interface(['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns(uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)']);
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,140);
-const BUILD='9.7.1';
+const BUILD='9.8.0';
 const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false,atomicSimulation:false};
 async function mapLimit(items,limit,fn){const results=new Array(items.length);let next=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const i=next++;try{results[i]=await fn(items[i],i)}catch(e){results[i]={error:err(e)}}}}));return results}
 function mount(app,{getBaseChain,rpc}){
@@ -26,7 +26,9 @@ function mount(app,{getBaseChain,rpc}){
   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
   const block=await rpc(chain,'eth_blockNumber',[]);
   const call=async(to,iface,fn,args)=>iface.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},block]));
-  const markets=['WETH','DAI'];
+  const markets=['WETH','DAI','cbBTC','USDT'];
+  const tokenDecimals={};
+  for(const asset of markets){const [decimals]=await call(TOKENS[asset],erc20,'decimals',[]);const d=Number(decimals);if(!Number.isInteger(d)||d<0||d>36)throw Error('INVALID_TOKEN_DECIMALS_'+asset);tokenDecimals[asset]=d;}
   const minUsd=500,maxUsd=50000;
   const minReserveUsdc=BigInt(minUsd*10)*1000000n;
   const pools=await mapLimit(markets.flatMap(asset=>VENUES.map(v=>({...v,asset}))),2,async v=>{
@@ -55,7 +57,7 @@ function mount(app,{getBaseChain,rpc}){
      const input=BigInt(Math.round(sizeUsdc*1e6));
      quoteCalls++;
      const weth=await quote(buy,TOKENS.USDC,TOKENS[buy.asset],input);
-     if(weth<=0n)throw Error('ZERO_WETH_QUOTE');
+     if(weth<=0n)throw Error('ZERO_ASSET_QUOTE');
      quoteCalls++;
      const usdc=await quote(sell,TOKENS[buy.asset],TOKENS.USDC,weth);
      const grossProfitUsd=Number(usdc-input)/1e6;
@@ -64,7 +66,7 @@ function mount(app,{getBaseChain,rpc}){
     }catch(e){const result={sizeUsdc,error:err(e)};samples.push(result);return result}
    }
    const screening=await sample(minUsd);
-   const sane=buy.asset!=='DAI'||(BigInt(screening.wethOutputRaw||0)>0n&&Number(BigInt(screening.wethOutputRaw||0))/1e18>=minUsd*0.95&&Number(BigInt(screening.wethOutputRaw||0))/1e18<=minUsd*1.05);
+   const sane=!['DAI','USDT'].includes(buy.asset)||(BigInt(screening.wethOutputRaw||0)>0n&&Number(BigInt(screening.wethOutputRaw||0))/10**tokenDecimals[buy.asset]>=minUsd*0.95&&Number(BigInt(screening.wethOutputRaw||0))/10**tokenDecimals[buy.asset]<=minUsd*1.05);
    const promising=sane&&Number.isFinite(screening.grossSpreadPct)&&screening.grossSpreadPct>0;
    if(promising)for(const size of initial.filter(x=>x!==minUsd))await sample(size);
    const ranked=()=>samples.filter(s=>Number.isFinite(s.grossProfitUsd)).sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd);
@@ -81,7 +83,7 @@ function mount(app,{getBaseChain,rpc}){
    const best=ranked()[0];
    return {...base,status:best?'INDICATIVE_ONLY':'QUOTE_FAILED',sizeUsdc:best?.sizeUsdc??null,grossProfitUsd:best?.grossProfitUsd??null,grossSpreadPct:best?.grossSpreadPct??null,wethOutputRaw:best?.wethOutputRaw,usdcReturnedRaw:best?.usdcReturnedRaw,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screening:{sizeUsdc:minUsd,passed:promising,criterion:'POSITIVE_GROSS_SPREAD_AND_STABLECOIN_SANITY_AT_MIN_SIZE',stablecoinSanityPassed:sane},samples,reason:'GAS_SLIPPAGE_FLASH_ELIGIBILITY_AND_ATOMIC_EXECUTION_UNVERIFIED'};
   });
-  return {success:true,stage:'PHASE971_DYNAMIC_V3_MONITORING_DIAGNOSTICS',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
+  return {success:true,stage:'PHASE98_EXPANDED_MARKET_DIAGNOSTICS',build:BUILD,chainId:8453,blockNumber:Number(BigInt(block)),concurrency:{poolDiscovery:2,routeQuoting:2},venuesChecked:VENUES.length,marketsChecked:markets,tokenDecimals,minUsdcReserveUsd:Number(minReserveUsdc)/1e6,poolExclusions:pools.filter(x=>x.status==='INSUFFICIENT_USDC_RESERVE').length,livePools:live.length,livePoolsByAsset:Object.fromEntries(markets.map(asset=>[asset,live.filter(p=>p.asset===asset).length])),pools,routeCount:routes.length,quoteCalls,tradeSizeRange:{minUsd,maxUsd,method:'SCREEN_THEN_ADAPTIVE_REFINEMENT'},screenedOutRoutes:routes.filter(r=>r.screening&&!r.screening.passed).length,positiveIndicativeRoutes:routes.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,limitations:['USDC_BALANCE_GATE_NOT_FULL_DEPTH_PROOF','QUOTES_NOT_ATOMIC','NO_GAS_OR_SLIPPAGE_NETTING','FLASH_LOAN_ELIGIBILITY_UNVERIFIED','NO_EXECUTION'],safety};
  }
  async function eventRequote(event){
   if(state.running)return;
