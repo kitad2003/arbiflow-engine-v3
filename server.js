@@ -9967,3 +9967,6 @@ require('./phase86-liquidity').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=
 
 // Phase 8.7: manual indexed liquidity discovery; preserves Phase 8.6.1 and prior routes.
 require('./phase87-indexed-discovery').mount(app);
+
+// Phase 8.8: independent manual on-chain Base pool inventory.
+require('./phase88-onchain-inventory').mount(app,{getBaseChain:()=>MC4750_CHAINS.find(c=>c.chainId===8453),rpc:(chain,method,params)=>dexRpcDiagnostic47815(chain,method,params)});
