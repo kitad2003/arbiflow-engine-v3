@@ -8,11 +8,16 @@ module.exports.mount=(app,{getChain,call})=>{
  const dai={8453:'0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',42161:'0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',10:'0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1'};
  const factories={8453:['0x33128a8fC17869897dcE68Ed026d694621f6FDfD','0x71524B4f93c58fcbF659783284E38825f0622859'],42161:['0x1F98431c8aD98523631AE4a59f267346ea31F984','0xc35DADB65012eC5796536bD9864eD8773aBc74C4'],10:['0x1F98431c8aD98523631AE4a59f267346ea31F984','0xFbc12984689e5f15626Bad03Ad60160Fe98B303C']};
  const state={running:false,runs:0,lastCompletedAt:null,result:null};
+ const lenderByChain={8453:{pool:'0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',dataProvider:'0x0F43731EB8d45A581f4a36DD74F5f358bc90C73A'},42161:{pool:'0x794a61358D6845594F94dc1DB02A252b5b4814aD',dataProvider:'0x243Aa95cAC2a25651eda86e80bEe66114413c43b'},10:{pool:'0x794a61358D6845594F94dc1DB02A252b5b4814aD',dataProvider:'0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654'}};
+ const loanAbi=new Interface(['function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)','function getReserveTokensAddresses(address asset) view returns (address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress)','function balanceOf(address owner) view returns (uint256)']);
+ async function lenderSnapshot(chain,chainId){const conf=lenderByChain[chainId];try{const invoke=async(address,fn,args=[])=>loanAbi.decodeFunctionResult(fn,await call(chain,address.toLowerCase(),loanAbi.encodeFunctionData(fn,args.map(x=>typeof x==='string'?x.toLowerCase():x))));const premium=Number((await invoke(conf.pool,'FLASHLOAN_PREMIUM_TOTAL'))[0]);const token=chain.tokens.USDC;const aToken=String((await invoke(conf.dataProvider,'getReserveTokensAddresses',[token]))[0]);const availableRaw=BigInt((await invoke(token,'balanceOf',[aToken]))[0]);return {status:'RESERVE_OBSERVED_NOT_EXECUTABLE',provider:'AAVE_V3',asset:'USDC',pool:conf.pool,availableUsdc:Number(availableRaw)/1e6,premiumBps:premium,flashLoanEligibility:'NOT_VERIFIED',atomicSimulation:false};}catch(e){return {status:'LENDER_CHECK_FAILED',error:String(e.message||e).slice(0,160),flashLoanEligibility:'NOT_VERIFIED',atomicSimulation:false};}}
+
  const valid=x=>typeof x==='string'&&/^0x[0-9a-fA-F]{40}$/.test(x)&&!/^0x0{40}$/i.test(x);
  const pairs=[['USDC','WETH'],['USDC','DAI'],['WETH','DAI']];
  async function run(chainId){
   const chain=getChain(chainId),f=factories[chainId];if(!chain||!f)throw Error('UNSUPPORTED_CHAIN');
   const tokens={USDC:chain.tokens.USDC,WETH:chain.tokens.WETH,DAI:dai[chainId]};
+  const lender=await lenderSnapshot(chain,chainId);
   const venues=[{name:'UNISWAP_V3_500',factory:f[0],fee:500},{name:'UNISWAP_V3_3000',factory:f[0],fee:3000},{name:'SUSHISWAP_V2',factory:f[1]}];
   const edges=[];
   for(const [a,b] of pairs)for(const v of venues){
@@ -59,7 +64,7 @@ module.exports.mount=(app,{getChain,call})=>{
    return feeAdjusted*reserveOut/(reserveIn*1000n+feeAdjusted);
   }
   async function probe(legs,combo,size){
-   const record={sizeUsdc:size,route:['USDC',...legs.map(l=>l[1])].join('>'),venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',flashLoan:{status:'NOT_VERIFIED',provider:null,availableUsdc:null,premiumBps:null,feeUsd:null,atomicSimulation:false},netProfitUsd:null,qualified:false};
+   const record={sizeUsdc:size,route:['USDC',...legs.map(l=>l[1])].join('>'),venues:combo.map(e=>e.venue),pools:combo.map(e=>e.pool),status:'UNQUOTED',feePolicy:'V2_30_BPS_ASSUMED',flashLoan:{...lender,feeUsd:lender.premiumBps==null?null:size*lender.premiumBps/10000,capacitySufficient:lender.availableUsdc!=null?lender.availableUsdc>=size:false},netProfitUsd:null,qualified:false};
    try{
     let amount=BigInt(Math.round(size*1e6));
     for(let j=0;j<3;j++){const inputRaw=amount.toString();amount=await quote(combo[j],legs[j][0],legs[j][1],amount);record.legs=record.legs||[];record.legs.push({from:legs[j][0],to:legs[j][1],venue:combo[j].venue,pool:combo[j].pool,inputRaw,outputRaw:amount.toString()});if(amount<=0n)throw Error('ZERO_LEG_OUTPUT');}
@@ -67,6 +72,8 @@ module.exports.mount=(app,{getChain,call})=>{
     record.outputUsdcRaw=amount.toString();
     record.grossProfitUsd=Number(amount-input)/1e6;
     record.grossReturnPct=Number((amount-input)*1000000n/input)/10000;
+    record.afterLoanPremiumBeforeGasUsd=record.flashLoan.feeUsd==null?null:record.grossProfitUsd-record.flashLoan.feeUsd;
+    record.netProfitUsd=null; // Gas, swap execution, flash eligibility and atomic simulation are unverified.
     record.status='INDICATIVE_QUOTED_NOT_EXECUTABLE';
    }catch(e){record.status='QUOTE_ERROR';record.error=String(e.message||e).slice(0,180);}
    routes.push(record);
@@ -98,6 +105,7 @@ module.exports.mount=(app,{getChain,call})=>{
   for(const candidate of candidates){
    if(quoteCalls+3>capQuotes)break;
    const depth=routeDepth(candidate.legs,candidate.combo);
+   if(lender.availableUsdc==null||lender.availableUsdc<minimumTradeUsdc){skippedShallowRoutes.push({reason:'LENDER_CAPACITY_NOT_VERIFIED',lenderStatus:lender.status});break;}
    if(depth!==null&&depth<minimumTradeUsdc){
     skippedShallowRoutes.push({route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reason:'V2_RESERVE_TOO_SHALLOW',estimatedSafeUsdc:depth});
     continue;
@@ -111,6 +119,7 @@ module.exports.mount=(app,{getChain,call})=>{
    const row={route:['USDC',...candidate.legs.map(l=>l[1])].join('>'),venues:candidate.combo.map(e=>e.venue),reserveBasedLimitUsdc:candidate.depth,sizesTested:[candidate.initialSize],stoppedReason:null};
    for(const multiplier of [2,5,10]){
     const size=Math.round(candidate.initialSize*multiplier);
+    if(size>lender.availableUsdc){row.stoppedReason='LENDER_LIQUIDITY_LIMIT';break;}
     if(size>maxProbeUsdc){row.stoppedReason='PROBE_SAFETY_CAP';break;}
     if(candidate.depth!==null&&size>candidate.depth){row.stoppedReason='V2_RESERVE_SCREEN';break;}
     if(quoteCalls+3>capQuotes){row.stoppedReason='QUOTE_BUDGET';break;}
@@ -124,7 +133,7 @@ module.exports.mount=(app,{getChain,call})=>{
   const sizes=[...new Set(routes.map(r=>r.sizeUsdc))].sort((a,b)=>a-b);
   const bestByGross=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE').sort((a,b)=>b.grossProfitUsd-a.grossProfitUsd).slice(0,10);
   const quoted=routes.filter(r=>r.status==='INDICATIVE_QUOTED_NOT_EXECUTABLE');
-  return {success:true,stage:'LARGE_TRADE_FLASH_LOAN_DIAGNOSTICS',chainId,tokens:Object.keys(tokens),poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,minimumTradeUsdc,maximumProbeUsdc:maxProbeUsdc,sizeCandidatesUsdc:sizes,skippedShallowRoutes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['FLASH_LOAN_PROVIDER_AND_CAPACITY_NOT_VERIFIED','FLASH_LOAN_PREMIUM_NOT_VERIFIED','NO_FLASH_LOAN_EXECUTOR_INTEGRATION','QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','V3_ONLY_ROUTES_HAVE_NO_USD_DEPTH_VERIFICATION','LARGE_TRADE_PROBES_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  return {success:true,stage:'LARGE_TRADE_FLASH_LOAN_DIAGNOSTICS',chainId,tokens:Object.keys(tokens),lender,loanPremiumIncludedInIndicativeBreakdown:true,netProfitVerified:false,atomicSimulation:false,poolChecks:edges.length,livePools:live.length,byPair,triangularTopologyAvailable:Object.values(byPair).every(n=>n>0),triangularCyclesQuoted:quoted.length,triangularCyclesAttempted:routes.length,venueCombinations:candidates.length,quoteCalls,quoteBudget:capQuotes,minimumTradeUsdc,maximumProbeUsdc:maxProbeUsdc,sizeCandidatesUsdc:sizes,skippedShallowRoutes,perRouteSizing,bestByGross,indicativePositiveGross:quoted.filter(r=>r.grossProfitUsd>0).length,qualified:0,alertsEmitted:0,routes,edges,limitations:['FLASH_LOAN_ELIGIBILITY_NOT_VERIFIED','RESERVE_BALANCE_NOT_GUARANTEED_FLASH_BORROWABLE','NO_FLASH_LOAN_EXECUTOR_INTEGRATION','QUOTES_NOT_ATOMIC_EXECUTION','V2_30_BPS_FEE_ASSUMED','NO_GAS_OR_FLASH_LOAN_FEE_NETTING','NO_ATOMIC_SIMULATION','V3_ONLY_ROUTES_HAVE_NO_USD_DEPTH_VERIFICATION','LARGE_TRADE_PROBES_NOT_TRUE_OPTIMIZATION','NOT_ALL_SIZES_TESTED_ON_ALL_ROUTES','NO_ALERTS_UNTIL_VERIFIED_NET_PROFIT'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
  }
  app.get('/api/market-graph/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false}}));
  app.get('/api/market-graph/run',(req,res)=>{
