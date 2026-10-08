@@ -1,0 +1,1 @@
+4.78.17: Manual Base Uniswap V3 vs PancakeSwap V3 two-leg quote screening. Run /api/dex-independent/run, await completion, then /api/dex-independent/v3-cross-dex/run?size=100 and /api/dex-independent/v3-cross-dex/status. Quoter compatibility, profit and execution remain unverified. Read-only.

@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.16";
+const VERSION = "4.78.17";
 
 /*
 =========================================================
@@ -9652,6 +9652,53 @@ app.get('/api/dex-independent/quoter-verification/run',(req,res)=>{
  setImmediate(async()=>{try{dexQuoterProbe47815.result=await dexProbeQuoter47815();}catch(e){dexQuoterProbe47815.result={error:String(e.message||e).slice(0,200)};}finally{dexQuoterProbe47815.running=false;dexQuoterProbe47815.lastCompletedAt=new Date().toISOString();}});
  res.json({success:true,version:VERSION,status:'STARTED_BACKGROUND',statusRoute:'/api/dex-independent/quoter-verification/status',readOnly:true});
 });
+
+// 4.78.17: manual Base V3-to-V3 two-leg quote screening, no trading.
+// Pancake V3 QuoterV2 compatibility is tested per quote; failures are explicit.
+const dexV3Pairs47817={running:false,runs:0,lastCompletedAt:null,result:null};
+async function dexV3PairQuote47817(c,quoter,tokenIn,tokenOut,fee,amountIn){
+ const args={tokenIn:dexNormalize47814(tokenIn),tokenOut:dexNormalize47814(tokenOut),fee:Number(fee),amountIn,sqrtPriceLimitX96:0};
+ const data=dexQuoterInterface47813.encodeFunctionData('quoteExactInputSingle',[args]);
+ const raw=await dexCall4780(c,dexNormalize47814(quoter),data);
+ const decoded=dexQuoterInterface47813.decodeFunctionResult('quoteExactInputSingle',raw);
+ const out=BigInt(decoded[0]); if(out<=0n)throw Error('ZERO_QUOTER_OUTPUT'); return out;
+}
+async function dexV3Cross47817(size){
+ const c=MC4750_CHAINS.find(x=>x.chainId===8453);
+ const snap=dexVerified4788.get(8453),age=snap?Date.now()-Date.parse(snap.observedAt):null;
+ if(!snap||age<0||age>DEX_SNAPSHOT_MAX_AGE_MS_4788)throw Error('FRESH_BASE_DISCOVERY_REQUIRED');
+ const uni=snap.venues.filter(v=>v.status==='POOL_LIVE'&&v.name.startsWith('UNISWAP_V3'));
+ const pancake=snap.venues.filter(v=>v.status==='POOL_LIVE'&&v.name.startsWith('PANCAKESWAP_V3'));
+ if(!uni.length||!pancake.length)throw Error('LIVE_UNISWAP_AND_PANCAKE_POOLS_REQUIRED');
+ const quoterUni=dexNormalize47814(UNISWAP_V3_QUOTER_V1_4490[c.key]);
+ const quoterPancake=dexNormalize47814(PANCAKESWAP_V3_BASE.quoter);
+ const amountIn=BigInt(size)*1000000n,rows=[];
+ for(const u of uni)for(const p of pancake)for(const direction of ['UNISWAP_BUY_PANCAKE_SELL','PANCAKE_BUY_UNISWAP_SELL']){
+  const buy=direction.startsWith('UNISWAP')?{venue:u,quoter:quoterUni}:{venue:p,quoter:quoterPancake};
+  const sell=direction.startsWith('UNISWAP')?{venue:p,quoter:quoterPancake}:{venue:u,quoter:quoterUni};
+  const row={direction,uniswapPool:u.pool,uniswapFeeTier:Number(u.feeTier),pancakePool:p.pool,pancakeFeeTier:Number(p.feeTier),inputUsdc:size,qualified:false,atomicSimulationVerified:false,gasUsd:null,netProfitUsd:null};
+  try{
+   const weth=await dexV3PairQuote47817(c,buy.quoter,c.tokens.USDC,c.tokens.WETH,buy.venue.feeTier,amountIn);
+   const usdc=await dexV3PairQuote47817(c,sell.quoter,c.tokens.WETH,c.tokens.USDC,sell.venue.feeTier,weth);
+   Object.assign(row,{firstLegWethOut:weth.toString(),finalUsdcBeforeGas:Number(usdc)/1e6,grossBeforeGasUsd:Number(usdc-amountIn)/1e6,bothQuotersReturned:true});
+  }catch(e){Object.assign(row,{bothQuotersReturned:false,error:String(e.shortMessage||e.message||e).slice(0,200)});}
+  rows.push(row);
+  if(Date.now()<dexRpcGate4783.cooldownUntil||Date.now()<rpcBudget4789.blockedUntil)break;
+ }
+ return {success:true,version:VERSION,stage:'BASE_V3_TO_V3_READ_ONLY_TWO_LEG_QUOTER_SCREEN',chainId:8453,sizeUsd:size,snapshotAgeMs:age,uniswapQuoter:quoterUni,pancakeQuoter:quoterPancake,results:rows,successfulTwoLegQuotes:rows.filter(x=>x.bothQuotersReturned).length,qualified:0,alertsEmitted:0,limitations:['PANCAKE_QUOTER_ABI_NOT_YET_LIVE_VERIFIED','QUOTER_CONTRACT_IDENTITIES_NOT_INDEPENDENTLY_VERIFIED','NO_ATOMIC_SIMULATION','NO_GAS_COST','NO_NET_PROFIT_VALIDATION','QUOTES_NOT_BLOCK_PINNED','IN_MEMORY_DISCOVERY_EXPIRES'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get('/api/dex-independent/v3-cross-dex/status',(req,res)=>res.json({success:true,version:VERSION,...dexV3Pairs47817,safety:{readOnly:true,mainnetBroadcast:false}}));
+app.get('/api/dex-independent/v3-cross-dex/run',(req,res)=>{
+ if(dexV3Pairs47817.running)return res.status(409).json({success:false,error:'QUOTE_CHECK_ALREADY_RUNNING'});
+ const size=Number(req.query.size||100);
+ if(![100,500,1000].includes(size))return res.status(400).json({success:false,error:'SIZE_MUST_BE_100_500_OR_1000'});
+ const snap=dexVerified4788.get(8453);
+ if(!snap||Date.now()-Date.parse(snap.observedAt)>DEX_SNAPSHOT_MAX_AGE_MS_4788)return res.status(409).json({success:false,error:'RUN_DISCOVERY_FIRST_SNAPSHOT_MUST_BE_UNDER_10_MINUTES'});
+ dexV3Pairs47817.running=true;dexV3Pairs47817.runs++;
+ setImmediate(async()=>{try{dexV3Pairs47817.result=await dexV3Cross47817(size);}catch(e){dexV3Pairs47817.result={success:false,version:VERSION,error:String(e.message||e).slice(0,200)};}finally{dexV3Pairs47817.running=false;dexV3Pairs47817.lastCompletedAt=new Date().toISOString();}});
+ res.json({success:true,version:VERSION,status:'STARTED_BACKGROUND',statusRoute:'/api/dex-independent/v3-cross-dex/status',readOnly:true});
+});
+
 app.get('/api/dex-independent/cross-dex-quotes/status',(req,res)=>res.json({success:true,version:VERSION,running:dexQuotes47813.running,runs:dexQuotes47813.runs,lastCompletedAt:dexQuotes47813.lastCompletedAt,result:dexQuotes47813.lastResult,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get('/api/dex-independent/cross-dex-quotes/run',(req,res)=>{
  if(dexQuotes47813.running)return res.status(409).json({success:false,error:'QUOTE_CHECK_ALREADY_RUNNING'});
