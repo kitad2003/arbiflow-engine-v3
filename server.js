@@ -90,7 +90,7 @@ const RPC_URLS = {
   celo: process.env.CELO_RPC_URL || ""
 };
 
-const VERSION = "4.78.11";
+const VERSION = "4.78.12";
 
 /*
 =========================================================
@@ -9510,6 +9510,45 @@ function dexPriceComparison4787(){
  return {success:true,version:VERSION,stage:"INDICATIVE_CROSS_DEX_PRICE_COMPARISON",source:"LAST_VERIFIED_PER_CHAIN_SNAPSHOT_IN_MEMORY",lastCompletedAt:dex4780.lastCompletedAt,ageMs:null,fresh,allChainsFresh:chains.every(c=>c.snapshotStatus==="FRESH"),requiresFreshScan:chains.some(c=>c.requiresFreshScan),chains,assumptions:["WETH_DECIMALS_18_USDC_DECIMALS_6_MUST_BE_VALIDATED","V3_SPOT_EXCLUDES_TICK_CROSSING_AND_PRICE_IMPACT","V2_SPOT_EXCLUDES_SWAP_FEES_AND_PRICE_IMPACT","CROSS_VENUE_SPOT_SPREAD_IS_NOT_EXECUTABLE_ARBITRAGE"],limitations:["SNAPSHOTS_IN_MEMORY_LOST_ON_PROCESS_RESTART","NO_EXECUTABLE_V3_QUOTER_CALLS","NO_ROUTER_CALLDATA","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
 }
 app.get("/api/dex-independent/prices",(req,res)=>res.json(dexPriceComparison4787()));
+// 4.78.12: deterministic V2 reserve-math probe; NO live trade quote or execution claim.
+// Only V2 constant-product calculations are supported. V3 needs a verified quoter
+// and tick-crossing simulation before an executable cross-venue route can be claimed.
+const DEX_QUOTE_SIZES_47812=Object.freeze([100,500,1000]);
+function dexV2AmountOut47812(amountIn,reserveIn,reserveOut,feeBps=30n){
+ if(amountIn<=0n||reserveIn<=0n||reserveOut<=0n||feeBps>=10000n) return 0n;
+ const net=amountIn*(10000n-feeBps);
+ return net*reserveOut/(reserveIn*10000n+net);
+}
+function dexV2Screen47812(c,snap){
+ const venues=(snap?.venues||[]).filter(v=>v.kind==='V2'&&v.liquidityEvidence?.kind==='V2_RESERVES'&&v.liquidityEvidence.nonzero);
+ const weth0=BigInt(c.tokens.WETH.toLowerCase())<BigInt(c.tokens.USDC.toLowerCase());
+ return venues.map(v=>{
+  const r0=BigInt(v.liquidityEvidence.reserve0),r1=BigInt(v.liquidityEvidence.reserve1);
+  const usdcReserve=weth0?r1:r0,wethReserve=weth0?r0:r1;
+  const probes=DEX_QUOTE_SIZES_47812.map(usd=>{
+   const usdcIn=BigInt(usd)*1000000n;
+   const wethOut=dexV2AmountOut47812(usdcIn,usdcReserve,wethReserve);
+   const usdcBack=dexV2AmountOut47812(wethOut,wethReserve,usdcReserve);
+   const back=Number(usdcBack)/1e6;
+   return {inputUsdc:usd,modeledWethOut:wethOut.toString(),modeledSamePoolRoundTripUsdc:back,modeledSamePoolRoundTripLossUsd:Number((usd-back).toFixed(6)),note:'RESERVE_MATH_ONLY_NOT_A_LIVE_QUOTE'};
+  });
+  return {venue:v.name,pool:v.pool,feeBpsAssumed:30,feeVerified:false,tokenDecimalsAssumed:{WETH:18,USDC:6},probes};
+ });
+}
+function dexQuoteReadiness47812(){
+ const indicative=dexPriceComparison4787();
+ const chains=MC4750_CHAINS.map(c=>{
+  const snap=dexVerified4788.get(Number(c.chainId));
+  const age=snap?Date.now()-Date.parse(snap.observedAt):null;
+  const fresh=age!==null&&age>=0&&age<=DEX_SNAPSHOT_MAX_AGE_MS_4788;
+  const prices=indicative.chains.find(x=>x.chainId===c.chainId);
+  const candidates=fresh?(prices?.comparisons||[]).filter(x=>x.indicativeSpotDifferencePct>0.5).map(x=>({...x,qualified:false,riskLevel:'UNASSESSED',estimatedNetProfitUsd:null,gasUsd:null,reason:'V3_EXECUTABLE_QUOTER_AND_ATOMIC_SIMULATION_NOT_IMPLEMENTED'})):[];
+  return {chainId:c.chainId,name:c.name,snapshotStatus:!snap?'UNAVAILABLE':fresh?'FRESH':'STALE',snapshotAgeMs:age,indicativeSpreadOverHalfPercent:candidates.length,indicativeCandidates:candidates,constantProductV2Probes:fresh?dexV2Screen47812(c,snap):[],executableCrossDexQuotes:0,qualified:0};
+ });
+ return {success:true,version:VERSION,stage:'READ_ONLY_QUOTE_READINESS_AND_V2_RESERVE_MATH',scope:'LAST_VERIFIED_IN_MEMORY_SNAPSHOTS',sizesUsd:DEX_QUOTE_SIZES_47812,feePolicy:'V2_30_BPS_ASSUMED_NOT_VERIFIED',alertPolicy:{minimumIndicativeSpreadPct:0.5,allowedRisk:['LOW','MEDIUM'],requiresPositiveVerifiedNetProfit:true,alertsEmitted:0},chains,limitations:['NO_VERIFIED_V3_QUOTER','NO_CROSS_DEX_EXECUTABLE_ROUNDTRIP','V2_FEE_NOT_VERIFIED','NO_TICK_CROSSING_SIMULATION','NO_L2_FULL_GAS_ESTIMATE','NO_ATOMIC_SIMULATION','IN_MEMORY_SNAPSHOTS_EXPIRE_AFTER_10_MINUTES'],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}};
+}
+app.get('/api/dex-independent/quote-readiness',(req,res)=>res.json(dexQuoteReadiness47812()));
+
 app.get("/api/rpc-budget/trace",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",byChain:rpcTrace47810.byChain,byCaller:rpcTrace47810.byCaller,byMethod:rpcTrace47810.byMethod,responses:rpcTrace47810.responses,recent429:rpcTrace47810.recent429,warning:rpcTrace47810.unmonitoredTransportWarning,containsSecrets:false,safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/rpc-budget/status",(req,res)=>res.json({success:true,version:VERSION,scope:"GLOBAL_FETCH_ALCHEMY_ONLY",monthlyQuotaMeasured:false,cuPerSecondMeasured:false,requests:rpcBudget4789.requests,rateLimited:rpcBudget4789.rateLimited,methods:rpcBudget4789.methods,minimumSpacingMs:rpcBudget4789.minimumSpacingMs,last429:rpcBudget4789.last429,cooldownRemainingMs:Math.max(0,rpcBudget4789.blockedUntil-Date.now()),note:"Other RPC transports and external apps are not covered",safety:{readOnly:true,mainnetBroadcast:false}}));
 app.get("/api/dex-independent/status",(req,res)=>res.json({success:true,version:VERSION,stage:"POOL_EVIDENCE_ONLY",...dex4780,rpcDiagnostics:{requests:dexRpcGate4783.requests,rateLimited:dexRpcGate4783.rateLimited,retries:dexRpcGate4783.retries,cacheHits:dexRpcGate4783.cacheHits,abortedScans:dexRpcGate4783.abortedScans,lastRateLimitAt:dexRpcGate4783.lastRateLimitAt,freeTierMode:true,backgroundHeartbeatIntervalMs:mc4750.pollIntervalMs,autoDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DISCOVERY==="true",autoDexDiscoveryEnabled:process.env.ARBIFLOW_AUTO_DEX_DISCOVERY==="true",cooldownRemainingMs:Math.max(0,dexRpcGate4783.cooldownUntil-Date.now())},limitations:["NO_INDEPENDENT_EXECUTABLE_QUOTES","NO_FLASH_LIQUIDITY_VERIFICATION","NO_DYNAMIC_OPTIMAL_SIZING","NO_ATOMIC_SIMULATION","L2_FULL_GAS_NOT_VERIFIED"],safety:{readOnly:true,executionEligible:false,mainnetBroadcast:false,fundsMovedOnMainnet:false}}));
