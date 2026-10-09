@@ -4,7 +4,8 @@ pragma solidity ^0.8.24;
 interface IERC20Atomic {function balanceOf(address) external view returns(uint256);function approve(address,uint256) external returns(bool);}
 interface IERC3156Atomic {function maxFlashLoan(address) external view returns(uint256);function flashLoan(address,address,uint256,bytes calldata) external returns(bool);}
 interface IUniV3RouterAtomic {
- function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) external payable returns(uint256 amountOut);
+ struct ExactInputSingleParams {address tokenIn;address tokenOut;uint24 fee;address recipient;uint256 deadline;uint256 amountIn;uint256 amountOutMinimum;uint160 sqrtPriceLimitX96;}
+ function exactInputSingle(ExactInputSingleParams calldata params) external payable returns(uint256 amountOut);
 }
 contract GhoAtomicExecutor12979 {
  address public immutable owner; address public immutable lender;address public immutable gho;address public immutable router;
