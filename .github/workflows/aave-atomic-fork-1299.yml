@@ -1,0 +1,29 @@
+name: ArbiFlow 12.9.9 Aave Atomic Fork
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveForkAtomicTest1299.js'
+      - 'atomic-mock-contracts/AaveForkReceiver1299.sol'
+      - 'hardhat.aave1299.config.js'
+      - '.github/workflows/aave-atomic-fork-1299.yml'
+jobs:
+  fork-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require private Base RPC URL
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL is missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run local fork atomic failure test
+        run: npm run test:aave-atomic-fork
