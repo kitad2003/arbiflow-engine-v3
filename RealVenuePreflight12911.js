@@ -21,11 +21,11 @@ async function main(){
   const code=await p.getCode(row.address);assert.notEqual(code,'0x',row.venue+'_POOL_MISSING');
   const pool=new ethers.Contract(row.address,abi,p);
   const [a,b,fee]=await Promise.all([pool.token0(),pool.token1(),pool.fee()]);
-  assert.deepEqual([a.toLowerCase(),b.toLowerCase()].sort(),[USDC,WETH].sort(),row.venue+'_WRONG_PAIR');
-  assert.equal(fee,row.expectedFee,row.venue+'_WRONG_FEE_TIER');
+  assert.deepEqual([a.toLowerCase(),b.toLowerCase()].sort(),[USDC,WETH].sort(),row.venue+'_WRONG_PAIR actual='+a+','+b);
+  assert.equal(fee,row.expectedFee,row.venue+'_WRONG_FEE_TIER actual='+fee.toString()+' expected='+row.expectedFee.toString());
   results.push({venue:row.venue,pool:row.address,feeTier:Number(fee),pairVerified:true});
  }
  console.log(JSON.stringify({success:true,build:'12.9.11',mode:'DIRECT_RPC_REAL_POOL_PREFLIGHT',block,pools:results,realVenuePoolReadsVerified:true,swapExecutionTested:false,flashLoanExecuted:false,atomicRoundTripVerified:false,gasUnitsMeasured:null,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false}));
  p.destroy();
 }
-main().catch(e=>{console.error('VENUE_PREFLIGHT_FAILED',String(e?.shortMessage||e?.code||e?.message||e).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,220));process.exitCode=1});
+main().catch(e=>{console.error('VENUE_PREFLIGHT_FAILED',String(e?.message||e?.shortMessage||e?.code||e).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,220));process.exitCode=1});
