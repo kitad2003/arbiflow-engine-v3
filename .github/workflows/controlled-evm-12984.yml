@@ -1,0 +1,28 @@
+name: ArbiFlow Controlled Atomic EVM
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ControlledEvm12984.js'
+      - 'atomic-mock-contracts/ControlledEvm12984.sol'
+      - '.github/workflows/controlled-evm-12984.yml'
+jobs:
+  controlled-atomic-evm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check ControlledEvm12984.js
+      - run: npm run test:controlled-evm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: controlled-evm-12984
+          path: arbiflow-controlled-evm-12984.json
+          if-no-files-found: warn
