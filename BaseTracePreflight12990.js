@@ -51,7 +51,7 @@ async function main() {
     for(let i=0;i<TARGET_INDEX;i++){
      const tx=result.transactions[i];
      try{
-      const diff=await rpc.send('debug_traceTransaction',[tx.hash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
+      const diff=await rpc.send('debug_traceTransaction',[tx.hash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'10s'}]);
       const check=evaluateTrace(diff);
       if(previousDiff)result.traceContinuity.push({from:i-1,to:i,...continuity(previousDiff,diff)});
       previousDiff=check.traceShapeValid?diff:null;
@@ -59,7 +59,7 @@ async function main() {
      }catch(e){result.prefixTraces.push({index:i,hash:tx.hash,transactionType:tx.type,traceShapeValid:false,error:short(e)});}
     }
     const trace=await rpc.send('debug_traceTransaction',[TARGET_HASH,
-      {tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
+      {tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'10s'}]);
     const validated=evaluateTrace(trace);
     if(previousDiff && validated.traceShapeValid){
       result.traceContinuity.push({from:TARGET_INDEX-1,to:TARGET_INDEX,...continuity(previousDiff,trace)});
@@ -74,7 +74,7 @@ async function main() {
     // it is not a complete executable fork checkpoint.
     try {
       const snapshot=await rpc.send('debug_traceTransaction',[TARGET_HASH,
-        {tracer:'prestateTracer',timeout:'20s'}]);
+        {tracer:'prestateTracer',timeout:'10s'}]);
       result.targetPrestateSnapshot=inspect(snapshot);
     }catch(e){result.targetPrestateSnapshot={available:false,fullCheckpoint:false,error:short(e)};}
    }catch(e){result.rpcTraceSupported=false;result.traceError=short(e)}
