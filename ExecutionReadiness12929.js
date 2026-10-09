@@ -11,8 +11,8 @@ async function main(){
  assert.equal(hre.network.name,'hardhat','FORK_ONLY');
  assert(/^https:\/\//.test(process.env.BASE_RPC_URL||''),'PRIVATE_BASE_RPC_REQUIRED');
  const e=hre.ethers;assert.equal((await e.provider.getNetwork()).chainId,8453n);
- const sizes=(process.env.READINESS_LOAN_SIZES_USDC||'1000,5000,10000,25000,50000').split(',').map(Number);
- assert(sizes.length>=1&&sizes.length<=5&&sizes.every(x=>[1000,5000,10000,25000,50000].includes(x)));
+ const sizes=(process.env.READINESS_LOAN_SIZES_USDC||'10000,25000,50000,100000,250000,500000,1000000').split(',').map(Number);
+ assert(sizes.length>=1&&sizes.length<=7&&sizes.every(x=>[10000,25000,50000,100000,250000,500000,1000000].includes(x)));
  const live=await run(process.env.BASE_RPC_URL,sizes),ordering=rank(live.rows);
  const candidates=ordering.ranked.filter(x=>x.rankable&&x.observedLiquidityCoversPrincipal);
  assert(candidates.length>0,'NO_RANKABLE_LIQUIDITY_SUPPORTED_ROUTES');
