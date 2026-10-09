@@ -59,6 +59,10 @@ async function main() {
     const trace=await rpc.send('debug_traceTransaction',[TARGET_HASH,
       {tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
     const validated=evaluateTrace(trace);
+    if(previousDiff && validated.traceShapeValid){
+      result.traceContinuity.push({from:TARGET_INDEX-1,to:TARGET_INDEX,...continuity(previousDiff,trace)});
+    }
+    result.continuitySummary={pairsChecked:result.traceContinuity.length,contradictions:result.traceContinuity.filter(x=>x.status==='INCONSISTENT').length,comparisonIsPartial:true,provesReconstruction:false};
     result.rpcTraceSupported=true;
     result.traceTargetSuccessful=validated.traceShapeValid;
     result.traceValidation=validated;
