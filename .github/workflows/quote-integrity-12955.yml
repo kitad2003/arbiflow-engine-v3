@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.55 Quote Integrity
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'QuoteIntegrity12955.js'
+      - '.github/workflows/quote-integrity-12955.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-12955
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      INTEGRITY_ROUTE_LIMIT: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run quote integrity audit
+        run: npm run test:quote-integrity
+      - name: Save audit output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quote-integrity-12955
+          path: arbiflow-quote-integrity-12955.json
+          if-no-files-found: warn
