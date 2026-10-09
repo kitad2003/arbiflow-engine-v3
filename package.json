@@ -37,7 +37,8 @@
     "test:atomic-settlement-gas": "hardhat run --config hardhat.aave1299.config.js AtomicSettlementGas12930.js",
     "test:settlement-analysis": "node SettlementAnalysis12931.js",
     "test:dex-pool-discovery": "node DexPoolDiscovery12934.js",
-    "test:multi-pool-discovery": "node MultiPoolDiscovery12935.js"
+    "test:multi-pool-discovery": "node MultiPoolDiscovery12935.js",
+    "test:cross-dex-quotes": "node CrossDexQuotes12936.js"
   },
   "engines": {
     "node": ">=20"
