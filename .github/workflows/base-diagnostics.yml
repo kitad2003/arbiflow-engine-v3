@@ -37,4 +37,8 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Historical trace diagnostic
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          ARBIFLOW_ENABLE_TRACE_PROBE: '1'
+          ARBIFLOW_REQUIRE_HISTORICAL_TRACE: '1'
         run: npm run test:base-trace
