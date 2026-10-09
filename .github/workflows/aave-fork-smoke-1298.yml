@@ -1,5 +1,5 @@
 name: ArbiFlow Base Aave Fork Smoke
-# Re-run after BASE_RPC_URL repository secret was updated again.
+# Retry Aave fork smoke after latest RPC credential update.
 on:
   workflow_dispatch:
   push:
