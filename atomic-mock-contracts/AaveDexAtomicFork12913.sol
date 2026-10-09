@@ -13,8 +13,8 @@ contract AaveDexAtomicFork12913 {
  address constant AERO=0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5;
  address public immutable owner;
  bool private entered;
- struct Plan {uint256 amount;uint256 minWeth;uint256 minUsdc;uint256 minProfit;uint256 deadline;bool uniFirst;}
- error Unauthorized();error InvalidPlan();error BadCallback();error Unprofitable();
+ struct Plan {uint256 amount;uint256 minWeth;uint256 minUsdc;uint256 minProfit;uint256 deadline;bool uniFirst;bool probeAfterSwaps;}
+ error Unauthorized();error InvalidPlan();error BadCallback();error Unprofitable();error BothSwapsReached(uint256 wethReceived,uint256 usdcReceived);
  constructor(){owner=msg.sender;}
  function start(Plan calldata p) external {
   if(msg.sender!=owner||entered)revert Unauthorized();
@@ -39,6 +39,9 @@ contract AaveDexAtomicFork12913 {
     IS12913(AERO).exactInputSingle(IS12913.P(WETH,USDC,100,address(this),p.deadline,wethOut,p.minUsdc,0)):
     IU12913(UNI).exactInputSingle(IU12913.P(WETH,USDC,500,address(this),wethOut,p.minUsdc,0));
   require(usdcOut>=p.minUsdc,"SELL_MIN");
+  // Deliberate fork probe: only reachable after both REAL router calls succeed.
+  // The revert rolls back the complete loan and both swaps.
+  if(p.probeAfterSwaps)revert BothSwapsReached(wethOut,usdcOut);
   // Require profit relative to initial balance and premium, prevents prefund masking losses.
   if(usdcOut<amount+premium+p.minProfit || IT12913(USDC).balanceOf(address(this))<initial+premium+p.minProfit)revert Unprofitable();
   require(IT12913(USDC).approve(POOL,0)&&IT12913(USDC).approve(POOL,amount+premium),"REPAY_APPROVE");
