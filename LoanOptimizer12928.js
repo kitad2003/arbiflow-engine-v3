@@ -33,12 +33,12 @@ async function main(){
 }
 if(require.main===module){
  const rows=[
-  {loanUsdc:5000,direction:'UNI_TO_AERO',quoted:true,afterPremiumBeforeGasRaw:'1000000',spreadGreaterThanHalfPercent:false,liquidityBalanceCoversPrincipal:true},
-  {loanUsdc:1000,direction:'AERO_TO_UNI',quoted:true,afterPremiumBeforeGasRaw:'2000000',spreadGreaterThanHalfPercent:true,liquidityBalanceCoversPrincipal:true},
-  {loanUsdc:50000,direction:'UNI_TO_AERO',quoted:false}
+  {loanUsdc:25000,direction:'UNI_TO_AERO',quoted:true,afterPremiumBeforeGasRaw:'1000000',spreadGreaterThanHalfPercent:false,liquidityBalanceCoversPrincipal:true},
+  {loanUsdc:10000,direction:'AERO_TO_UNI',quoted:true,afterPremiumBeforeGasRaw:'2000000',spreadGreaterThanHalfPercent:true,liquidityBalanceCoversPrincipal:true},
+  {loanUsdc:100000,direction:'UNI_TO_AERO',quoted:false}
  ];
  const test=rank(rows);
- assert.equal(test.ranked[0].loanUsdc,1000);
+ assert.equal(test.ranked[0].loanUsdc,10000);
  assert.equal(test.ranked[2].rankable,false);
  assert(test.ranked.every(x=>!x.qualified&&x.alerts.length===0));
  console.log(JSON.stringify({success:true,build:'12.9.28',unitChecksPassed:3,realQuotesRun:false,qualified:0,alerts:[]}));
