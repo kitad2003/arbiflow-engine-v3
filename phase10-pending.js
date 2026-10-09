@@ -6,6 +6,7 @@ const pendingObservations=require('./phase108-observations');
 const receiptTracker=require('./phase115-receipts');
 const v3Inspector=require('./phase117-v3');
 const pairDiscovery=require('./phase118-pairs');
+const spotDiagnostic=require('./phase120-spot');
 const routerRegistry={
  UNISWAP_ROUTER_02:'0x2626664c2603336e57b271c5c0b26f421741e481',
  AERODROME_ROUTER:'0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43'
@@ -48,7 +49,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'11.9.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ const state={build:'12.0.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
@@ -90,12 +91,13 @@ function mount(app,{getBaseChain,rpc}){
    const swap={router:'UNISWAP_ROUTER_02',method:'exactInputSingle',tokenIn:BASE_USDC,tokenOut:BASE_WETH,fee:500};
    const v3Pool=await v3Inspector.inspect(swap,chain,rpc);
    const samePairPools=v3Pool.status==='POOL_STATE_VERIFIED'?await pairDiscovery.discover({...swap,v3Pool},chain,rpc):null;
-   pairProbe.lastResult={success:true,build:'11.9.0',chainId:8453,probePair:'BASE_USDC_WETH',v3Pool,samePairPools,qualified:0,alerts:[],limitations:['INDEPENDENT_DIAGNOSTIC_NOT_PENDING_TRANSACTION','SAME_DEX_POOLS_NOT_CROSS_DEX','NO_EXECUTABLE_QUOTES','NO_PROFIT_VALIDATION'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
-  }catch(e){pairProbe.failures++;pairProbe.lastError=safeError(e);pairProbe.lastResult={success:false,build:'11.9.0',error:pairProbe.lastError,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
+   const spotObservations=samePairPools?await spotDiagnostic.compare(samePairPools,chain,rpc):null;
+   pairProbe.lastResult={success:true,build:'12.0.0',chainId:8453,probePair:'BASE_USDC_WETH',v3Pool,samePairPools,spotObservations,qualified:0,alerts:[],limitations:['INDEPENDENT_DIAGNOSTIC_NOT_PENDING_TRANSACTION','SAME_DEX_POOLS_NOT_CROSS_DEX','NO_EXECUTABLE_QUOTES','NO_PROFIT_VALIDATION'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  }catch(e){pairProbe.failures++;pairProbe.lastError=safeError(e);pairProbe.lastResult={success:false,build:'12.0.0',error:pairProbe.lastError,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
   finally{pairProbe.running=false;}
   if(res)return res.json(pairProbe.lastResult);
  }
- app.get('/api/phase11/pairs/status',(_req,res)=>res.json({success:true,build:'11.9.0',...pairProbe,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
+ app.get('/api/phase11/pairs/status',(_req,res)=>res.json({success:true,build:'12.0.0',...pairProbe,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  app.get('/api/phase11/pairs/probe',async(_req,res)=>runPairProbe(res));
  app.get('/api/phase10/probe',async(_req,res)=>runProbe(res,'manual'));
  const autoTimer=setInterval(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=safeError(e);});},60000);
