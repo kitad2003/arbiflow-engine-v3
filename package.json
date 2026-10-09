@@ -29,7 +29,8 @@
     "test:base-gas-receipt": "node BaseGasReceipt12922.js",
     "test:eth-usdc-gas": "node EthUsdcGas12923.js",
     "test:base-price-oracle": "node BaseOracle12924.js",
-    "test:profitability-report": "node ProfitabilityReport12925.js"
+    "test:profitability-report": "node ProfitabilityReport12925.js",
+    "test:real-qualification": "node RealQualification12926.js"
   },
   "engines": {
     "node": ">=20"
