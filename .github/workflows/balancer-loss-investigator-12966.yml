@@ -1,0 +1,28 @@
+name: ArbiFlow Balancer Loss Investigator 12.9.66
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BalancerLossInvestigator12966.js'
+      - '.github/workflows/balancer-loss-investigator-12966.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Syntax check
+        run: node --check BalancerLossInvestigator12966.js
+      - name: Compile atomic receiver
+        run: npx hardhat compile --config hardhat.aave1299.config.js
+      - name: Test five sizes and both real DEX directions on Base fork
+        run: npm run test:balancer-loss-investigator
