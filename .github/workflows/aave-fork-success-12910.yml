@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.10 Aave Fork Repayment
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveForkSuccess12910.js'
+      - '.github/workflows/aave-fork-success-12910.yml'
+jobs:
+  fork-only-repayment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Fork-only Aave repayment with receipt gas
+        run: npm run test:aave-fork-success
