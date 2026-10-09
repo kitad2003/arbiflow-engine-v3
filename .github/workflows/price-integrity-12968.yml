@@ -1,0 +1,34 @@
+name: ArbiFlow 12.9.68 Price Integrity
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'PriceIntegrity12968.js'
+      - '.github/workflows/price-integrity-12968.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      INTEGRITY_ROUTE_LIMIT: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Syntax verification
+        run: node --check PriceIntegrity12968.js
+      - name: Run read-only price integrity audit
+        run: npm run test:price-integrity
+      - name: Preserve full diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: price-integrity-12968
+          path: arbiflow-integrity-12968.json
+          if-no-files-found: warn
