@@ -1,0 +1,36 @@
+name: ArbiFlow Base Tx Replay 12.9.89
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TxReplay12989.js'
+      - 'hardhat.txreplay12989.config.js'
+      - '.github/workflows/tx-replay-12989.yml'
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check TxReplay12989.js
+      - name: Confirm Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "BASE_RPC_URL required"
+            exit 1
+          fi
+      - run: npm run test:tx-replay
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tx-replay-12989
+          path: arbiflow-tx-replay-12989.json
+          if-no-files-found: warn
