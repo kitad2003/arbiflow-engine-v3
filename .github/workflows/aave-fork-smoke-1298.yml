@@ -1,0 +1,30 @@
+name: ArbiFlow Base Aave Fork Smoke
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveForkSmoke1298.js'
+      - '.github/workflows/aave-fork-smoke-1298.yml'
+jobs:
+  read-only-aave-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require private Base RPC configuration
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "::error::BASE_RPC_URL repository secret is not configured"
+            exit 1
+          fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run Base fork read-only Aave smoke test
+        run: npm run test:aave-fork-smoke
