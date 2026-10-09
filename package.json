@@ -33,7 +33,8 @@
     "test:real-qualification": "node RealQualification12926.js",
     "test:large-loan-quotes": "node LargeLoanQuotes12927.js",
     "test:loan-optimizer": "node LoanOptimizer12928.js",
-    "test:execution-readiness": "hardhat run --config hardhat.aave1299.config.js ExecutionReadiness12929.js"
+    "test:execution-readiness": "hardhat run --config hardhat.aave1299.config.js ExecutionReadiness12929.js",
+    "test:atomic-settlement-gas": "hardhat run --config hardhat.aave1299.config.js AtomicSettlementGas12930.js"
   },
   "engines": {
     "node": ">=20"
