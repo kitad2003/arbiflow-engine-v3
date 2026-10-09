@@ -13,10 +13,10 @@ const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,400);
 const hex=n=>'0x'+n.toString(16);
 function mount(app,{getBaseChain,rpc}){
- const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,cumulative:{swapEvents:0,uniqueSwapTransactions:0,matchedTransactions:0,observedBeforeBlockTransactions:0},recentTransactions:[],autoScanning:{enabled:true,intervalMs:10000,processLocal:true,maxBlocksPerPoolPerCycle:10}};
+ const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,cumulative:{swapEvents:0,uniqueSwapTransactions:0,matchedTransactions:0,observedBeforeBlockTransactions:0},recentTransactions:[],autoScanning:{enabled:true,intervalMs:10000,processLocal:true,maxBlocksPerPoolPerCycle:30,maxBatchesPerPoolPerCycle:3}};
  const seen=new Set();const seenTransactions=new Set();const blockTimestamps=new Map();
  async function blockTimestamp(chain,number){if(blockTimestamps.has(number))return blockTimestamps.get(number);const b=await rpc(chain,'eth_getBlockByNumber',[hex(number),false]);const timestamp=b?.timestamp?Number(BigInt(b.timestamp))*1000:null;if(timestamp!==null){blockTimestamps.set(number,timestamp);if(blockTimestamps.size>100)blockTimestamps.delete(blockTimestamps.keys().next().value);}return timestamp;}
- app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'11.2.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,cumulative:state.cumulative,cumulativeMatchRatePct:state.cumulative.uniqueSwapTransactions?Math.round(10000*state.cumulative.matchedTransactions/state.cumulative.uniqueSwapTransactions)/100:null,autoChecks:state.autoChecks,manualChecks:state.manualChecks,autoFailures:state.autoFailures,autoLastRunAt:state.autoLastRunAt,autoLastError:state.autoLastError,autoScanning:state.autoScanning,lastResult:state.lastResult,safety}));
+ app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'11.3.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,cumulative:state.cumulative,cumulativeMatchRatePct:state.cumulative.uniqueSwapTransactions?Math.round(10000*state.cumulative.matchedTransactions/state.cumulative.uniqueSwapTransactions)/100:null,autoChecks:state.autoChecks,manualChecks:state.manualChecks,autoFailures:state.autoFailures,autoLastRunAt:state.autoLastRunAt,autoLastError:state.autoLastError,autoScanning:state.autoScanning,lastResult:state.lastResult,safety}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
   if(source==='auto'){state.autoChecks++;state.autoLastRunAt=new Date().toISOString();}else state.manualChecks++;
@@ -37,16 +37,17 @@ function mount(app,{getBaseChain,rpc}){
      // Initial probe: last ten blocks. Subsequent probes: resume after successful range.
      const previous=state.cursors[key];
      const from=previous===undefined?Math.max(0,latest-9):previous+1;
-     const to=Math.min(latest,from+9);
+     const to=Math.min(latest,from+29);
      pool.fromBlock=from;pool.toBlock=to;
      pool.remainingBlocks=Math.max(0,latest-to);
      if(from>latest){pool.logQuery='UP_TO_DATE';pools.push(pool);continue;}
      let logs;
      try{
-      logs=await rpc(chain,'eth_getLogs',[{address,fromBlock:hex(from),toBlock:hex(to),topics:[TOPIC]}]);
-      pool.logQuery='UP_TO_10_BLOCKS';
+      logs=[];
+      for(let start=from;start<=to;start+=10){const end=Math.min(to,start+9);const batch=await rpc(chain,'eth_getLogs',[{address,fromBlock:hex(start),toBlock:hex(end),topics:[TOPIC]}]);if(!Array.isArray(batch))throw Error('INVALID_LOGS');logs.push(...batch);pool.batchesCompleted=(pool.batchesCompleted||0)+1;}
+      pool.logQuery='BOUNDED_10_BLOCK_BATCHES';
      }catch(e){
-      logDiagnostics.push({fee,attempt:'UP_TO_10_BLOCKS',error:err(e)});
+      logDiagnostics.push({fee,attempt:'BOUNDED_10_BLOCK_BATCHES',error:err(e)});
       // Only advance the cursor for the actual successfully queried range.
       logs=await rpc(chain,'eth_getLogs',[{address,fromBlock:hex(from),toBlock:hex(from),topics:[TOPIC]}]);
       pool.logQuery='SINGLE_BLOCK_FALLBACK';pool.toBlock=from;
@@ -77,8 +78,8 @@ function mount(app,{getBaseChain,rpc}){
     }catch(e){logFailures++;pool.error=err(e);logDiagnostics.push({fee,attempt:'POOL_SCAN',error:err(e)});}
     pools.push(pool);
    }
-   state.lastResult={success:logFailures===0,build:'11.2.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,matchedPendingSwaps,unmatchedConfirmedSwaps,observedBeforeBlock,scanSource:source,uniqueSwapTransactions,matchedPendingTransactions,observedBeforeBlockTransactions,transactionMatchRatePct:uniqueSwapTransactions?Math.round(matchedPendingTransactions/uniqueSwapTransactions*10000)/100:null,cumulative:{...state.cumulative},cumulativeMatchRatePct:state.cumulative.uniqueSwapTransactions?Math.round(state.cumulative.matchedTransactions/state.cumulative.uniqueSwapTransactions*10000)/100:null,matchRatePct:observations.length?Math.round(matchedPendingSwaps/observations.length*10000)/100:null,pendingObservationStore:pendingObservations.stats(),pendingStoreAtScanStart,visibilityDiagnostic:pendingStoreAtScanStart.stored===0?'NO_PENDING_HASHES_AT_SCAN_START':matchedPendingTransactions===0?'PENDING_HASHES_PRESENT_BUT_NO_CONFIRMED_TX_MATCH':'CONFIRMED_TX_HASH_MATCH_OBSERVED',observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,pendingHashMatchingImplemented:true,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','PENDING_HASH_MATCHING_REQUIRES_PRIOR_PENDING_PROBES','BLOCK_TIMESTAMP_NOT_LOCAL_RECEIPT_TIME','MATCH_RATE_IS_SAMPLED_NOT_NETWORK_WIDE','CUMULATIVE_COUNTS_RESET_ON_RESTART','SCAN_BACKLOG_MAY_GROW_IF_RPC_SLOW','CUMULATIVE_MATCHES_ARE_UNIQUE_TRANSACTIONS_NOT_SWAP_LOGS','NO_PROFIT_VALIDATION'],safety};
-  }catch(e){if(source==='auto'){state.autoFailures++;state.autoLastError=err(e);}state.lastResult={success:false,build:'11.2.0',error:err(e),safety};}
+   state.lastResult={success:logFailures===0,build:'11.3.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,matchedPendingSwaps,unmatchedConfirmedSwaps,observedBeforeBlock,scanSource:source,uniqueSwapTransactions,matchedPendingTransactions,observedBeforeBlockTransactions,transactionMatchRatePct:uniqueSwapTransactions?Math.round(matchedPendingTransactions/uniqueSwapTransactions*10000)/100:null,cumulative:{...state.cumulative},cumulativeMatchRatePct:state.cumulative.uniqueSwapTransactions?Math.round(state.cumulative.matchedTransactions/state.cumulative.uniqueSwapTransactions*10000)/100:null,matchRatePct:observations.length?Math.round(matchedPendingSwaps/observations.length*10000)/100:null,pendingObservationStore:pendingObservations.stats(),pendingStoreAtScanStart,visibilityDiagnostic:pendingStoreAtScanStart.stored===0?'NO_PENDING_HASHES_AT_SCAN_START':matchedPendingTransactions===0?'PENDING_HASHES_PRESENT_BUT_NO_CONFIRMED_TX_MATCH':'CONFIRMED_TX_HASH_MATCH_OBSERVED',observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,pendingHashMatchingImplemented:true,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_RPC_REQUEST','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','PENDING_HASH_MATCHING_REQUIRES_PRIOR_PENDING_PROBES','BLOCK_TIMESTAMP_NOT_LOCAL_RECEIPT_TIME','MATCH_RATE_IS_SAMPLED_NOT_NETWORK_WIDE','CUMULATIVE_COUNTS_RESET_ON_RESTART','SCAN_BACKLOG_MAY_GROW_IF_RPC_SLOW','CUMULATIVE_MATCHES_ARE_UNIQUE_TRANSACTIONS_NOT_SWAP_LOGS','NO_PROFIT_VALIDATION'],safety};
+  }catch(e){if(source==='auto'){state.autoFailures++;state.autoLastError=err(e);}state.lastResult={success:false,build:'11.3.0',error:err(e),safety};}
   finally{state.running=false;}
   if(res)res.json(state.lastResult);
  }
