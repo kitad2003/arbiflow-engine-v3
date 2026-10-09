@@ -6,6 +6,11 @@ async function main(){
  assert.equal(hre.network.name,'hardhat','HARDHAT_ONLY');
  assert(process.env.BASE_RPC_URL?.startsWith('https://'),'RPC_REQUIRED');
  const p=hre.ethers.provider;assert.equal((await p.getNetwork()).chainId,8453n,'BASE_FORK_REQUIRED');
+ // On custom-chain forks, some Hardhat versions cannot select EVM rules for
+ // eth_call at the historical origin block. Mine one disposable local block.
+ const forkOrigin=await p.getBlockNumber();
+ await hre.network.provider.send('hardhat_mine',['0x1']);
+ assert.equal(await p.getBlockNumber(),forkOrigin+1,'FORK_BLOCK_ADVANCE_FAILED');
  assert.notEqual(await p.getCode(VAULT),'0x','BALANCER_V2_NOT_DEPLOYED');
  const token=new hre.ethers.Contract(USDC,['function balanceOf(address) view returns(uint256)','function transfer(address,uint256) returns(bool)'],p);
  const before=await token.balanceOf(VAULT);
@@ -34,6 +39,6 @@ async function main(){
  assert.equal(await receiver.paidFee(),fee,'FEE_MISMATCH');
  const after=await token.balanceOf(VAULT);
  assert(after>=before-fee,'VAULT_UNDERPAID');
- console.log(JSON.stringify({success:true,build:'BALANCER_V2_FORK_1',test:'BASE_HARDHAT_BALANCER_V2_10000_USDC',block:await p.getBlockNumber(),vault:VAULT,loanPrincipalUsdc:10000,vaultUsdcBefore:Number(before)/1e6,feeRaw:fee.toString(),feePercentageWad:pct.toString(),callbackVerified:true,repaymentVerified:true,gasUnits:receipt.gasUsed.toString(),premiumFundedOnForkOnly:fee>0n,profitVerified:false,realDexUsed:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false}));
+ console.log(JSON.stringify({success:true,build:'BALANCER_V2_FORK_1',test:'BASE_HARDHAT_BALANCER_V2_10000_USDC',forkOriginBlock:forkOrigin,simulatedBlock:await p.getBlockNumber(),vault:VAULT,loanPrincipalUsdc:10000,vaultUsdcBefore:Number(before)/1e6,feeRaw:fee.toString(),feePercentageWad:pct.toString(),callbackVerified:true,repaymentVerified:true,gasUnits:receipt.gasUsed.toString(),premiumFundedOnForkOnly:fee>0n,profitVerified:false,realDexUsed:false,readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false}));
 }
 main().catch(e=>{console.error('BALANCER_V2_FORK_FAILED',String(e?.shortMessage||e?.message||e).slice(0,210));process.exitCode=1});
