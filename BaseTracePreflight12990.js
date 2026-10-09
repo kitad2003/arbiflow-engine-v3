@@ -8,6 +8,7 @@ const { validatePrefix } = require('./BasePrefixValidation12990');
 const { evaluateTrace } = require('./BaseTraceValidation12991');
 const { verdict } = require('./BaseEvidenceGate12992');
 const { readiness } = require('./BaseReconstructionReadiness12993');
+const { continuity } = require('./BaseTraceContinuity12995');
 const BLOCK = 52392050;
 const TARGET_INDEX = 2;
 const TARGET_HASH = '0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
@@ -18,7 +19,7 @@ async function main() {
  const result = {
   build:'12.9.90',mode:'BASE_OP_STACK_TRACE_PREFLIGHT',block:BLOCK,
   parentBlock:BLOCK-1,targetIndex:TARGET_INDEX,targetHash:TARGET_HASH,
-  status:'BLOCKED', reason:null,depositIndices:[],transactions:[],prefixTraces:[],
+  status:'BLOCKED', reason:null,depositIndices:[],transactions:[],prefixTraces:[],traceContinuity:[],
   rpcTraceSupported:null,traceProbed:false,traceTargetSuccessful:false,
   preTransactionStateReconstructed:false,receiptMatches:0,
   postTransactionPoolStateVerified:false,netProfitVerified:false,
@@ -44,11 +45,14 @@ async function main() {
    result.traceProbed=true;
    try{
     // A tracer result establishes provider capabilities, NOT valid replayed state.
+    let previousDiff=null;
     for(let i=0;i<TARGET_INDEX;i++){
      const tx=result.transactions[i];
      try{
       const diff=await rpc.send('debug_traceTransaction',[tx.hash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
       const check=evaluateTrace(diff);
+      if(previousDiff)result.traceContinuity.push({from:i-1,to:i,...continuity(previousDiff,diff)});
+      previousDiff=check.traceShapeValid?diff:null;
       result.prefixTraces.push({index:i,hash:tx.hash,transactionType:tx.type,traceShapeValid:check.traceShapeValid,traceSummary:check});
      }catch(e){result.prefixTraces.push({index:i,hash:tx.hash,transactionType:tx.type,traceShapeValid:false,error:short(e)});}
     }
