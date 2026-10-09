@@ -54,7 +54,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'12.3.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ const state={build:'12.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
@@ -97,8 +97,8 @@ function mount(app,{getBaseChain,rpc}){
    const v3Pool=await v3Inspector.inspect(swap,chain,rpc);
    const samePairPools=v3Pool.status==='POOL_STATE_VERIFIED'?await pairDiscovery.discover({...swap,v3Pool},chain,rpc):null;
    const spotObservations=samePairPools?await spotDiagnostic.compare(samePairPools,chain,rpc):null;
-   pairProbe.lastResult={success:true,build:'12.3.0',chainId:8453,probePair:'BASE_USDC_WETH',v3Pool,samePairPools,spotObservations,qualified:0,alerts:[],limitations:['INDEPENDENT_DIAGNOSTIC_NOT_PENDING_TRANSACTION','SAME_DEX_POOLS_NOT_CROSS_DEX','NO_EXECUTABLE_QUOTES','NO_PROFIT_VALIDATION'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
-  }catch(e){pairProbe.failures++;pairProbe.lastError=safeError(e);pairProbe.lastResult={success:false,build:'12.3.0',error:pairProbe.lastError,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
+   pairProbe.lastResult={success:true,build:'12.4.0',chainId:8453,probePair:'BASE_USDC_WETH',v3Pool,samePairPools,spotObservations,qualified:0,alerts:[],limitations:['INDEPENDENT_DIAGNOSTIC_NOT_PENDING_TRANSACTION','SAME_DEX_POOLS_NOT_CROSS_DEX','NO_EXECUTABLE_QUOTES','NO_PROFIT_VALIDATION'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  }catch(e){pairProbe.failures++;pairProbe.lastError=safeError(e);pairProbe.lastResult={success:false,build:'12.4.0',error:pairProbe.lastError,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
   finally{pairProbe.running=false;}
   if(res)return res.json(pairProbe.lastResult);
  }
@@ -116,7 +116,7 @@ function mount(app,{getBaseChain,rpc}){
   if(aaveState.running)return res.status(409).json({success:false,error:'AAVE_PROBE_RUNNING',statusUrl:'/api/phase12/aave/status',instanceId:aaveInstanceId});
   aaveState.running=true;aaveState.checks++;aaveState.lastRunAt=new Date().toISOString();aaveState.lastStep='QUEUED';aaveState.lastStepAt=aaveState.lastRunAt;
   const attempt=aaveState.checks;
-  res.status(202).json({success:true,build:'12.3.0',status:'PROBE_STARTED',instanceId:aaveInstanceId,attempt,statusUrl:'/api/phase12/aave/status',safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}});
+  res.status(202).json({success:true,build:'12.4.0',status:'PROBE_STARTED',instanceId:aaveInstanceId,attempt,statusUrl:'/api/phase12/aave/status',safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}});
   setImmediate(async()=>{
    let timer;
    let completed=false;
@@ -129,32 +129,32 @@ function mount(app,{getBaseChain,rpc}){
    try{
     const result=await Promise.race([
      aaveProbe.probe(getBaseChain(),rpc,updateStep),
-     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('AAVE_PROBE_DEADLINE_EXCEEDED_45S')),45000);})
+     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('AAVE_PROBE_DEADLINE_EXCEEDED_90S')),45000);})
     ]);
     completed=true;
-    aaveState.lastResult={success:true,build:'12.3.0',...result,elapsedMs:Date.now()-started};aaveState.lastError=null;
+    aaveState.lastResult={success:true,build:'12.4.0',...result,elapsedMs:Date.now()-started};aaveState.lastError=null;
     aaveState.lastStep='COMPLETE';aaveState.lastStepAt=new Date().toISOString();
    }catch(e){
     completed=true;
     const failedStep=aaveState.lastStep;
     aaveState.failures++;aaveState.lastError=safeError(e);
-    aaveState.lastResult={success:false,build:'12.3.0',error:aaveState.lastError,failedStep,elapsedMs:Date.now()-started,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+    aaveState.lastResult={success:false,build:'12.4.0',error:aaveState.lastError,failedStep,elapsedMs:Date.now()-started,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
     aaveState.lastStep='FAILED';aaveState.lastStepAt=new Date().toISOString();
    }finally{completed=true;clearTimeout(timer);aaveState.running=false;saveAaveState();}
   });
  }
  app.get('/api/phase12/aave/probe',runAaveProbe);
- app.get('/api/phase12/aave/status',(_req,res)=>res.json({success:true,build:'12.3.0',...aaveState,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
+ app.get('/api/phase12/aave/status',(_req,res)=>res.json({success:true,build:'12.4.0',...aaveState,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  // Phase 12.1: flash-loan-first strategy readiness; never executes or advertises available credit.
  app.get('/api/phase12/flash-loan/status',(_req,res)=>res.json({
-  success:true,build:'12.3.0',strategy:'FLASH_LOAN_FIRST',network:'BASE',capitalModel:{loanPrincipalProvidedByUser:false,gasAndOperatingFundsRequired:true,exampleUserBudgetUsd:500,budgetIsNotARequiredDeposit:true},
+  success:true,build:'12.4.0',strategy:'FLASH_LOAN_FIRST',network:'BASE',capitalModel:{loanPrincipalProvidedByUser:false,gasAndOperatingFundsRequired:true,exampleUserBudgetUsd:500,budgetIsNotARequiredDeposit:true},
   provider:{selected:aaveState.lastResult?.success===true,name:aaveState.lastResult?.success?'AAVE_V3':null,verifiedLiquidityRaw:null,poolTokenBalanceRaw:aaveState.lastResult?.poolTokenBalanceRaw||null,feeBps:aaveState.lastResult?.premiumBps??null,callbackVerified:false},
-  prerequisites:{verifiedSamePairPools:!!pairProbe.lastResult?.samePairPools?.venues?.length,spotDiagnostics:pairProbe.lastResult?.spotObservations?.status==='SPOT_OBSERVATIONS_COLLECTED',tradeSizeExecutableQuotes:false,crossVenueRoundTripQuotes:false,flashLoanProviderLiquidity:false,flashLoanReserveFlagsVerified:aaveState.lastResult?.reserveConfiguration?.configurationReadVerified===true,flashLoanReserveReadEligible:aaveState.lastResult?.reserveConfiguration?.reserveReadEligible===true,flashLoanFeeVerified:aaveState.lastResult?.success===true,atomicContractForkTest:false,gasAndNetProfitGate:false},
+  prerequisites:{verifiedSamePairPools:!!pairProbe.lastResult?.samePairPools?.venues?.length,spotDiagnostics:pairProbe.lastResult?.spotObservations?.status==='SPOT_OBSERVATIONS_COLLECTED',tradeSizeExecutableQuotes:false,crossVenueRoundTripQuotes:false,flashLoanProviderLiquidity:false,flashLoanObservedATokenUnderlyingBalance:aaveState.lastResult?.liquidityObservation?.underlyingBalanceRaw??null,flashLoanAmountScreened:aaveState.lastResult?.liquidityObservation?.readVerified===true,flashLoanReserveFlagsVerified:aaveState.lastResult?.reserveConfiguration?.configurationReadVerified===true,flashLoanReserveReadEligible:aaveState.lastResult?.reserveConfiguration?.reserveReadEligible===true,flashLoanFeeVerified:aaveState.lastResult?.success===true,atomicContractForkTest:false,gasAndNetProfitGate:false},
   opportunityGate:{minimumSpreadPctExclusive:0.5,allowedRisk:['LOW','MEDIUM'],requiresPositiveNetProfit:true,qualified:0,alerts:[]},
   safety:{readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false},
   warnings:['NO_FLASH_LOAN_HAS_BEEN_REQUESTED','FLASH_LOAN_PRINCIPAL_MUST_BE_REPAID_ATOMICALLY','REVERTED_TRANSACTIONS_CAN_STILL_COST_GAS','EXISTING_LIQUIDATION_TEST_HARNESS_IS_NOT_A_LIVE_ARBITRAGE_EXECUTOR']
  }));
- app.get('/api/phase11/pairs/status',(_req,res)=>res.json({success:true,build:'12.3.0',...pairProbe,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
+ app.get('/api/phase11/pairs/status',(_req,res)=>res.json({success:true,build:'12.4.0',...pairProbe,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  app.get('/api/phase11/pairs/probe',async(_req,res)=>runPairProbe(res));
  app.get('/api/phase10/probe',async(_req,res)=>runProbe(res,'manual'));
  const autoTimer=setInterval(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=safeError(e);});},60000);
