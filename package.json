@@ -43,7 +43,8 @@
     "test:multi-dex-quotes": "node MultiDexQuotes12938.js",
     "test:pool-universe": "node PoolUniverse12939.js",
     "test:pending-state": "node PendingState12939.js",
-    "test:pool-depth": "node PoolDepth12940.js"
+    "test:pool-depth": "node PoolDepth12940.js",
+    "test:pool-rank": "node PoolRank12941.js"
   },
   "engines": {
     "node": ">=20"
