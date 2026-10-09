@@ -8,9 +8,9 @@ const USDC='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
 const WETH='0x4200000000000000000000000000000000000006';
 const POOLS=[
  {venue:'UNISWAP_V3',address:'0xd0b53d9277642d899df5c87a3966a349a798f224',expectedFee:500n},
- {venue:'AERODROME_SLIPSTREAM',address:'0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59',expectedFee:100n}
+ {venue:'AERODROME_SLIPSTREAM',address:'0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59',expectedTickSpacing:100n}
 ];
-const abi=['function token0() view returns(address)','function token1() view returns(address)','function fee() view returns(uint24)'];
+const abi=['function token0() view returns(address)','function token1() view returns(address)','function fee() view returns(uint24)','function tickSpacing() view returns(int24)'];
 async function main(){
  if(!/^https:\/\//.test(RPC||''))throw Error('BASE_RPC_URL_HTTPS_REQUIRED');
  const p=new ethers.JsonRpcProvider(RPC,8453,{staticNetwork:true});
@@ -22,8 +22,9 @@ async function main(){
   const pool=new ethers.Contract(row.address,abi,p);
   const [a,b,fee]=await Promise.all([pool.token0(),pool.token1(),pool.fee()]);
   assert.deepEqual([a.toLowerCase(),b.toLowerCase()].sort(),[USDC,WETH].sort(),row.venue+'_WRONG_PAIR actual='+a+','+b);
-  assert.equal(fee,row.expectedFee,row.venue+'_WRONG_FEE_TIER actual='+fee.toString()+' expected='+row.expectedFee.toString());
-  results.push({venue:row.venue,pool:row.address,feeTier:Number(fee),pairVerified:true});
+  if(row.venue==='UNISWAP_V3') assert.equal(fee,row.expectedFee,row.venue+'_WRONG_FEE_TIER actual='+fee.toString());
+  else {const spacing=await pool.tickSpacing();assert.equal(spacing,row.expectedTickSpacing,row.venue+'_WRONG_TICK_SPACING actual='+spacing.toString());}
+  results.push({venue:row.venue,pool:row.address,observedSwapFeePips:Number(fee),tickSpacing:row.expectedTickSpacing?Number(row.expectedTickSpacing):null,pairVerified:true});
  }
  console.log(JSON.stringify({success:true,build:'12.9.11',mode:'DIRECT_RPC_REAL_POOL_PREFLIGHT',block,pools:results,realVenuePoolReadsVerified:true,swapExecutionTested:false,flashLoanExecuted:false,atomicRoundTripVerified:false,gasUnitsMeasured:null,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false}));
  p.destroy();
