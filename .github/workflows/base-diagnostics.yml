@@ -25,3 +25,16 @@ jobs:
           node --check BaseTraceContinuity12995.js
       - name: Run offline regression tests
         run: npm run test:base-validation
+  historical-trace:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Historical trace diagnostic
+        run: npm run test:base-trace
