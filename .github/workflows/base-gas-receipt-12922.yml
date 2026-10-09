@@ -1,0 +1,21 @@
+name: ArbiFlow 12.9.22 Base Gas Evidence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BaseGasReceipt12922.js'
+      - '.github/workflows/base-gas-receipt-12922.yml'
+jobs:
+  gas-accounting:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify Base receipt execution and L1 fee accounting
+        run: npm run test:base-gas-receipt
