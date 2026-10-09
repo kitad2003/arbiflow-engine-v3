@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.24 Base ETH USD Oracle
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BaseOracle12924.js'
+      - '.github/workflows/base-oracle-12924.yml'
+jobs:
+  base-oracle-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate live Chainlink Base ETH USD feed
+        run: npm run test:base-price-oracle
