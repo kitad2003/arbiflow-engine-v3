@@ -1,0 +1,27 @@
+name: ArbiFlow Base Diagnostics
+on:
+  push:
+    branches:
+      - build-12.9.90-base-trace-diagnostics
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check diagnostic syntax
+        run: |
+          node --check BaseTracePreflight12990.js
+          node --check BasePrefixValidation12990.js
+          node --check BaseTraceValidation12991.js
+          node --check BaseEvidenceGate12992.js
+          node --check BaseReconstructionReadiness12993.js
+          node --check BaseTraceContinuity12995.js
+      - name: Run offline regression tests
+        run: npm run test:base-validation
