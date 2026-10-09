@@ -1,0 +1,34 @@
+name: ArbiFlow 12.9.74 Liquidation Position Inspector
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LiquidationProfit12974.js'
+      - '.github/workflows/liquidation-profit-12974.yml'
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      LIQUIDATION_WINDOWS: 3
+      LIQUIDATION_BLOCKS_PER_WINDOW: 2000
+      LIQUIDATION_LOG_CHUNK: 10
+      LIQUIDATION_USER_LIMIT: 400
+      LIQUIDATION_INVESTIGATE_LIMIT: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check LiquidationProfit12974.js
+      - run: npm run test:liquidation-profit-investigation
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: liquidation-profit-12974
+          path: arbiflow-liquidation-profit-investigation-12974.json
+          if-no-files-found: warn
