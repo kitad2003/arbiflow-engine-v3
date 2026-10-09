@@ -10,7 +10,8 @@
     "check": "node --check server.js && node --check Startup4300.js && node --check BaseForkTest4300.js && node --check MorphoCandidateForkGate4300.js && node --check ControlledAtomicForkTest4300.js && node --check ControlledKyberAtomicForkTest4350.js && node --check ProductionBoundForkTest4380.js && node --check MainnetSafetyGate4390.js && node --check GlobalDiscrepancy4710.js",
     "controlled-atomic-test": "hardhat run --no-compile ControlledAtomicForkTest4300.js",
     "production-bound-fork-test": "hardhat run --no-compile ProductionBoundForkTest4380.js",
-    "mainnet-safety-gate": "hardhat run --no-compile MainnetSafetyGate4390.js"
+    "mainnet-safety-gate": "hardhat run --no-compile MainnetSafetyGate4390.js",
+    "test:atomic-mock": "hardhat run --config hardhat.fixture1297.config.js AtomicMockTest1297.js"
   },
   "engines": {
     "node": ">=20"
