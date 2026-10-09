@@ -25,7 +25,8 @@
     "test:verified-cost-bridge": "node VerifiedCostBridge12918.js",
     "test:onchain-evidence": "node OnChainEvidence12919.js",
     "test:transaction-evidence": "node TransactionEvidence12920.js",
-    "test:aave-repayment-proof": "node AaveRepaymentProof12921.js"
+    "test:aave-repayment-proof": "node AaveRepaymentProof12921.js",
+    "test:base-gas-receipt": "node BaseGasReceipt12922.js"
   },
   "engines": {
     "node": ">=20"
