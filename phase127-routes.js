@@ -22,13 +22,16 @@ async function scan(chain,rpc,amountUsdc){
  if(![100,500,1000].includes(amountUsdc))throw Error('INVALID_AMOUNT');
  if(BigInt(await rpc(chain,'eth_chainId',[]))!==8453n)throw Error('RPC_WRONG_CHAIN');
  const block=await rpc(chain,'eth_blockNumber',[]);
- const call=async(addr,abi,fn,args=[])=>abi.decodeFunctionResult(fn,await rpc(chain,'eth_call',[{to:addr,data:abi.encodeFunctionData(fn,args)},block]));
+ const deadline=Date.now()+45000;
+ const bounded=async(method,params)=>{const remaining=deadline-Date.now();if(remaining<=0)throw Error('SCAN_DEADLINE_45000MS');let timer;try{return await Promise.race([rpc(chain,method,params),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('RPC_TIMEOUT_OR_SCAN_DEADLINE')),Math.min(5000,remaining));})]);}finally{clearTimeout(timer)}};
+ const call=async(addr,abi,fn,args=[])=>abi.decodeFunctionResult(fn,await bounded('eth_call',[{to:addr,data:abi.encodeFunctionData(fn,args)},block]));
  const possibilities=[
   ...[100,500,3000].map(fee=>({...uni,tier:fee,factoryAbi:uniFactory,quoterAbi:uniQuote})),
   ...[1,10,50,100,200].map(tier=>({...aero,tier,factoryAbi:aeroFactory,quoterAbi:aeroQuote}))
  ];
  const pools=[],failures=[];
  for(const p of possibilities){
+  if(Date.now()>=deadline){failures.push({error:'SCAN_DEADLINE_REACHED_DURING_POOL_DISCOVERY'});break;}
   try{
    const [addr]=await call(p.factory,p.factoryAbi,'getPool',[USDC,WETH,p.tier]);
    if(addr.toLowerCase()===ZERO)continue;
@@ -46,6 +49,7 @@ async function scan(chain,rpc,amountUsdc){
  };
  const starting=BigInt(amountUsdc)*1000000n,rows=[];
  for(const buy of pools)for(const sell of pools){
+  if(Date.now()>=deadline){failures.push({error:'SCAN_DEADLINE_REACHED_DURING_QUOTES'});break;}
   if(buy.name===sell.name)continue;
   const row={buyDex:buy.name,buyTier:buy.tier,buyPool:buy.pool,sellDex:sell.name,sellTier:sell.tier,sellPool:sell.pool,blockTag:block,quoteSuccess:false,qualifiedForDashboard:false,executionEligible:false};
   try{
@@ -59,19 +63,19 @@ async function scan(chain,rpc,amountUsdc){
   }catch(e){row.error=safe(e)}
   rows.push(row);
  }
- return {success:true,build:'12.7.0',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
+ return {success:true,build:'12.7.1',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
 }
 function mount(app,{getBaseChain,rpc}){
- let running=false,lastResult=null,lastCheckedAt=null;
- app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.0',running,lastCheckedAt,lastResult,safety}));
+ let running=false,lastResult=null,lastCheckedAt=null,startedAt=null;
+ app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.1',running,startedAt,lastCheckedAt,lastResult,safety}));
  app.get('/api/phase12/routes/probe',async(req,res)=>{
   if(running)return res.status(409).json({success:false,error:'ROUTE_PROBE_RUNNING',safety});
   const amount=Number(req.query.amountUsdc||100);
   if(![100,500,1000].includes(amount))return res.status(400).json({success:false,error:'ALLOWED_AMOUNTS_100_500_1000',safety});
-  running=true;
+  running=true;startedAt=new Date().toISOString();
   try{lastResult=await scan(getBaseChain(),rpc,amount)}
   catch(e){lastResult={success:false,error:safe(e),qualified:0,alerts:[],safety}}
-  finally{running=false;lastCheckedAt=new Date().toISOString()}
+  finally{running=false;startedAt=null;lastCheckedAt=new Date().toISOString()}
   res.json(lastResult);
  });
 }
