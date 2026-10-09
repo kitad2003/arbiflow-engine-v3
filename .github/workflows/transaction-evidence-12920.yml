@@ -1,0 +1,21 @@
+name: ArbiFlow 12.9.20 Transaction Evidence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TransactionEvidence12920.js'
+      - '.github/workflows/transaction-evidence-12920.yml'
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Test fail-closed exchange event evidence
+        run: npm run test:transaction-evidence
