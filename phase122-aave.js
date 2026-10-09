@@ -7,10 +7,10 @@ const usdc='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
 const providerAbi=new Interface(['function getPool() view returns(address)']);
 const poolAbi=new Interface(['function FLASHLOAN_PREMIUM_TOTAL() view returns(uint128)']);
 const tokenAbi=new Interface(['function balanceOf(address) view returns(uint256)']);
-async function read(rpc,chain,to,iface,fn,args=[]){const result=await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},'latest']);return iface.decodeFunctionResult(fn,result)[0];}
-async function probe(chain,rpc){
+async function read(rpc,chain,to,iface,fn,args=[],onStep){onStep?.('RPC_'+fn+'_START');const result=await rpc(chain,'eth_call',[{to,data:iface.encodeFunctionData(fn,args)},'latest']);const decoded=iface.decodeFunctionResult(fn,result)[0];onStep?.('RPC_'+fn+'_OK');return decoded;}
+async function probe(chain,rpc,onStep){
  if(Number(chain?.chainId)!==8453)throw Error('BASE_CHAIN_REQUIRED');
- const pool=await read(rpc,chain,provider,providerAbi,'getPool');
+ const pool=await read(rpc,chain,provider,providerAbi,'getPool',[],onStep);
  if(pool.toLowerCase()!==expectedPool.toLowerCase())throw Error('AAVE_POOL_ADDRESS_MISMATCH');
  const premium=BigInt(await read(rpc,chain,pool,poolAbi,'FLASHLOAN_PREMIUM_TOTAL'));
  if(premium>10000n)throw Error('INVALID_PREMIUM_BPS');
