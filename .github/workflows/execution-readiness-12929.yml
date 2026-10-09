@@ -13,7 +13,7 @@ jobs:
       contents: read
     env:
       BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-      READINESS_LOAN_SIZES_USDC: '1000,5000,10000,25000,50000'
+      READINESS_LOAN_SIZES_USDC: '10000,25000,50000,100000,250000,500000,1000000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
