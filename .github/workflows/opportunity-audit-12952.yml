@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.52 Opportunity Audit
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'OpportunityAudit12952.js'
+      - '.github/workflows/opportunity-audit-12952.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-12952-audit
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      AUDIT_ROUTE_LIMIT: 36
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run closest-miss audit
+        run: npm run test:opportunity-audit
+      - name: Preserve audit file
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opportunity-audit-12952
+          path: arbiflow-audit-12952.json
+          if-no-files-found: warn
