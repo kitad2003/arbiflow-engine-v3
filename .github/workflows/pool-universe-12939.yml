@@ -1,0 +1,30 @@
+name: ArbiFlow 12.9.39 Twenty Pool Universe
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'PoolUniverse12939.js'
+      - 'PendingState12939.js'
+      - '.github/workflows/pool-universe-12939.yml'
+jobs:
+  discover-and-measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Discover at least 20 active distinct pool addresses
+        run: npm run test:pool-universe
+      - name: Compare confirmed and pending quoting state
+        run: npm run test:pending-state
