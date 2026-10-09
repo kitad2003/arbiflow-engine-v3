@@ -64,7 +64,8 @@
     "test:event-validation": "node EventValidation12958.js",
     "test:transaction-intelligence": "node TransactionIntelligence12959.js",
     "test:direction-intelligence": "node DirectionIntelligence12960.js",
-    "test:dynamic-sizing": "node DynamicSizing12961.js"
+    "test:dynamic-sizing": "node DynamicSizing12961.js",
+    "test:triangles": "node TriangleDiscovery12962.js"
   },
   "engines": {
     "node": ">=20"
