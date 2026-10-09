@@ -1,0 +1,11 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {readiness}=require('./BaseReconstructionReadiness12993');
+const h=n=>'0x'+String(n).padStart(64,'0');
+const sample=()=>({readOnly:true,mainnetBroadcast:false,executionEligible:false,targetIndex:2,transactions:[{hash:h(1)},{hash:h(2)},{hash:h(3)}],prefixTraces:[{index:0,hash:h(1),traceShapeValid:true},{index:1,hash:h(2),traceShapeValid:true}],traceTargetSuccessful:true});
+test('valid traces still fail closed',()=>{const r=readiness(sample());assert.equal(r.ready,false);assert.equal(r.code,'TRACE_EVIDENCE_ONLY_CHECKPOINT_UNVERIFIED')});
+test('missing prefix trace',()=>{const r=sample();r.prefixTraces.pop();assert.equal(readiness(r).code,'PREFIX_TRACES_MISSING')});
+test('wrong prefix hash',()=>{const r=sample();r.prefixTraces[1].hash=h(8);assert.equal(readiness(r).code,'PREFIX_TRACE_INVALID')});
+test('target trace absent',()=>{const r=sample();r.traceTargetSuccessful=false;assert.equal(readiness(r).code,'TARGET_TRACE_MISSING')});
+test('unsafe flags',()=>{const r=sample();r.executionEligible=true;assert.equal(readiness(r).code,'SAFETY_GATE')});
