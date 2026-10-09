@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.27 Expanded Loan Quotes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LargeLoanQuotes12927.js'
+      - '.github/workflows/large-loan-quotes-12927.yml'
+jobs:
+  expanded-loans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require RPC secret
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run five real loan sizes through pinned-block DEX quotes
+        run: npm run test:large-loan-quotes
