@@ -1,6 +1,6 @@
 'use strict';
 const isHex = x => typeof x==='string' && /^0x[0-9a-fA-F]*$/.test(x);
-const isQuantity = x => isHex(x) && x.length>=3 && x.length%2===1 && (x==='0x0'||!x.startsWith('0x0'));
+const isQuantity = x => isHex(x) && x.length>=3 && (x==='0x0'||!/^0x0/i.test(x));
 const isWord = x => isHex(x) && x.length===66;
 function inspect(value){
  const reject=reason=>({available:false,accountsAccessed:0,fullCheckpoint:false,verifiedAgainstFork:false,reason});
