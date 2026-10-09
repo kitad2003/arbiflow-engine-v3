@@ -1,0 +1,28 @@
+name: ArbiFlow 12.9.26 Real Route Qualification
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'RealQualification12926.js'
+      - '.github/workflows/real-qualification-12926.yml'
+jobs:
+  real-read-only-quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      REAL_QUOTE_LOAN_SIZES_USDC: '1000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify RPC is present
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run real pinned Base quotes and Aave premium checks
+        run: npm run test:real-qualification
