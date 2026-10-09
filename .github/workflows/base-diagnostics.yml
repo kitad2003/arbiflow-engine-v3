@@ -23,6 +23,7 @@ jobs:
           node --check BaseEvidenceGate12992.js
           node --check BaseReconstructionReadiness12993.js
           node --check BaseTraceContinuity12995.js
+          node --check BasePrestateInspect129100.js
       - name: Run offline regression tests
         run: npm run test:base-validation
   historical-trace:
@@ -42,3 +43,11 @@ jobs:
           ARBIFLOW_ENABLE_TRACE_PROBE: '1'
           ARBIFLOW_REQUIRE_HISTORICAL_TRACE: '1'
         run: npm run test:base-trace
+      - name: Upload historical evidence report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-historical-evidence
+          path: arbiflow-base-trace-12990.json
+          if-no-files-found: warn
+          retention-days: 7
