@@ -26,7 +26,8 @@
     "test:onchain-evidence": "node OnChainEvidence12919.js",
     "test:transaction-evidence": "node TransactionEvidence12920.js",
     "test:aave-repayment-proof": "node AaveRepaymentProof12921.js",
-    "test:base-gas-receipt": "node BaseGasReceipt12922.js"
+    "test:base-gas-receipt": "node BaseGasReceipt12922.js",
+    "test:eth-usdc-gas": "node EthUsdcGas12923.js"
   },
   "engines": {
     "node": ">=20"
