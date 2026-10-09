@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.54 Liquidity Impact Audit
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LiquidityImpact12954.js'
+      - '.github/workflows/liquidity-impact-12954.yml'
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-impact-12954
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      IMPACT_ROUTE_LIMIT: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Liquidity and impact audit
+        run: npm run test:liquidity-impact
+      - name: Preserve impact results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidity-impact-12954
+          path: arbiflow-impact-12954.json
+          if-no-files-found: warn
