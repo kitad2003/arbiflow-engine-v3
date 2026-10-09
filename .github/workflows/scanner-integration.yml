@@ -1,0 +1,30 @@
+name: ArbiFlow Pro Scanner Integration
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ArbiFlowPrivateProcessor.js'
+      - 'ArbiFlowScannerService.js'
+      - 'ArbiFlowProScanner.html'
+      - 'ArbiFlowScannerTest.js'
+      - '.github/workflows/scanner-integration.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Syntax verification
+        run: |
+          node --check ArbiFlowPrivateProcessor.js
+          node --check ArbiFlowScannerService.js
+          node --check ArbiFlowScannerTest.js
+      - name: Integrated scanner smoke test
+        run: npm run test:scanner-integration
