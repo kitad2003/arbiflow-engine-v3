@@ -11,7 +11,7 @@ async function main(){
  assert.equal(hre.network.name,'hardhat','HARDHAT_FORK_ONLY');
  assert(/^https:\/\//.test(process.env.BASE_RPC_URL||''),'BASE_RPC_URL_REQUIRED');
  const e=hre.ethers;assert.equal((await e.provider.getNetwork()).chainId,8453n);
- const quotes=await run(process.env.BASE_RPC_URL,[1000,5000,10000,25000,50000]);
+ const quotes=await run(process.env.BASE_RPC_URL,[10000,25000,50000,100000,250000,500000,1000000]);
  const candidates=rank(quotes.rows).ranked.filter(r=>r.rankable&&r.observedLiquidityCoversPrincipal).slice(0,3);
  assert(candidates.length>0,'NO_QUOTED_CANDIDATES');
  await hre.network.provider.send('evm_mine');
