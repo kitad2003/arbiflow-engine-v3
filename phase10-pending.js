@@ -58,6 +58,7 @@ function mount(app,{getBaseChain,rpc}){
  require('./phase126-balancer').mount(app,{getBaseChain,rpc});
  require('./phase129-gas').mount(app,{getBaseChain,rpc});
  require('./phase1291-cost').mount(app);
+ require('./phase1292-l1').mount(app,{getBaseChain,rpc});
  const phase127Routes=require('./phase127-routes').mount(app,{getBaseChain,rpc});
  const state={build:'12.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
