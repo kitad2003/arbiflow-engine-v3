@@ -1,0 +1,35 @@
+name: ArbiFlow Event Triggered Discovery 12.9.87
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SwapEventDiscovery12987.js'
+      - '.github/workflows/swap-event-discovery-12987.yml'
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check SwapEventDiscovery12987.js
+      - name: Verify RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "BASE_RPC_URL missing"
+            exit 1
+          fi
+      - run: npm run test:swap-events
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swap-event-discovery-12987
+          path: arbiflow-swap-events-12987.json
+          if-no-files-found: warn
