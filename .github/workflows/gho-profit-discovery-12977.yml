@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.77 GHO Profit Discovery
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'GhoProfitDiscovery12977.js'
+      - '.github/workflows/gho-profit-discovery-12977.yml'
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check GhoProfitDiscovery12977.js
+      - name: Require Ethereum RPC
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL missing; discovery NOT TESTED"
+            exit 1
+          fi
+      - run: npm run test:gho-profit-discovery
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gho-profit-discovery-12977
+          path: arbiflow-gho-profit-discovery-12977.json
+          if-no-files-found: warn
