@@ -44,6 +44,14 @@ async function main() {
    result.traceProbed=true;
    try{
     // A tracer result establishes provider capabilities, NOT valid replayed state.
+    for(let i=0;i<TARGET_INDEX;i++){
+     const tx=result.transactions[i];
+     try{
+      const diff=await rpc.send('debug_traceTransaction',[tx.hash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
+      const check=evaluateTrace(diff);
+      result.prefixTraces.push({index:i,hash:tx.hash,transactionType:tx.type,traceShapeValid:check.traceShapeValid,traceSummary:check});
+     }catch(e){result.prefixTraces.push({index:i,hash:tx.hash,transactionType:tx.type,traceShapeValid:false,error:short(e)});}
+    }
     const trace=await rpc.send('debug_traceTransaction',[TARGET_HASH,
       {tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
     const validated=evaluateTrace(trace);
