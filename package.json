@@ -48,7 +48,8 @@
     "test:three-leg-routes": "node ThreeLegRoutes12942.js",
     "test:dynamic-routes": "node DynamicRoutes12943.js",
     "test:route-priority": "node RoutePriority12944.js",
-    "test:route-amounts": "node RouteAmounts12945.js"
+    "test:route-amounts": "node RouteAmounts12945.js",
+    "test:speed-audit": "node SpeedAudit12946.js"
   },
   "engines": {
     "node": ">=20"
