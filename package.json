@@ -45,7 +45,8 @@
     "test:pending-state": "node PendingState12939.js",
     "test:pool-depth": "node PoolDepth12940.js",
     "test:pool-rank": "node PoolRank12941.js",
-    "test:three-leg-routes": "node ThreeLegRoutes12942.js"
+    "test:three-leg-routes": "node ThreeLegRoutes12942.js",
+    "test:dynamic-routes": "node DynamicRoutes12943.js"
   },
   "engines": {
     "node": ">=20"
