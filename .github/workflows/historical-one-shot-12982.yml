@@ -1,0 +1,35 @@
+name: ArbiFlow One Shot Historical Benchmark
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'HistoricalOneShot12982.js'
+      - '.github/workflows/historical-one-shot-12982.yml'
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check HistoricalOneShot12982.js
+      - name: Require Ethereum RPC
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL missing; benchmark not run"
+            exit 1
+          fi
+      - run: npm run test:historical-one-shot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-one-shot-12982
+          path: arbiflow-one-shot-benchmark-12982.json
+          if-no-files-found: warn
