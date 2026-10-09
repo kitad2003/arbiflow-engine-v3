@@ -1,0 +1,34 @@
+name: ArbiFlow 12.9.59 Transaction Intelligence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TransactionIntelligence12959.js'
+      - '.github/workflows/transaction-intelligence-12959.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      INTELLIGENCE_MAX_EVENTS: 15
+      INTELLIGENCE_WATCH_SECONDS: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run read-only swap event intelligence
+        run: npm run test:transaction-intelligence
+      - name: Preserve diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: transaction-intelligence-12959
+          path: arbiflow-event-intelligence-12959.json
+          if-no-files-found: warn
