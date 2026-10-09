@@ -66,7 +66,7 @@ async function run(rpc){
    const row={...serialize(r),sizes:[]};
    for(const dollars of SIZES){const amount=BigInt(dollars)*1000000n;
     const entry={sizeUsdc:dollars,canBorrowByBalance:amount<=balance,qualified:false};
-    if(amount>balance){entry.success=false;entry.error:'VAULT_BALANCE_BELOW_SIZE';row.sizes.push(entry);continue}
+    if(amount>balance){entry.success=false;entry.error='VAULT_BALANCE_BELOW_SIZE';row.sizes.push(entry);continue}
     try{let out=amount;for(const leg of r.legs)out=await quote(leg,out);
      const fee=(amount*feeWad+10n**18n-1n)/10n**18n,profit=out-amount-fee;
      Object.assign(entry,{success:true,returnRaw:out.toString(),grossUsdc:Number(out-amount)/1e6,
