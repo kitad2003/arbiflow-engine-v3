@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const { JsonRpcProvider } = require('ethers');
 const { validatePrefix } = require('./BasePrefixValidation12990');
+const { evaluateTrace } = require('./BaseTraceValidation12991');
 const BLOCK = 52392050;
 const TARGET_INDEX = 2;
 const TARGET_HASH = '0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
@@ -43,9 +44,11 @@ async function main() {
     // A tracer result establishes provider capabilities, NOT valid replayed state.
     const trace=await rpc.send('debug_traceTransaction',[TARGET_HASH,
       {tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'20s'}]);
-    result.rpcTraceSupported=!!trace;
-    result.traceTargetSuccessful=!!(trace&&typeof trace==='object');
-    result.traceShape=trace ? Object.keys(trace).slice(0,8) : [];
+    const validated=evaluateTrace(trace);
+    result.rpcTraceSupported=true;
+    result.traceTargetSuccessful=validated.traceShapeValid;
+    result.traceValidation=validated;
+    result.traceShape=trace && typeof trace==='object' ? Object.keys(trace).slice(0,8) : [];
    }catch(e){result.rpcTraceSupported=false;result.traceError=short(e)}
   }
   result.status='PREFLIGHT_COMPLETE_REPLAY_NOT_PROVEN';
