@@ -1,0 +1,35 @@
+name: ArbiFlow Real DEX Fork 12.9.85
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'RealDexFork12985.js'
+      - '.github/workflows/real-dex-fork-12985.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check RealDexFork12985.js
+      - name: Verify Ethereum RPC
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL required"
+            exit 1
+          fi
+      - run: npm run test:real-dex-fork
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-dex-fork-12985
+          path: arbiflow-real-dex-fork-12985.json
+          if-no-files-found: warn
