@@ -1,0 +1,33 @@
+name: ArbiFlow 12.9.62 Triangular Discovery
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TriangleDiscovery12962.js'
+      - '.github/workflows/triangular-discovery-12962.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      TRIANGLE_ROUTE_LIMIT: 45
+      COMPARATOR_ROUTE_LIMIT: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run read-only triangular audit
+        run: npm run test:triangles
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triangular-discovery-12962
+          path: arbiflow-triangles-12962.json
+          if-no-files-found: warn
