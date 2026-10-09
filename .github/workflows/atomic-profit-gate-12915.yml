@@ -1,0 +1,28 @@
+name: ArbiFlow 12.9.15 Flash Loan Profit Gate
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveDexProfitGate12915.js'
+      - '.github/workflows/atomic-profit-gate-12915.yml'
+jobs:
+  loan-profit-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      FORK_FLASH_LOAN_USDC: '10000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run full Aave flash-loan two-swap profit gate on disposable Base fork
+        run: npm run test:atomic-profit-gate
