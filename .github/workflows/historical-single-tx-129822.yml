@@ -1,0 +1,36 @@
+name: ArbiFlow Focused Historical Tx
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'HistoricalSingleTx129822.js'
+      - '.github/workflows/historical-single-tx-129822.yml'
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+      ETHEREUM_TRACE_RPC_URL: ${{ secrets.ETHEREUM_TRACE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check HistoricalSingleTx129822.js
+      - name: Require Ethereum RPC
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL missing; no test performed"
+            exit 1
+          fi
+      - run: npm run test:historical-single-tx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-single-tx-129822
+          path: arbiflow-single-tx-diagnostic-129822.json
+          if-no-files-found: warn
