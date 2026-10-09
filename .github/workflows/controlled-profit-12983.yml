@@ -1,0 +1,23 @@
+name: ArbiFlow Controlled Profit Validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ControlledProfit12983.js'
+      - '.github/workflows/controlled-profit-12983.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check ControlledProfit12983.js
+      - run: npm run test:controlled-profit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controlled-profit-12983
+          path: arbiflow-controlled-profit-12983.json
