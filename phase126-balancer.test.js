@@ -1,0 +1,30 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {Interface}=require('ethers');
+const {probe}=require('./phase126-balancer');
+const VAULT='0xBA12222222228d8Ba445958a75a0704d566BF2C8';
+const USDC='0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+const COL='0x1111111111111111111111111111111111111111';
+const v=new Interface(['function getProtocolFeesCollector() view returns(address)','function getPausedState() view returns(bool,uint256,uint256)']);
+const f=new Interface(['function getFlashLoanFeePercentage() view returns(uint256)']);
+const t=new Interface(['function balanceOf(address) view returns(uint256)']);
+const mock=async(_chain,method,params)=>{
+ if(method==='eth_getCode')return '0x6000';
+ if(method!=='eth_call')throw Error('UNKNOWN_METHOD');
+ const {to,data}=params[0],sel=data.slice(0,10);
+ if(to.toLowerCase()===VAULT.toLowerCase()&&sel===v.getFunction('getProtocolFeesCollector').selector)return v.encodeFunctionResult('getProtocolFeesCollector',[COL]);
+ if(to.toLowerCase()===VAULT.toLowerCase()&&sel===v.getFunction('getPausedState').selector)return v.encodeFunctionResult('getPausedState',[false,0,0]);
+ if(to.toLowerCase()===COL.toLowerCase())return f.encodeFunctionResult('getFlashLoanFeePercentage',[0]);
+ if(to.toLowerCase()===USDC.toLowerCase())return t.encodeFunctionResult('balanceOf',[1000000000n]);
+ throw Error('UNEXPECTED_CALL');
+};
+(async()=>{
+ const r=await probe({chainId:8453},mock);
+ assert.equal(r.technicalPreScreen,true);
+ assert.equal(r.qualifiedForExecution,false);
+ assert.equal(r.safety.executionEligible,false);
+ assert.equal(r.loanAmountScreens[0].withinObservedVaultBalance,true);
+ assert.equal(r.loanAmountScreens.at(-1).withinObservedVaultBalance,false);
+ await assert.rejects(()=>probe({chainId:1},mock),/BASE_CHAIN_REQUIRED/);
+ console.log('PASS Balancer read-only probe and execution lock invariants');
+})().catch(e=>{console.error(e);process.exitCode=1;});
