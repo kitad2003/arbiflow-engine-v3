@@ -37,6 +37,10 @@ async function main(){
   const after=await output.balanceOf(account);assert(after>before,'NO_SWAP_OUTPUT');
   return {output:after-before,gas:receipt.gasUsed};
  }
+ const vault=new e.Contract(BAL,['function getProtocolFeesCollector() view returns(address)'],p);
+ const feeCollector=await vault.getProtocolFeesCollector();
+ const feeContract=new e.Contract(feeCollector,['function getFlashLoanFeePercentage() view returns(uint256)'],p);
+ const feeWad=BigInt(await feeContract.getFlashLoanFeePercentage());
  const results=[];
  for(const dollars of AMOUNTS)for(const direction of [{name:'UNISWAP_TO_AERODROME',first:UNI,second:AERO,uniFirst:true},{name:'AERODROME_TO_UNISWAP',first:AERO,second:UNI,uniFirst:false}]){
   const snap=await hre.network.provider.send('evm_snapshot'),amount=BigInt(dollars)*1000000n;
@@ -50,9 +54,10 @@ async function main(){
    row.independentSwapSuccess=true;row.wethReceivedRaw=first.output.toString();row.usdcReturnedRaw=second.output.toString();
    row.grossUsdc=Number(gross)/1e6;row.grossSpreadPct=Number(gross)*100/(Number(amount));
    row.independentSwapGasUnits=(first.gas+second.gas).toString();
-   row.balancerFeeRaw='0'; // Fee from previously verified Balancer test block; check current vault fee separately.
-   row.afterKnownBalancerFeeUsdc=row.grossUsdc;row.estimatedNetProfitUsdc=null;
-   row.profitGateWouldPass=gross>0n;
+   const fee=(amount*feeWad+999999999999999999n)/1000000000000000000n;
+   row.balancerFeeRaw=fee.toString();
+   row.afterKnownBalancerFeeUsdc=Number(gross-fee)/1e6;row.estimatedNetProfitUsdc=null;
+   row.profitGateWouldPass=gross>fee;
   }catch(err){row.independentSwapError=String(err?.shortMessage||err?.message||err).slice(0,135)}
   await hre.network.provider.send('evm_revert',[snap]);
   const probe=await hre.network.provider.send('evm_snapshot');
@@ -65,7 +70,7 @@ async function main(){
   await hre.network.provider.send('evm_revert',[probe]);
   results.push(row);
  }
- const output={build:'BALANCER_LOSS_INVESTIGATOR_12966',success:true,chain:'BASE_FORK',forkOriginBlock:origin,amountsUsdc:AMOUNTS,vaultBalanceUsdc:Number(vaultUsdc)/1e6,results,
+ const output={build:'BALANCER_LOSS_INVESTIGATOR_12966',success:true,chain:'BASE_FORK',forkOriginBlock:origin,amountsUsdc:AMOUNTS,balancerFeePercentageWad:feeWad.toString(),vaultBalanceUsdc:Number(vaultUsdc)/1e6,results,
  notes:['Independent swaps use fork-only seeded USDC for loss attribution; not proof of flash-loan profitability','Fee and exact gas/net require atomic successful simulation and fee verification','Any losing atomic transaction reverts; no mainnet broadcast'],
  qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false};
  console.log(JSON.stringify(output));
