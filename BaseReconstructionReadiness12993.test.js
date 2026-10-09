@@ -9,3 +9,5 @@ test('missing prefix trace',()=>{const r=sample();r.prefixTraces.pop();assert.eq
 test('wrong prefix hash',()=>{const r=sample();r.prefixTraces[1].hash=h(8);assert.equal(readiness(r).code,'PREFIX_TRACE_INVALID')});
 test('target trace absent',()=>{const r=sample();r.traceTargetSuccessful=false;assert.equal(readiness(r).code,'TARGET_TRACE_MISSING')});
 test('unsafe flags',()=>{const r=sample();r.executionEligible=true;assert.equal(readiness(r).code,'SAFETY_GATE')});
+
+test('contradictory adjacent traces are blocked',()=>{const r=sample();r.traceContinuity=[{from:0,to:1,status:'INCONSISTENT',mismatches:[{field:'balance'}]}];assert.equal(readiness(r).code,'TRACE_CONTINUITY_CONTRADICTION')});
