@@ -40,7 +40,9 @@
     "test:multi-pool-discovery": "node MultiPoolDiscovery12935.js",
     "test:cross-dex-quotes": "node CrossDexQuotes12936.js",
     "test:expanded-dex-pools": "node ExpandedDexPools12937.js",
-    "test:multi-dex-quotes": "node MultiDexQuotes12938.js"
+    "test:multi-dex-quotes": "node MultiDexQuotes12938.js",
+    "test:pool-universe": "node PoolUniverse12939.js",
+    "test:pending-state": "node PendingState12939.js"
   },
   "engines": {
     "node": ">=20"
