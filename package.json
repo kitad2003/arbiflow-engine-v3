@@ -73,7 +73,8 @@
     "test:balancer-loss-investigator": "hardhat run --config hardhat.aave1299.config.js BalancerLossInvestigator12966.js",
     "test:market-discrepancy": "node MarketDiscrepancy12967.js",
     "test:price-integrity": "node PriceIntegrity12968.js",
-    "test:lst-research": "node LSTResearch12969.js"
+    "test:lst-research": "node LSTResearch12969.js",
+    "test:lst-dynamic-sizing": "node LSTDynamicSizing12970.js"
   },
   "engines": {
     "node": ">=20"
