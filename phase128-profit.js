@@ -28,15 +28,15 @@ function assess(routes,aave){
  });
  return {success:true,build:'12.8.0',strategy:'FLASH_LOAN_FIRST',quoteBuild:routes?.build??null,quoteBlock:routes?.blockTag??null,loanSizeUsdc:principal===null?null:loanSize,quoteDataAvailable:!!routes?.routes?.length,providerOptions,routeAssessments:reviewed,qualified:0,alerts:[],netProfitVerified:false,needs:['ONCHAIN_TRANSACTION_GAS_ESTIMATE','BASE_L1_DATA_FEE','SLIPPAGE_BOUND','ATOMIC_FLASH_LOAN_FORK_TEST','FRESH_PROVIDER_READS'],safety};
 }
-function mount(app,{getRoutes,getAave,startScan,getRunning}){
+function mount(app,{getRoutes,getAave,startScan,getRunning,getStage}){
  app.get('/api/phase12/profit/refresh',(req,res)=>{
   const amount=Number(req.query.amountUsdc||500);
   if(![100,500,1000].includes(amount))return res.status(400).json({success:false,error:'ALLOWED_AMOUNTS_100_500_1000',safety});
   const result=startScan(amount);
-  res.status(result.success?200:409).json({...result,build:'12.8.1',profitStatusRoute:'/api/phase12/profit/status',routeStatusRoute:'/api/phase12/routes/status',safety});
+  res.status(result.success?200:409).json({...result,build:'12.8.2',profitStatusRoute:'/api/phase12/profit/status',routeStatusRoute:'/api/phase12/routes/status',safety});
  });
  app.get('/api/phase12/profit/status',(_req,res)=>{
-  try{res.json({...assess(getRoutes(),getAave()),build:'12.8.1',scannerRunning:getRunning(),diagnostic:getRunning()?'QUOTE_SCAN_IN_PROGRESS':getRoutes()==null?'NO_CURRENT_PROCESS_QUOTE_RESULTS':'QUOTE_RESULTS_AVAILABLE'})}
+  try{res.json({...assess(getRoutes(),getAave()),build:'12.8.1',scannerRunning:getRunning(),scannerStage:getStage(),diagnostic:getRunning()?'QUOTE_SCAN_IN_PROGRESS':getRoutes()==null?'NO_CURRENT_PROCESS_QUOTE_RESULTS':'QUOTE_RESULTS_AVAILABLE'})}
   catch(e){res.status(500).json({success:false,error:'PROFIT_ASSESSMENT_UNAVAILABLE',qualified:0,alerts:[],safety})}
  });
 }
