@@ -4,7 +4,7 @@
 const fs=require('node:fs'),assert=require('node:assert/strict'),{ethers}=require('ethers');
 const {run:discover}=require('./LiquidationIntelligence12973');
 const POOL='0xA238Dd80C259a72e81d7e4664a9801593F98d1';
-const P=['function getReservesList() view returns(address[])','function getReserveData(address) view returns((uint256 configuration,uint128 liquidityIndex,uint128 currentLiquidityRate,uint128 variableBorrowIndex,uint128 currentVariableBorrowRate,uint128 currentStableBorrowRate,uint40 lastUpdateTimestamp,uint16 id,address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress,address interestRateStrategyAddress,uint128 accruedToTreasury,uint128 unbacked,uint128 isolationModeTotalDebt))',
+const P=['function getReservesList() view returns(address[])','function getReserveData(address) view returns(((uint256 data) configuration,uint128 liquidityIndex,uint128 currentLiquidityRate,uint128 variableBorrowIndex,uint128 currentVariableBorrowRate,uint128 currentStableBorrowRate,uint40 lastUpdateTimestamp,uint16 id,address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress,address interestRateStrategyAddress,uint128 accruedToTreasury,uint128 unbacked,uint128 isolationModeTotalDebt))',
 'function getUserAccountData(address) view returns(uint256,uint256,uint256,uint256,uint256,uint256)'];
 const TOKEN=['function balanceOf(address) view returns(uint256)','function decimals() view returns(uint8)','function symbol() view returns(string)'];
 const CAP=Number(process.env.LIQUIDATION_INVESTIGATE_LIMIT||12);
@@ -18,7 +18,7 @@ async function main(rpc){
   const block=await p.getBlockNumber(),c=new ethers.Contract(POOL,P,p),reserveAddresses=await c.getReservesList({blockTag:block}),reserves=[];
   for(const asset of reserveAddresses){
    try{
-    const data=await c.getReserveData(asset,{blockTag:block}),conf=decodeConfiguration(data.configuration),t=new ethers.Contract(asset,TOKEN,p);
+    const data=await c.getReserveData(asset,{blockTag:block}),conf=decodeConfiguration(data.configuration.data),t=new ethers.Contract(asset,TOKEN,p);
     let symbol=null;try{symbol=await t.symbol({blockTag:block})}catch{}
     reserves.push({asset,symbol,configuration:conf,aToken:data.aTokenAddress,variableDebtToken:data.variableDebtTokenAddress});
    }catch(e){errors.push({stage:'RESERVE',asset,error:fail(e)})}
