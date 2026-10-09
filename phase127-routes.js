@@ -62,28 +62,33 @@ async function scan(chain,rpc,amountUsdc){
   if(buy.name===sell.name)continue;
   const row={buyDex:buy.name,buyTier:buy.tier,buyPool:buy.pool,sellDex:sell.name,sellTier:sell.tier,sellPool:sell.pool,blockTag:block,quoteSuccess:false,qualifiedForDashboard:false,executionEligible:false};
   try{
+   row.failedLeg='BUY_USDC_TO_WETH';
    const weth=await quote(buy,USDC,WETH,starting);
+   row.buyQuoteSucceeded=true;
+   row.failedLeg='SELL_WETH_TO_USDC';
    const returned=await quote(sell,WETH,USDC,weth);
+   row.sellQuoteSucceeded=true;
+   row.failedLeg=null;
    const gross=returned-starting;
    row.wethOutRaw=weth.toString();row.returnUsdcRaw=returned.toString();
    row.grossUsdcRaw=gross.toString();
    row.spreadAbovePointFivePct=gross*10000n>starting*50n;
    row.quoteSuccess=true;
-  }catch(e){row.error=safe(e)}
+  }catch(e){row.error=safe(e);row.errorCategory=row.error.includes('reverted')?'QUOTE_EXECUTION_REVERTED':'QUOTE_RPC_ERROR'}
   rows.push(row);
  }
- return {success:pools.length>0,build:'12.7.5',diagnostic:pools.length===0?'NO_VERIFIED_POOLS':new Set(pools.map(x=>x.name)).size<2?'ONLY_ONE_VENUE_VERIFIED':rows.some(x=>x.quoteSuccess)?'CROSS_VENUE_QUOTES_RECEIVED':'CROSS_VENUE_POOLS_FOUND_QUOTES_UNVERIFIED',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
+ return {success:pools.length>0,build:'12.7.6',diagnostic:pools.length===0?'NO_VERIFIED_POOLS':new Set(pools.map(x=>x.name)).size<2?'ONLY_ONE_VENUE_VERIFIED':rows.some(x=>x.quoteSuccess)?'CROSS_VENUE_QUOTES_RECEIVED':'CROSS_VENUE_POOLS_FOUND_QUOTES_UNVERIFIED',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
 }
 function mount(app,{getBaseChain,rpc}){
  let running=false,lastResult=null,lastCheckedAt=null,startedAt=null;
- app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.5',running,startedAt,lastCheckedAt,lastResult,safety}));
+ app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.6',running,startedAt,lastCheckedAt,lastResult,safety}));
  app.get('/api/phase12/routes/probe',(req,res)=>{
   if(running)return res.status(409).json({success:false,error:'ROUTE_PROBE_RUNNING',startedAt,statusRoute:'/api/phase12/routes/status',safety});
   const amount=Number(req.query.amountUsdc||100);
   if(![100,500,1000].includes(amount))return res.status(400).json({success:false,error:'ALLOWED_AMOUNTS_100_500_1000',safety});
   running=true;startedAt=new Date().toISOString();
   lastResult=null;
-  res.json({success:true,build:'12.7.5',status:'SCAN_STARTED',amountUsdc:amount,startedAt,statusRoute:'/api/phase12/routes/status',safety});
+  res.json({success:true,build:'12.7.6',status:'SCAN_STARTED',amountUsdc:amount,startedAt,statusRoute:'/api/phase12/routes/status',safety});
   setImmediate(async()=>{
    try{lastResult=await scan(getBaseChain(),rpc,amount)}
    catch(e){lastResult={success:false,error:safe(e),qualified:0,alerts:[],safety}}
