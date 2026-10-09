@@ -12,9 +12,9 @@ async function probe(chain,rpc,onStep){
  if(Number(chain?.chainId)!==8453)throw Error('BASE_CHAIN_REQUIRED');
  const pool=await read(rpc,chain,provider,providerAbi,'getPool',[],onStep);
  if(pool.toLowerCase()!==expectedPool.toLowerCase())throw Error('AAVE_POOL_ADDRESS_MISMATCH');
- const premium=BigInt(await read(rpc,chain,pool,poolAbi,'FLASHLOAN_PREMIUM_TOTAL'));
+ const premium=BigInt(await read(rpc,chain,pool,poolAbi,'FLASHLOAN_PREMIUM_TOTAL',[],onStep));
  if(premium>10000n)throw Error('INVALID_PREMIUM_BPS');
- const balance=BigInt(await read(rpc,chain,usdc,tokenAbi,'balanceOf',[pool]));
+ const balance=BigInt(await read(rpc,chain,usdc,tokenAbi,'balanceOf',[pool],onStep));
  return {status:'AAVE_BASE_ONCHAIN_READS_VERIFIED',provider:'AAVE_V3',chainId:8453,addressesProvider:provider,pool,asset:usdc,assetSymbol:'USDC',assetDecimals:6,poolTokenBalanceRaw:balance.toString(),poolTokenBalanceUsdc:(Number(balance)/1e6).toFixed(2),premiumBps:Number(premium),premiumPct:Number(premium)/100,availableFlashLoanAmountVerified:false,loanExecutionVerified:false,callbackVerified:false,notes:['POOL_TOKEN_BALANCE_IS_NOT_GUARANTEED_FLASH_LOAN_CAPACITY','RESERVE_PAUSE_AND_FLASHLOAN_ENABLEMENT_NOT_CHECKED','PREMIUM_CAN_CHANGE','NO_LOAN_EXECUTED'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
 }
 module.exports={probe};
