@@ -78,7 +78,8 @@
     "test:research-validation": "node ResearchValidation12971.js",
     "test:alternative-evidence": "node AlternativeEvidence12972.js",
     "test:liquidation-intelligence": "node LiquidationIntelligence12973.js",
-    "test:liquidation-profit-investigation": "node LiquidationProfit12974.js"
+    "test:liquidation-profit-investigation": "node LiquidationProfit12974.js",
+    "test:flash-mint-research": "node FlashMintResearch12975.js"
   },
   "engines": {
     "node": ">=20"
