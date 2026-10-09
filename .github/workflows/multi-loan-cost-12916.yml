@@ -1,0 +1,28 @@
+name: ArbiFlow 12.9.16 Multi Loan Fork Costs
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveMultiLoanCost12916.js'
+      - '.github/workflows/multi-loan-cost-12916.yml'
+jobs:
+  fork-cost-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      FORK_LOAN_SIZES_USDC: '1000,10000,50000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require fork RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify configurable Aave flash loan sizes and atomic gas diagnostics
+        run: npm run test:multi-loan-cost-fork
