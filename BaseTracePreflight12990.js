@@ -4,6 +4,7 @@
 // Does NOT submit, sign, or execute any transaction.
 const fs = require('node:fs');
 const { JsonRpcProvider } = require('ethers');
+const { validatePrefix } = require('./BasePrefixValidation12990');
 const BLOCK = 52392050;
 const TARGET_INDEX = 2;
 const TARGET_HASH = '0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
@@ -29,15 +30,11 @@ async function main() {
   const block=await rpc.send('eth_getBlockByNumber',['0x'+BLOCK.toString(16),true]);
   assert(block?.transactions?.length>TARGET_INDEX,'HISTORICAL_BLOCK_MISSING');
   assert(block.transactions[TARGET_INDEX].hash.toLowerCase()===TARGET_HASH,'TARGET_TX_MISMATCH');
-  for(let i=0;i<=TARGET_INDEX;i++){
-   const tx=block.transactions[i];const receipt=await rpc.send('eth_getTransactionReceipt',[tx.hash]);
-   assert(receipt&&receipt.blockNumber===block.number,'RECEIPT_BLOCK_MISMATCH_'+i);
-   const type=Number(BigInt(tx.type));const receiptType=Number(BigInt(receipt.type));
-   assert(type===receiptType,'TX_RECEIPT_TYPE_MISMATCH_'+i);
-   if(type===126)result.depositIndices.push(i);
-   result.transactions.push({index:i,hash:tx.hash,type:'0x'+type.toString(16),
-    receiptStatus:receipt.status,gasUsed:receipt.gasUsed,transactionIndex:receipt.transactionIndex});
-  }
+  const receipts=[];
+  for(let i=0;i<=TARGET_INDEX;i++)receipts.push(await rpc.send('eth_getTransactionReceipt',[block.transactions[i].hash]));
+  const prefix=validatePrefix(block,receipts,TARGET_INDEX,TARGET_HASH);
+  result.transactions=prefix.transactions;
+  result.depositIndices=prefix.depositIndices;
   // Default mode only reads block + receipt metadata. Tracing is optional because
   // third-party RPC providers may not expose debug_traceTransaction.
   if(process.env.ARBIFLOW_ENABLE_TRACE_PROBE==='1'){
