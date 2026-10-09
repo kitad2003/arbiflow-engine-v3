@@ -3,6 +3,7 @@
 const {Interface}=require('ethers');
 const {simulateAerodrome}=require('./phase102-impact');
 const pendingObservations=require('./phase108-observations');
+const receiptTracker=require('./phase115-receipts');
 const routerRegistry={
  UNISWAP_ROUTER_02:'0x2626664c2603336e57b271c5c0b26f421741e481',
  AERODROME_ROUTER:'0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43'
@@ -45,7 +46,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'11.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ const state={build:'11.5.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
@@ -66,7 +67,7 @@ function mount(app,{getBaseChain,rpc}){
     if(!name){counts.contractInteraction++;const selector=data.slice(0,10).toLowerCase();if(targetAddress(tx)===BASE_USDC&&erc20Selectors[selector])tokenMethods.verifiedUsdc++;else if(erc20Selectors[selector])tokenMethods.unverifiedErc20Selector++;if(targetAddress(tx)===BASE_USDC)watchedAssets.usdc++;if(targetAddress(tx)===BASE_WETH)watchedAssets.weth++;unknownSelectors[selector]=(unknownSelectors[selector]||0)+1;const target=String(tx.to).toLowerCase();const key=target+'|'+selector;unknownTargets.set(key,(unknownTargets.get(key)||0)+1);continue;}
     counts.knownRouter++;routers[name]=(routers[name]||0)+1;
     const result=decode({...tx,input:data},name);
-    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED',_txValue:tx.value||'0x0'});}
+    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;receiptTracker.track({hash:tx.hash,router:name,method:result.method});swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED',_txValue:tx.value||'0x0'});}
     else if(result.classification==='NESTED_MULTICALL')counts.nestedMulticall++;
     else counts.unsupportedRouterMethod++;
    }
