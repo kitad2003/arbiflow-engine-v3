@@ -1,0 +1,46 @@
+name: ArbiFlow 12.9.32 Actual Settlement Evidence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SettlementAnalysis12931.js'
+      - '.github/workflows/actual-settlement-12932.yml'
+jobs:
+  actual-settlement-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Capture actual fork-only settlement test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:atomic-settlement-gas | tee atomic-fork-output.log
+      - name: Extract exact 12.9.30 result, never synthesize
+        run: |
+          node -e 'const fs=require("fs");const logs=fs.readFileSync("atomic-fork-output.log","utf8");const matches=logs.split(/\r?\n/).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(x=>x&&x.build==="12.9.30"&&Array.isArray(x.rows));if(matches.length!==1||!matches[0].success||matches[0].rows.length===0)throw Error("EXACT_ONE_NONEMPTY_ACTUAL_12930_RESULT_REQUIRED");fs.writeFileSync("actual-settlement-12930.json",JSON.stringify(matches[0],null,2));console.log("ACTUAL_REPORT_EXTRACTED rows="+matches[0].rows.length)'
+      - name: Analyze actual results and fail if missing
+        env:
+          ATOMIC_REPORT_PATH: actual-settlement-12930.json
+        run: npm run test:settlement-analysis
+      - name: Upload actual evidence and summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-12932-actual-settlement
+          path: |
+            atomic-fork-output.log
+            actual-settlement-12930.json
+          if-no-files-found: warn
