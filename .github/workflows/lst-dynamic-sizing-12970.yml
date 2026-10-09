@@ -1,0 +1,34 @@
+name: ArbiFlow 12.9.70 LST Dynamic Sizing
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LSTDynamicSizing12970.js'
+      - '.github/workflows/lst-dynamic-sizing-12970.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      LST_SIZE_ROUTE_LIMIT: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Check syntax
+        run: node --check LSTDynamicSizing12970.js
+      - name: Run dynamic loan sizing audit
+        run: npm run test:lst-dynamic-sizing
+      - name: Upload complete report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lst-dynamic-sizing-12970
+          path: arbiflow-lst-sizing-12970.json
+          if-no-files-found: warn
