@@ -48,7 +48,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'11.8.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ const state={build:'11.9.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
@@ -81,6 +81,22 @@ function mount(app,{getBaseChain,rpc}){
   finally{state.running=false;}
   if(res)res.json(state.lastResult);
  }
+ const pairProbe={running:false,checks:0,failures:0,lastRunAt:null,lastError:null,lastResult:null};
+ async function runPairProbe(res){
+  if(pairProbe.running){if(res)return res.status(409).json({success:false,error:'PAIR_PROBE_RUNNING'});return;}
+  pairProbe.running=true;pairProbe.checks++;pairProbe.lastRunAt=new Date().toISOString();
+  try{
+   const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
+   const swap={router:'UNISWAP_ROUTER_02',method:'exactInputSingle',tokenIn:BASE_USDC,tokenOut:BASE_WETH,fee:500};
+   const v3Pool=await v3Inspector.inspect(swap,chain,rpc);
+   const samePairPools=v3Pool.status==='POOL_STATE_VERIFIED'?await pairDiscovery.discover({...swap,v3Pool},chain,rpc):null;
+   pairProbe.lastResult={success:true,build:'11.9.0',chainId:8453,probePair:'BASE_USDC_WETH',v3Pool,samePairPools,qualified:0,alerts:[],limitations:['INDEPENDENT_DIAGNOSTIC_NOT_PENDING_TRANSACTION','SAME_DEX_POOLS_NOT_CROSS_DEX','NO_EXECUTABLE_QUOTES','NO_PROFIT_VALIDATION'],safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
+  }catch(e){pairProbe.failures++;pairProbe.lastError=safeError(e);pairProbe.lastResult={success:false,build:'11.9.0',error:pairProbe.lastError,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
+  finally{pairProbe.running=false;}
+  if(res)return res.json(pairProbe.lastResult);
+ }
+ app.get('/api/phase11/pairs/status',(_req,res)=>res.json({success:true,build:'11.9.0',...pairProbe,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
+ app.get('/api/phase11/pairs/probe',async(_req,res)=>runPairProbe(res));
  app.get('/api/phase10/probe',async(_req,res)=>runProbe(res,'manual'));
  const autoTimer=setInterval(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=safeError(e);});},60000);
  autoTimer.unref?.();
