@@ -4,7 +4,7 @@
 const MICRO=1000000n;
 const MAX=1000000000000000n*MICRO;
 function amount(value,name) {
-  if(typeof value!=='string'|| !/^(0|[1-9][0-9]{0,14})(\\.[0-9]{1,6})?$/.test(value))throw Error(name+'_INVALID_USDC_AMOUNT');
+  if(typeof value!=='string'|| !/^(0|[1-9][0-9]{0,14})(\.[0-9]{1,6})?$/.test(value))throw Error(name+'_INVALID_USDC_AMOUNT');
   const [a,b='']=value.split('.');
   const n=BigInt(a)*MICRO+BigInt((b+'000000').slice(0,6));
   if(n>MAX)throw Error(name+'_OUT_OF_RANGE');
