@@ -1,0 +1,19 @@
+name: ArbiFlow 12.9.17 Net Profit Gate
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'NetProfitGate12917.js'
+      - '.github/workflows/net-profit-gate-12917.yml'
+jobs:
+  profit-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify fail closed profit gate and thresholds
+        run: npm run test:net-profit-gate
