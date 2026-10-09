@@ -1,0 +1,27 @@
+name: ArbiFlow Balancer V2 Atomic DEX Fork
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BalancerAtomicDexTest12965.js'
+      - 'atomic-mock-contracts/BalancerAtomicDex12965.sol'
+      - '.github/workflows/balancer-atomic-dex-12965.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Compile fork receiver
+        run: npx hardhat compile --config hardhat.aave1299.config.js
+      - name: Run full atomic Balancer V2 and two DEX simulation
+        run: npm run test:balancer-atomic-dex
