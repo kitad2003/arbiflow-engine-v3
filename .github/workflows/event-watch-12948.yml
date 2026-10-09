@@ -1,0 +1,46 @@
+name: ArbiFlow 12.9.48 Wide Event Watch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'EventWatch12948.js'
+      - '.github/workflows/event-watch-12948.yml'
+jobs:
+  wide-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      WATCH_SECONDS: 45
+      WATCH_MAX_EVENTS: 24
+      ROUTE_LIMIT: 600
+      QUOTE_WORKERS: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Restore cached pool registry
+        uses: actions/cache/restore@v4
+        with:
+          path: .arbiflow-pools-12948.json
+          key: base-pools-12948-${{ github.run_id }}
+          restore-keys: |
+            base-pools-12948-
+      - name: Require RPC and WebSocket endpoints
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+          if [ -z "$BASE_FLASHBLOCKS_WSS_URL" ]; then echo "::error::BASE_FLASHBLOCKS_WSS_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run event watch with bounded quote queue
+        run: npm run test:event-watch-wide
+      - name: Preserve pool registry for next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .arbiflow-pools-12948.json
+          key: base-pools-12948-${{ github.run_id }}
