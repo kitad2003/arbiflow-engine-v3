@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.34 DEX Pool Discovery
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'DexPoolDiscovery12934.js'
+      - '.github/workflows/dex-pool-discovery-12934.yml'
+jobs:
+  base-pool-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Read-only onchain DEX and pool verification
+        run: npm run test:dex-pool-discovery
