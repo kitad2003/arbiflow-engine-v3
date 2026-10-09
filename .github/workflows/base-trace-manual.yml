@@ -55,3 +55,8 @@ jobs:
           name: base-trace-evidence
           path: arbiflow-base-trace-12990.json
           if-no-files-found: warn
+      - name: Fail if RPC capability probe failed
+        if: steps.capabilities.outcome == 'failure'
+        run: |
+          echo '::error::RPC tracing capability probe failed. Review its output before retrying historical replay.'
+          exit 1
