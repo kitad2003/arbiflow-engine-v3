@@ -70,7 +70,8 @@
     "scanner:local": "node ArbiFlowScannerService.js",
     "test:balancer-v2-fork": "hardhat run --config hardhat.aave1299.config.js BalancerV2ForkTest12964.js",
     "test:balancer-atomic-dex": "hardhat run --config hardhat.aave1299.config.js BalancerAtomicDexTest12965.js",
-    "test:balancer-loss-investigator": "hardhat run --config hardhat.aave1299.config.js BalancerLossInvestigator12966.js"
+    "test:balancer-loss-investigator": "hardhat run --config hardhat.aave1299.config.js BalancerLossInvestigator12966.js",
+    "test:market-discrepancy": "node MarketDiscrepancy12967.js"
   },
   "engines": {
     "node": ">=20"
