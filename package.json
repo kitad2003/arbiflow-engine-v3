@@ -65,7 +65,9 @@
     "test:transaction-intelligence": "node TransactionIntelligence12959.js",
     "test:direction-intelligence": "node DirectionIntelligence12960.js",
     "test:dynamic-sizing": "node DynamicSizing12961.js",
-    "test:triangles": "node TriangleDiscovery12962.js"
+    "test:triangles": "node TriangleDiscovery12962.js",
+    "test:scanner-integration": "node ArbiFlowScannerTest.js",
+    "scanner:local": "node ArbiFlowScannerService.js"
   },
   "engines": {
     "node": ">=20"
