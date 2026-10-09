@@ -29,3 +29,4 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Verify event-driven read-only scanner
         run: npm run test:event-watch
+# Retry trigger for WebSocket secret verification
