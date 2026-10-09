@@ -1,0 +1,12 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {verdict}=require('./BaseEvidenceGate12992');
+const base=()=>({mode:'BASE_OP_STACK_TRACE_PREFLIGHT',readOnly:true,mainnetBroadcast:false,executionEligible:false,status:'PREFLIGHT_COMPLETE_REPLAY_NOT_PROVEN',transactions:[{},{},{}],targetIndex:2,traceProbed:true,rpcTraceSupported:true,traceTargetSuccessful:true,traceValidation:{traceShapeValid:true}});
+test('even valid trace is not reconstructed state',()=>{const v=verdict(base());assert.equal(v.ready,false);assert.equal(v.code,'TRACE_AVAILABLE_REPLAY_UNVERIFIED')});
+test('missing report fails closed',()=>assert.equal(verdict(null).code,'INVALID_REPORT'));
+test('unsafe flags fail closed',()=>{const r=base();r.executionEligible=true;assert.equal(verdict(r).code,'SAFETY_FLAGS_INVALID')});
+test('unprobed RPC is not assumed supported',()=>{const r=base();r.traceProbed=false;assert.equal(verdict(r).code,'TRACE_NOT_REQUESTED')});
+test('missing prefix blocks',()=>{const r=base();r.transactions=[];assert.equal(verdict(r).code,'TRANSACTION_PREFIX_INCOMPLETE')});
+test('unsupported trace blocks',()=>{const r=base();r.rpcTraceSupported=false;assert.equal(verdict(r).code,'TRACE_RPC_UNAVAILABLE')});
+test('malformed trace blocks',()=>{const r=base();r.traceValidation.traceShapeValid=false;assert.equal(verdict(r).code,'TRACE_MALFORMED')});
