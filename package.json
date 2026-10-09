@@ -81,7 +81,8 @@
     "test:liquidation-profit-investigation": "node LiquidationProfit12974.js",
     "test:flash-mint-research": "node FlashMintResearch12975.js",
     "test:erc3156-fork": "hardhat run --config hardhat.ethereum12976.config.js ERC3156Fork12976.js",
-    "test:gho-profit-discovery": "node GhoProfitDiscovery12977.js"
+    "test:gho-profit-discovery": "node GhoProfitDiscovery12977.js",
+    "test:gho-cross-venue": "node GhoCrossVenue12978.js"
   },
   "engines": {
     "node": ">=20"
