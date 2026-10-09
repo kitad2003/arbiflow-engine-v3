@@ -55,7 +55,8 @@
     "test:event-watch-multiroute": "node EventWatch12949.js",
     "test:spike-control": "node EventWatch12950.js",
     "test:profit-audit": "node EventWatch12951.js",
-    "test:opportunity-audit": "node OpportunityAudit12952.js"
+    "test:opportunity-audit": "node OpportunityAudit12952.js",
+    "test:price-ranked-audit": "node OpportunityAudit12953.js"
   },
   "engines": {
     "node": ">=20"
