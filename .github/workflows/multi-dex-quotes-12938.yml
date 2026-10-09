@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.38 Multi DEX Quotes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'MultiDexQuotes12938.js'
+      - '.github/workflows/multi-dex-quotes-12938.yml'
+jobs:
+  compare-base-venues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Compare four DEX configurations read-only
+        run: npm run test:multi-dex-quotes
