@@ -21,7 +21,15 @@ async function run(){
   assert.equal((await p.getNetwork()).chainId,8453n);
   const head=await p.getBlockNumber(),start=Math.max(1,head-79);report.range=[start,head];
   const pools=POOLS.map(x=>x.address);
-  const logs=await p.getLogs({address:pools,topics:[[SWAP,SWAP_ALT]],fromBlock:start,toBlock:head});
+  const logs=[],failures=[];
+  for(const address of pools)for(let from=start;from<=head;from+=10){
+    const to=Math.min(head,from+9);
+    try{logs.push(...await p.getLogs({address,topics:[SWAP],fromBlock:from,toBlock:to}));}
+    catch(e){failures.push({address,from,to,error:err(e)});break;}
+  }
+  report.logQueryErrors=failures;report.logQueryComplete=failures.length===0;
+  if(failures.length)throw Error('RPC_GETLOGS_REJECTED');
+  logs.sort((x,y)=>x.blockNumber-y.blockNumber||x.index-y.index);
   report.eventsSeen=logs.length;
   const uniq=[...new Set(logs.map(x=>x.blockNumber))].sort((a,b)=>b-a).slice(0,8);
   report.triggerBlocks=uniq.length;
