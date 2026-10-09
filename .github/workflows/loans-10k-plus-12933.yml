@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.33 Loans 10K And Up
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LargeLoanQuotes12927.js'
+      - '.github/workflows/loans-10k-plus-12933.yml'
+jobs:
+  larger-flash-loans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify $10k minimum and seven real quote sizes
+        run: npm run test:large-loan-quotes
