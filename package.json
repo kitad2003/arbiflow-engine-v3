@@ -90,7 +90,7 @@
     "test:historical-single-tx": "node HistoricalSingleTx129822.js",
     "test:controlled-profit": "node ControlledProfit12983.js",
     "test:controlled-evm": "hardhat run --config hardhat.fixture1297.config.js ControlledEvm12984.js",
-    "test:real-dex-fork": "hardhat run --config hardhat.ethereum12976.config.js RealDexFork12985.js"
+    "test:real-dex-fork": "hardhat run --config hardhat.real12985.config.js RealDexFork12985.js"
   },
   "engines": {
     "node": ">=20"
