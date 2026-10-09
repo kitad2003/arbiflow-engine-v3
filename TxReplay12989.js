@@ -8,7 +8,7 @@ const UNI='0xd0b53d9277642d899df5c87a3966a349a798f224',AERO='0xb2cc224c1c9fee385
 const SLOT=['function slot0() view returns(uint160 sqrtPriceX96,int24 tick,uint16 observationIndex,uint16 observationCardinality,uint16 observationCardinalityNext,uint8 feeProtocol,bool unlocked)'];
 function msg(e){return String(e?.shortMessage||e?.reason||e?.code||e?.message||e).replace(/https?:\/\/\S+/g,'[RPC]').slice(0,180)}
 async function main(){
- const p=hre.ethers.provider,report={build:'12.9.89',mode:'BASE_HISTORICAL_PARENT_BLOCK_REPLAY',block:BLOCK,parentBlock:BLOCK-1,
+ const p=hre.ethers.provider,report={build:'12.9.89.1',mode:'BASE_HISTORICAL_PARENT_BLOCK_REPLAY',block:BLOCK,parentBlock:BLOCK-1,
  targetIndex:INDEX,targetHash:HASH,status:'BLOCKED',reason:null,rawTxAvailable:0,
  txCountRequired:3,txReplayed:0,receiptMatches:0,preTransactionStateReconstructed:false,
  postTransactionPoolStateVerified:false,netProfitVerified:false,readOnly:true,mainnetBroadcast:false,
@@ -25,12 +25,28 @@ async function main(){
    if(hashes[INDEX].toLowerCase()!==HASH)throw Error('TARGET_TX_MISMATCH');
    const raw=[];
    for(let i=0;i<hashes.length;i++){
-    try{const bytes=await api.send('eth_getRawTransactionByHash',[hashes[i]]);
+    const hash=hashes[i];
+    let type=null;
+    try{
+     // Direct JSON-RPC bypasses ethers' transaction-format normalization.
+     const info=await api.send('eth_getTransactionByHash',[hash]);
+     type=info?.type||null;
+     report.details.push({index:i,hash,transactionType:type,isOpStackDeposit:type==='0x7e'});
+     if(type==='0x7e'){
+      report.reason='BASE_OP_STACK_DEPOSIT_TX_0x7E_CANNOT_BE_REPLAYED_AS_NORMAL_SIGNED_ETHEREUM_TX';
+      report.status='INCOMPATIBLE_REPLAY_TRANSACTION_TYPE';
+      return;
+     }
+     const bytes=await api.send('eth_getRawTransactionByHash',[hash]);
      if(!ethers.isHexString(bytes)||bytes==='0x')throw Error('RAW_NOT_AVAILABLE');
      const parsed=ethers.Transaction.from(bytes);
-     if(parsed.hash.toLowerCase()!==hashes[i].toLowerCase())throw Error('RAW_HASH_MISMATCH');
+     if(parsed.hash.toLowerCase()!==hash.toLowerCase())throw Error('RAW_HASH_MISMATCH');
      raw.push(bytes);report.rawTxAvailable++;
-    }catch(e){report.details.push({index:i,hash:hashes[i],status:'RAW_UNAVAILABLE',error:msg(e)});break}
+    }catch(e){
+     report.details.push({index:i,hash,transactionType:type,status:'RETRIEVAL_OR_DECODING_FAILED',error:msg(e)});
+     report.reason=type?'RAW_REPLAY_INCOMPATIBILITY_OR_RPC_LIMITATION':'HISTORICAL_TRANSACTION_METADATA_UNAVAILABLE';
+     return;
+    }
    }
    if(raw.length!==3){report.reason='PROVIDER_CANNOT_RETURN_ORIGINAL_SIGNED_RAW_TRANSACTIONS';return}
    // Capture historical target pool state at end of block for diagnostic ONLY.
