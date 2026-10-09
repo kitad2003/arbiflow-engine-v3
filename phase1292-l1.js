@@ -1,13 +1,13 @@
 'use strict';
 // 12.9.2 Base GasPriceOracle telemetry, not an executable transaction-cost quote.
-const {Interface}=require('ethers');
+const {Interface,Transaction}=require('ethers');
 const ORACLE='0x420000000000000000000000000000000000000F';
 const abi=new Interface(['function l1BaseFee() view returns(uint256)','function getL1Fee(bytes) view returns(uint256)']);
 const safety={readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false};
 const safe=e=>String(e?.shortMessage||e?.message||e).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,150);
 function mount(app,{getBaseChain,rpc}){
  let running=false,lastResult=null;
- app.get('/api/phase12/l1/status',(_req,res)=>res.json({success:true,build:'12.9.2',running,lastResult,safety}));
+ app.get('/api/phase12/l1/status',(_req,res)=>res.json({success:true,build:'12.9.3',running,lastResult,safety}));
  app.get('/api/phase12/l1/probe',async(_req,res)=>{
   if(running)return res.status(409).json({success:false,error:'L1_PROBE_RUNNING',safety});
   running=true;let timer;
@@ -20,8 +20,12 @@ function mount(app,{getBaseChain,rpc}){
    const block=await bounded('eth_blockNumber',[]);
    const raw=await bounded('eth_call',[{to:ORACLE,data:abi.encodeFunctionData('l1BaseFee',[])},block]);
    const fee=BigInt(abi.decodeFunctionResult('l1BaseFee',raw)[0]);
-   lastResult={success:true,build:'12.9.2',chainId:8453,blockTag:block,oracle:ORACLE,observedL1BaseFeeWei:fee.toString(),sampleTransactionL1FeeWei:null,actualArbitrageL1FeeWei:null,transactionGasUnits:null,ethUsdPrice:null,netProfitVerified:false,notes:['L1_BASE_FEE_IS_NOT_THE_L1_DATA_FEE_FOR_A_TRANSACTION','GET_L1_FEE_REQUIRES_ENCODED_UNSIGNED_TRANSACTION','NO_ATOMIC_EXECUTOR_TRANSACTION_AVAILABLE'],safety};
-  }catch(e){lastResult={success:false,build:'12.9.2',error:safe(e),safety}}
+   // Deterministic unsigned type-2 transfer SAMPLE, not the arbitrage executor payload.
+   const sample=Transaction.from({type:2,chainId:8453,nonce:0,to:'0x0000000000000000000000000000000000000001',value:0n,gasLimit:21000n,maxFeePerGas:1000000000n,maxPriorityFeePerGas:0n,data:'0x'}).unsignedSerialized;
+   const sampleRaw=await bounded('eth_call',[{to:ORACLE,data:abi.encodeFunctionData('getL1Fee',[sample])},block]);
+   const sampleFee=BigInt(abi.decodeFunctionResult('getL1Fee',sampleRaw)[0]);
+   lastResult={success:true,build:'12.9.3',chainId:8453,blockTag:block,oracle:ORACLE,observedL1BaseFeeWei:fee.toString(),sampleTransactionL1FeeWei:sampleFee.toString(),sampleTransactionType:'UNSIGNED_TYPE_2_TRANSFER_NOT_ARBITRAGE',sampleTransactionByteLength:(sample.length-2)/2,actualArbitrageL1FeeWei:null,transactionGasUnits:null,ethUsdPrice:null,netProfitVerified:false,notes:['L1_BASE_FEE_IS_NOT_THE_L1_DATA_FEE_FOR_A_TRANSACTION','SAMPLE_FEE_IS_NOT_EXECUTOR_FEE','NO_ATOMIC_EXECUTOR_TRANSACTION_AVAILABLE'],safety};
+  }catch(e){lastResult={success:false,build:'12.9.3',error:safe(e),safety}}
   finally{running=false;clearTimeout(timer)}
   res.json(lastResult);
  });
