@@ -111,7 +111,7 @@ function mount(app,{getBaseChain,rpc}){
  let previouslySaved=null,restoreError=null;
  try{previouslySaved=JSON.parse(fs.readFileSync(aaveStateFile,'utf8'));}catch(e){if(e.code!=='ENOENT')restoreError=e.message;}
  const aaveState={running:false,checks:0,failures:0,lastRunAt:null,lastError:null,lastResult:previouslySaved?.lastResult||null,lastStep:'IDLE',lastStepAt:null,restoredFromLocalFile:!!previouslySaved,instanceId:aaveInstanceId,instanceStartedAt:aaveStartedAt,persistenceScope:'INSTANCE_LOCAL_TEMP_FILE_ONLY_NOT_DURABLE_ACROSS_REDEPLOY',persistenceError:restoreError};
- require('./phase128-profit').mount(app,{getRoutes:()=>phase127Routes.getLastResult(),getAave:()=>aaveState.lastResult,startScan:phase127Routes.startScan,getRunning:phase127Routes.getRunning});
+ require('./phase128-profit').mount(app,{getRoutes:()=>phase127Routes.getLastResult(),getAave:()=>aaveState.lastResult,startScan:phase127Routes.startScan,getRunning:phase127Routes.getRunning,getStage:phase127Routes.getStage});
  function saveAaveState(){
   try{const tmp=aaveStateFile+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify({lastResult:aaveState.lastResult,savedAt:new Date().toISOString()}),{mode:0o600});fs.renameSync(tmp,aaveStateFile);aaveState.persistenceError=null;}
   catch(e){aaveState.persistenceError=String(e.message||e).slice(0,200);}
