@@ -87,7 +87,8 @@
     "test:gho-execution-diagnostics": "hardhat run --config hardhat.ethereum12976.config.js GhoExecutionDiagnostics12980.js",
     "test:historical-arbitrage": "node HistoricalArbitrage12981.js",
     "test:historical-one-shot": "node HistoricalOneShot12982.js",
-    "test:historical-single-tx": "node HistoricalSingleTx129822.js"
+    "test:historical-single-tx": "node HistoricalSingleTx129822.js",
+    "test:controlled-profit": "node ControlledProfit12983.js"
   },
   "engines": {
     "node": ">=20"
