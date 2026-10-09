@@ -88,7 +88,8 @@
     "test:historical-arbitrage": "node HistoricalArbitrage12981.js",
     "test:historical-one-shot": "node HistoricalOneShot12982.js",
     "test:historical-single-tx": "node HistoricalSingleTx129822.js",
-    "test:controlled-profit": "node ControlledProfit12983.js"
+    "test:controlled-profit": "node ControlledProfit12983.js",
+    "test:controlled-evm": "hardhat run --config hardhat.fixture1297.config.js ControlledEvm12984.js"
   },
   "engines": {
     "node": ">=20"
