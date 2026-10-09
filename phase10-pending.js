@@ -129,7 +129,7 @@ function mount(app,{getBaseChain,rpc}){
    try{
     const result=await Promise.race([
      aaveProbe.probe(getBaseChain(),rpc,updateStep),
-     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('AAVE_PROBE_DEADLINE_EXCEEDED_90S')),45000);})
+     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('AAVE_PROBE_DEADLINE_EXCEEDED_90S')),90000);})
     ]);
     completed=true;
     aaveState.lastResult={success:true,build:'12.4.0',...result,elapsedMs:Date.now()-started};aaveState.lastError=null;
