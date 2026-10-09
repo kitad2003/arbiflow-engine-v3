@@ -1,4 +1,5 @@
 name: ArbiFlow Base Aave Fork Smoke
+# Re-run after BASE_RPC_URL repository secret configuration.
 on:
   workflow_dispatch:
   push:
