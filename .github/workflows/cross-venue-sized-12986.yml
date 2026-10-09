@@ -3,7 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'CrossVenueSized12986.js'
+      - 'RealCrossVenue12986.js'
+      - 'package.json'
       - '.github/workflows/cross-venue-sized-12986.yml'
 jobs:
   compare:
@@ -19,7 +20,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm install --no-audit --no-fund
-      - run: node --check CrossVenueSized12986.js
+      - run: node --check RealCrossVenue12986.js
       - name: Confirm Base RPC
         run: |
           if [ -z "$BASE_RPC_URL" ]; then
