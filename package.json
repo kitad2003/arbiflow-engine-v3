@@ -96,7 +96,8 @@
     "test:tx-position": "node TxPosition12988.js",
     "test:tx-replay": "hardhat run --config hardhat.txreplay12989.config.js TxReplay12989.js",
     "test:base-prefix": "node --test BasePrefixValidation12990.test.js",
-    "test:base-trace": "node BaseTracePreflight12990.js"
+    "test:base-trace": "node BaseTracePreflight12990.js",
+    "test:base-validation": "node --test BasePrefixValidation12990.test.js BaseTraceValidation12991.test.js"
   },
   "engines": {
     "node": ">=20"
