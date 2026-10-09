@@ -68,7 +68,8 @@
     "test:triangles": "node TriangleDiscovery12962.js",
     "test:scanner-integration": "node ArbiFlowScannerTest.js",
     "scanner:local": "node ArbiFlowScannerService.js",
-    "test:balancer-v2-fork": "hardhat run --config hardhat.aave1299.config.js BalancerV2ForkTest12964.js"
+    "test:balancer-v2-fork": "hardhat run --config hardhat.aave1299.config.js BalancerV2ForkTest12964.js",
+    "test:balancer-atomic-dex": "hardhat run --config hardhat.aave1299.config.js BalancerAtomicDexTest12965.js"
   },
   "engines": {
     "node": ">=20"
