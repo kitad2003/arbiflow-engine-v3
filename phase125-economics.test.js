@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {evaluate}=require('./phase125-economics');
+const base={loanUsdc:'1000',roundTripReturnUsdc:'1010',gasUsd:'1',slippageReserveUsd:'1',otherFeesUsd:'0',premiumBps:5,risk:'LOW'};
+const pass=evaluate(base);
+assert.equal(pass.screen.passesHypotheticalEconomics,true);
+assert.equal(pass.estimatedNetUsd,'7.500000');
+assert.equal(pass.qualifiedForDashboard,false);
+assert.equal(pass.executionEligible,false);
+assert.equal(evaluate({...base,roundTripReturnUsdc:'1005'}).screen.spreadStrictlyAbovePointFivePct,false);
+assert.equal(evaluate({...base,risk:'HIGH'}).screen.passesHypotheticalEconomics,false);
+assert.equal(evaluate({...base,gasUsd:'15'}).screen.netPositive,false);
+assert.throws(()=>evaluate({...base,loanUsdc:'1e3'}));
+assert.throws(()=>evaluate({...base,premiumBps:-1}));
+assert.equal(evaluate({...base,roundTripReturnUsdc:'1005.000001'}).screen.spreadStrictlyAbovePointFivePct,true);
+console.log('PASS Phase 12.5: threshold, fee accounting, rejection and read-only invariants');
