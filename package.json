@@ -23,7 +23,8 @@
     "test:multi-loan-cost-fork": "hardhat run --config hardhat.aave1299.config.js AaveMultiLoanCost12916.js",
     "test:net-profit-gate": "node NetProfitGate12917.js",
     "test:verified-cost-bridge": "node VerifiedCostBridge12918.js",
-    "test:onchain-evidence": "node OnChainEvidence12919.js"
+    "test:onchain-evidence": "node OnChainEvidence12919.js",
+    "test:transaction-evidence": "node TransactionEvidence12920.js"
   },
   "engines": {
     "node": ">=20"
