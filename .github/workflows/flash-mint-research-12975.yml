@@ -1,0 +1,32 @@
+name: ArbiFlow 12.9.75 ERC3156 Flash Mint Research
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'FlashMintResearch12975.js'
+      - '.github/workflows/flash-mint-research-12975.yml'
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+      BASE_ERC3156_LENDER: ${{ vars.BASE_ERC3156_LENDER }}
+      BASE_ERC3156_TOKEN: ${{ vars.BASE_ERC3156_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check FlashMintResearch12975.js
+      - run: npm run test:flash-mint-research
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flash-mint-research-12975
+          path: arbiflow-flash-mint-research-12975.json
+          if-no-files-found: warn
