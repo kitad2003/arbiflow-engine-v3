@@ -74,7 +74,8 @@
     "test:market-discrepancy": "node MarketDiscrepancy12967.js",
     "test:price-integrity": "node PriceIntegrity12968.js",
     "test:lst-research": "node LSTResearch12969.js",
-    "test:lst-dynamic-sizing": "node LSTDynamicSizing12970.js"
+    "test:lst-dynamic-sizing": "node LSTDynamicSizing12970.js",
+    "test:research-validation": "node ResearchValidation12971.js"
   },
   "engines": {
     "node": ">=20"
