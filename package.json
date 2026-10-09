@@ -51,7 +51,8 @@
     "test:route-amounts": "node RouteAmounts12945.js",
     "test:speed-audit": "node SpeedAudit12946.js",
     "test:event-watch": "node EventWatch12947.js",
-    "test:event-watch-wide": "node EventWatch12948.js"
+    "test:event-watch-wide": "node EventWatch12948.js",
+    "test:event-watch-multiroute": "node EventWatch12949.js"
   },
   "engines": {
     "node": ">=20"
