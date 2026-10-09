@@ -58,7 +58,8 @@
     "test:opportunity-audit": "node OpportunityAudit12952.js",
     "test:price-ranked-audit": "node OpportunityAudit12953.js",
     "test:liquidity-impact": "node LiquidityImpact12954.js",
-    "test:quote-integrity": "node QuoteIntegrity12955.js"
+    "test:quote-integrity": "node QuoteIntegrity12955.js",
+    "test:full-universe": "node FullUniverse12956.js"
   },
   "engines": {
     "node": ">=20"
