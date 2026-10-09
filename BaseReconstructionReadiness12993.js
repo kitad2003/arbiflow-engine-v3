@@ -8,6 +8,7 @@ function readiness(r){
   const t=r.prefixTraces[i];
   if(t?.index!==i||t?.hash?.toLowerCase()!==r.transactions[i]?.hash?.toLowerCase()||t?.traceShapeValid!==true)return {ready:false,code:'PREFIX_TRACE_INVALID',index:i};
  }
+ if(Array.isArray(r.traceContinuity)&&r.traceContinuity.some(x=>x?.status==='INCONSISTENT'||(Array.isArray(x?.mismatches)&&x.mismatches.length>0)))return {ready:false,code:'TRACE_CONTINUITY_CONTRADICTION'};
  if(r.traceTargetSuccessful!==true)return {ready:false,code:'TARGET_TRACE_MISSING'};
  return {ready:false,code:'TRACE_EVIDENCE_ONLY_CHECKPOINT_UNVERIFIED'};
 }
