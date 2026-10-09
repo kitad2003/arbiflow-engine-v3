@@ -27,7 +27,14 @@ jobs:
             echo '::error::Missing BASE_RPC_URL GitHub Actions secret'
             exit 1
           fi
+      - name: Probe RPC capabilities
+        id: capabilities
+        continue-on-error: true
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npm run test:base-rpc-capabilities
       - name: Historical trace
+        if: steps.capabilities.outcome == 'success'
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARBIFLOW_ENABLE_TRACE_PROBE: '1'
