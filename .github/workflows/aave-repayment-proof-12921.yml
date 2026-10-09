@@ -1,0 +1,21 @@
+name: ArbiFlow 12.9.21 Aave Repayment Proof
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'AaveRepaymentProof12921.js'
+      - '.github/workflows/aave-repayment-proof-12921.yml'
+jobs:
+  repayment-proof:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test exact Aave principal and premium event proof
+        run: npm run test:aave-repayment-proof
