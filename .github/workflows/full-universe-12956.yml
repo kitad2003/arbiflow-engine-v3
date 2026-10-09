@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.56 Full Universe Screen
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'FullUniverse12956.js'
+      - '.github/workflows/full-universe-12956.yml'
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-12956
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      MAX_ROUND_TRIPS: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run full-universe screen
+        run: npm run test:full-universe
+      - name: Preserve result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-universe-12956
+          path: arbiflow-full-universe-12956.json
+          if-no-files-found: warn
