@@ -1,0 +1,35 @@
+name: ArbiFlow Base Cross Venue Sized
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'CrossVenueSized12986.js'
+      - '.github/workflows/cross-venue-sized-12986.yml'
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check CrossVenueSized12986.js
+      - name: Confirm Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "Missing BASE_RPC_URL"
+            exit 1
+          fi
+      - run: npm run test:cross-venue-sized
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-venue-sized-12986
+          path: arbiflow-cross-venue-12986.json
+          if-no-files-found: warn
