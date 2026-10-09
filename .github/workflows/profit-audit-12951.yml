@@ -1,0 +1,46 @@
+name: ArbiFlow 12.9.51 Profit Audit
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'EventWatch12951.js'
+      - '.github/workflows/profit-audit-12951.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-profit-audit
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      WATCH_SECONDS: 45
+      ROUTES_PER_EVENT: 3
+      QUOTE_WORKERS: 2
+      RPC_GAP_MS: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .arbiflow-pools-12951.json
+          key: pool-12951-${{ github.run_id }}
+          restore-keys: |
+            pool-12951-
+      - name: Require endpoints
+        run: |
+          test -n "$BASE_RPC_URL" && test -n "$BASE_FLASHBLOCKS_WSS_URL"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run quote profitability audit
+        run: npm run test:profit-audit
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .arbiflow-pools-12951.json
+          key: pool-12951-${{ github.run_id }}
