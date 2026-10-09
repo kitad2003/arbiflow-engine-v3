@@ -80,16 +80,28 @@ async function scan(chain,rpc,amountUsdc){
  return {success:pools.length>0,build:'12.7.7',diagnostic:pools.length===0?'NO_VERIFIED_POOLS':new Set(pools.map(x=>x.name)).size<2?'ONLY_ONE_VENUE_VERIFIED':rows.some(x=>x.quoteSuccess)?'CROSS_VENUE_QUOTES_RECEIVED':'CROSS_VENUE_POOLS_FOUND_QUOTES_UNVERIFIED',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
 }
 function mount(app,{getBaseChain,rpc}){
- let running=false,lastResult=null,lastCheckedAt=null,startedAt=null;
- app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.7',running,startedAt,lastCheckedAt,lastResult,safety}));
+ let running=false,lastResult=null,lastCheckedAt=null,startedAt=null,scanId=0,stage='IDLE';
+ const MAX_WALL_MS=120000;
+ app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.8.2',running,stage,startedAt,elapsedMs:running&&startedAt?Date.now()-Date.parse(startedAt):0,maxWallMs:MAX_WALL_MS,lastCheckedAt,lastResult,safety}));
  function startScan(amount){
   if(running)return {success:false,error:'ROUTE_PROBE_RUNNING',startedAt};
   if(![100,500,1000].includes(amount))return {success:false,error:'ALLOWED_AMOUNTS_100_500_1000'};
-  running=true;startedAt=new Date().toISOString();lastResult=null;
+  running=true;startedAt=new Date().toISOString();lastResult=null;stage='SCAN_ACTIVE';
+  const token=++scanId;
+  const watchdog=setTimeout(()=>{
+   if(token!==scanId||!running)return;
+   scanId++;running=false;stage='SCAN_TIMED_OUT';startedAt=null;lastCheckedAt=new Date().toISOString();
+   lastResult={success:false,build:'12.8.2',error:'SCAN_WALL_TIMEOUT_120000MS',diagnostic:'RPC_OR_QUEUE_MAY_BE_STALLED',qualified:0,alerts:[],safety};
+  },MAX_WALL_MS);
+  watchdog.unref?.();
   setImmediate(async()=>{
-   try{lastResult=await scan(getBaseChain(),rpc,amount)}
-   catch(e){lastResult={success:false,error:safe(e),qualified:0,alerts:[],safety}}
-   finally{running=false;startedAt=null;lastCheckedAt=new Date().toISOString()}
+   let result;
+   try{result=await scan(getBaseChain(),rpc,amount)}
+   catch(e){result={success:false,error:safe(e),qualified:0,alerts:[],safety}}
+   finally{
+    clearTimeout(watchdog);
+    if(token===scanId){lastResult=result;running=false;stage=result?.success?'COMPLETED':'FAILED';startedAt=null;lastCheckedAt=new Date().toISOString()}
+   }
   });
   return {success:true,build:'12.7.7',status:'SCAN_STARTED',amountUsdc:amount,startedAt};
  }
@@ -97,6 +109,6 @@ function mount(app,{getBaseChain,rpc}){
   const result=startScan(Number(req.query.amountUsdc||100));
   res.status(result.success?200:result.error==='ROUTE_PROBE_RUNNING'?409:400).json({...result,statusRoute:'/api/phase12/routes/status',safety});
  });
- return {getLastResult:()=>lastResult,getRunning:()=>running,startScan};
+ return {getLastResult:()=>lastResult,getRunning:()=>running,getStage:()=>stage,startScan};
 }
 module.exports={scan,mount};
