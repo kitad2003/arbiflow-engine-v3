@@ -1,0 +1,21 @@
+name: ArbiFlow 12.9.23 ETH USDC Gas Conversion
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'EthUsdcGas12923.js'
+      - '.github/workflows/eth-usdc-gas-12923.yml'
+jobs:
+  gas-conversion:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test ETH to USDC exact gas conversion and safety
+        run: npm run test:eth-usdc-gas
