@@ -1,0 +1,27 @@
+name: ArbiFlow Balancer V2 Fork Only
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BalancerV2ForkTest12964.js'
+      - 'atomic-mock-contracts/BalancerV2ForkReceiver12964.sol'
+      - '.github/workflows/balancer-v2-fork-12964.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Compile local fork receiver
+        run: npx hardhat compile --config hardhat.aave1299.config.js
+      - name: Simulate Balancer V2 only on disposable Base fork
+        run: npm run test:balancer-v2-fork
