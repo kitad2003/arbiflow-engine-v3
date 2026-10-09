@@ -1,0 +1,30 @@
+name: ArbiFlow 12.9.71 Research Validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ResearchValidation12971.js'
+      - '.github/workflows/research-validation-12971.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      RESEARCH_12971_ROUTE_LIMIT: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check ResearchValidation12971.js
+      - run: npm run test:research-validation
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-validation-12971
+          path: arbiflow-research-validation-12971.json
+          if-no-files-found: warn
