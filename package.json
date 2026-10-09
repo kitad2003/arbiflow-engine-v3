@@ -36,7 +36,8 @@
     "test:execution-readiness": "hardhat run --config hardhat.aave1299.config.js ExecutionReadiness12929.js",
     "test:atomic-settlement-gas": "hardhat run --config hardhat.aave1299.config.js AtomicSettlementGas12930.js",
     "test:settlement-analysis": "node SettlementAnalysis12931.js",
-    "test:dex-pool-discovery": "node DexPoolDiscovery12934.js"
+    "test:dex-pool-discovery": "node DexPoolDiscovery12934.js",
+    "test:multi-pool-discovery": "node MultiPoolDiscovery12935.js"
   },
   "engines": {
     "node": ">=20"
