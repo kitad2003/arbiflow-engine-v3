@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.45 Test 25k and 35k
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'RouteAmounts12945.js'
+      - '.github/workflows/route-amounts-12945.yml'
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Compare 25000 and 35000 USDC route quotes
+        run: npm run test:route-amounts
