@@ -61,7 +61,8 @@
     "test:quote-integrity": "node QuoteIntegrity12955.js",
     "test:full-universe": "node FullUniverse12956.js",
     "test:two-sided-liquidity": "node TwoSidedLiquidity12957.js",
-    "test:event-validation": "node EventValidation12958.js"
+    "test:event-validation": "node EventValidation12958.js",
+    "test:transaction-intelligence": "node TransactionIntelligence12959.js"
   },
   "engines": {
     "node": ">=20"
