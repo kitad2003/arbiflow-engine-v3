@@ -1,0 +1,19 @@
+name: ArbiFlow 12.9.18 Verified Cost Bridge
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'VerifiedCostBridge12918.js'
+      - '.github/workflows/verified-cost-bridge-12918.yml'
+jobs:
+  provenance-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify no fork diagnostics can qualify as a live settlement
+        run: npm run test:verified-cost-bridge
