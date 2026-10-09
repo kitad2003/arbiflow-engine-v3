@@ -11,7 +11,8 @@
     "controlled-atomic-test": "hardhat run --no-compile ControlledAtomicForkTest4300.js",
     "production-bound-fork-test": "hardhat run --no-compile ProductionBoundForkTest4380.js",
     "mainnet-safety-gate": "hardhat run --no-compile MainnetSafetyGate4390.js",
-    "test:atomic-mock": "hardhat run --config hardhat.fixture1297.config.js AtomicMockTest1297.js"
+    "test:atomic-mock": "hardhat run --config hardhat.fixture1297.config.js AtomicMockTest1297.js",
+    "test:aave-fork-smoke": "hardhat run --no-compile AaveForkSmoke1298.js"
   },
   "engines": {
     "node": ">=20"
