@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.80 GHO Execution Diagnostics
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'GhoExecutionDiagnostics12980.js'
+      - '.github/workflows/gho-execution-diagnostics-12980.yml'
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check GhoExecutionDiagnostics12980.js
+      - name: Require Ethereum RPC
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL missing; diagnostics not tested"
+            exit 1
+          fi
+      - run: npm run test:gho-execution-diagnostics
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gho-execution-diagnostics-12980
+          path: arbiflow-gho-execution-diagnostics-12980.json
+          if-no-files-found: warn
