@@ -1,0 +1,34 @@
+name: ArbiFlow Manual Base Trace
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  base-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: build-12.9.90-base-trace-diagnostics
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Offline tests
+        run: npm run test:base-validation
+      - name: Install trace dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Historical trace
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          ARBIFLOW_ENABLE_TRACE_PROBE: '1'
+          ARBIFLOW_REQUIRE_HISTORICAL_TRACE: '1'
+        run: npm run test:base-trace
+      - name: Archive report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-trace-evidence
+          path: arbiflow-base-trace-12990.json
+          if-no-files-found: warn
