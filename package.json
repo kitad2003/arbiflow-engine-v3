@@ -53,7 +53,8 @@
     "test:event-watch": "node EventWatch12947.js",
     "test:event-watch-wide": "node EventWatch12948.js",
     "test:event-watch-multiroute": "node EventWatch12949.js",
-    "test:spike-control": "node EventWatch12950.js"
+    "test:spike-control": "node EventWatch12950.js",
+    "test:profit-audit": "node EventWatch12951.js"
   },
   "engines": {
     "node": ">=20"
