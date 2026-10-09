@@ -20,6 +20,6 @@ if(require.main===module){
  assert.equal(t.counts.tested,1);assert.equal(t.counts.settledOnFork,0);assert.equal(t.rows[0].gasUsedFromSuccessfulReceipt,null);
  console.log(JSON.stringify({success:true,build:'12.9.31',unitAssertionsPassed:3,fixtureOnly:true,actualReportParsed:false,qualified:0,alerts:[]}));
  const file=process.env.ATOMIC_REPORT_PATH;
- if(file){const actual=analyze(JSON.parse(fs.readFileSync(file,'utf8')));console.log('ATOMIC_SETTLEMENT_ANALYSIS '+JSON.stringify(actual));}
+ if(file){const actual=analyze(JSON.parse(fs.readFileSync(file,'utf8')));assert(actual.counts.tested>0,'EMPTY_ACTUAL_REPORT');console.log('ATOMIC_SETTLEMENT_ANALYSIS '+JSON.stringify(actual));}
 }
 module.exports={analyze};
