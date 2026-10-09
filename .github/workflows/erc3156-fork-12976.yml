@@ -1,0 +1,33 @@
+name: ArbiFlow 12.9.76 Ethereum ERC3156 Fork
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ERC3156Fork12976.js'
+      - 'atomic-mock-contracts/ERC3156ForkReceiver12976.sol'
+      - 'hardhat.ethereum12976.config.js'
+      - '.github/workflows/erc3156-fork-12976.yml'
+jobs:
+  fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check ERC3156Fork12976.js
+      - name: Confirm Ethereum RPC is configured
+        run: test -n "$ETHEREUM_RPC_URL" || (echo "ETHEREUM_RPC_URL secret missing: fork test NOT RUN" && exit 1)
+      - run: npm run test:erc3156-fork
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: erc3156-fork-12976
+          path: arbiflow-flash-mint-fork-12976.json
+          if-no-files-found: warn
