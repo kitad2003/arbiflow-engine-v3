@@ -1,0 +1,35 @@
+name: ArbiFlow 12.9.57 Two-Sided Liquidity
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TwoSidedLiquidity12957.js'
+      - '.github/workflows/two-sided-liquidity-12957.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-12957
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      TWO_SIDED_ROUND_TRIPS: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run two-sided liquidity audit
+        run: npm run test:two-sided-liquidity
+      - name: Preserve diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: two-sided-liquidity-12957
+          path: arbiflow-two-sided-12957.json
+          if-no-files-found: warn
