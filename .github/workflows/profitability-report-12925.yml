@@ -1,0 +1,21 @@
+name: ArbiFlow 12.9.25 Profitability Integration
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ProfitabilityReport12925.js'
+      - '.github/workflows/profitability-report-12925.yml'
+jobs:
+  cost-profit-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify six fail-closed multi-loan profitability report rows
+        run: npm run test:profitability-report
