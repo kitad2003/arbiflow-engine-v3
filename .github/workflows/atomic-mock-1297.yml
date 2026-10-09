@@ -1,0 +1,28 @@
+name: ArbiFlow Atomic Mock Verification
+on:
+  push:
+    paths:
+      - 'ArbiFlowAtomicFixture1296.sol'
+      - 'MockAtomic1297.sol'
+      - 'AtomicMockTest1297.js'
+      - 'hardhat.fixture1297.config.js'
+      - 'package.json'
+      - '.github/workflows/atomic-mock-1297.yml'
+  workflow_dispatch:
+jobs:
+  atomic-mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Compile and run isolated atomic mock verification
+        env:
+          BASE_RPC_URL: ''
+        run: npm run test:atomic-mock
