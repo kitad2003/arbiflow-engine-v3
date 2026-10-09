@@ -95,5 +95,6 @@ function mount(app,{getBaseChain,rpc}){
    finally{running=false;startedAt=null;lastCheckedAt=new Date().toISOString()}
   });
  });
+ return {getLastResult:()=>lastResult};
 }
 module.exports={scan,mount};
