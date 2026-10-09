@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.40 Pool Depth
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'PoolDepth12940.js'
+      - '.github/workflows/pool-depth-12940.yml'
+jobs:
+  test-depth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Discover and screen pool depth
+        run: npm run test:pool-depth
