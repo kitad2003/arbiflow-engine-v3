@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const { JsonRpcProvider } = require('ethers');
 const { validatePrefix } = require('./BasePrefixValidation12990');
 const { evaluateTrace } = require('./BaseTraceValidation12991');
+const { verdict } = require('./BaseEvidenceGate12992');
 const BLOCK = 52392050;
 const TARGET_INDEX = 2;
 const TARGET_HASH = '0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
@@ -56,6 +57,6 @@ async function main() {
     ? 'OP_STACK_DEPOSIT_IN_PREFIX_REQUIRES_PROTOCOL_AWARE_STATE_RECONSTRUCTION'
     : 'TRACE_AND_RECEIPT_PROOFS_REQUIRED_BEFORE_REPLAY_CLAIMS';
  } catch(e) {result.reason=short(e)}
- finally { if(rpc)rpc.destroy();fs.writeFileSync(OUTPUT,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));}
+ finally { if(rpc)rpc.destroy();result.evidenceGate=verdict(result);fs.writeFileSync(OUTPUT,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));}
 }
 main().catch(e=>{console.error('BASE_TRACE_12990_FATAL',short(e));process.exitCode=1});
