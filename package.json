@@ -16,7 +16,8 @@
     "test:aave-atomic-fork": "hardhat run --config hardhat.aave1299.config.js AaveForkAtomicTest1299.js",
     "test:aave-fork-success": "hardhat run --config hardhat.aave1299.config.js AaveForkSuccess12910.js",
     "test:real-venue-preflight": "node RealVenuePreflight12911.js",
-    "test:real-swap-fork": "hardhat run --config hardhat.aave1299.config.js RealSwapFork12912.js"
+    "test:real-swap-fork": "hardhat run --config hardhat.aave1299.config.js RealSwapFork12912.js",
+    "test:aave-dex-atomic-fork": "hardhat run --config hardhat.aave1299.config.js AaveDexAtomicForkTest12913.js"
   },
   "engines": {
     "node": ">=20"
