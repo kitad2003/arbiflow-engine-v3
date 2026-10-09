@@ -45,8 +45,8 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'11.0.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null};
- app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
+ const state={build:'11.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
   state.running=true;state.checks++;if(source==='auto'){state.autoChecks++;state.autoLastRunAt=new Date().toISOString();}else state.manualChecks++;
@@ -80,6 +80,8 @@ function mount(app,{getBaseChain,rpc}){
  app.get('/api/phase10/probe',async(_req,res)=>runProbe(res,'manual'));
  const autoTimer=setInterval(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=safeError(e);});},60000);
  autoTimer.unref?.();
- state.autoSampling={enabled:true,intervalMs:60000,processLocal:true};
+ state.autoSampling={enabled:true,intervalMs:60000,initialSampleOnStartup:true,processLocal:true};
+ const initialTimer=setTimeout(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=safeError(e);});},2000);
+ initialTimer.unref?.();
 }
 module.exports={mount};
