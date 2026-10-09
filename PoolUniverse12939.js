@@ -12,7 +12,11 @@ const TOKENS={
  AERO:'0x940181a94A35A4569E4529A3CDfB74e38FD98631',
  cbETH:'0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22',
  USDT:'0xfde4c96c8593536e31f229ea8f37b2ada2699bb2',
- WBTC:'0x0555E30da8f98308EdB960aa94C0Db47230d2B9c'
+ WBTC:'0x0555E30da8f98308EdB960aa94C0Db47230d2B9c',
+ VIRTUAL:'0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b',
+ MORPHO:'0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842',
+ VVV:'0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf',
+ BRETT:'0x532f27101965dd16442E59d40670FaF5eBB142E4'
 };
 const UNI_F='0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
 const PAN_F='0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865';
@@ -66,7 +70,7 @@ async function discover(rpc){
  }finally{p.destroy()}
 }
 if(require.main===module){
- assert.equal(pairs.length,36);
+ assert.equal(pairs.length,78);
  assert.equal(new Set(Object.values(TOKENS).map(x=>x.toLowerCase())).size,Object.keys(TOKENS).length);
  console.log(JSON.stringify({build:'12.9.39',unitAssertionsPassed:2,liveDiscoveryRun:!!process.env.BASE_RPC_URL,qualified:0,alerts:[]}));
  if(process.env.BASE_RPC_URL)discover(process.env.BASE_RPC_URL).then(x=>{console.log(JSON.stringify(x));if(!x.success)process.exitCode=1}).catch(e=>{console.error('POOL_12939_FAILED',String(e?.message||e).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,220));process.exitCode=1});
