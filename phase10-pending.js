@@ -46,7 +46,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
- const state={build:'11.5.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
+ const state={build:'11.6.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
   if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
@@ -67,12 +67,12 @@ function mount(app,{getBaseChain,rpc}){
     if(!name){counts.contractInteraction++;const selector=data.slice(0,10).toLowerCase();if(targetAddress(tx)===BASE_USDC&&erc20Selectors[selector])tokenMethods.verifiedUsdc++;else if(erc20Selectors[selector])tokenMethods.unverifiedErc20Selector++;if(targetAddress(tx)===BASE_USDC)watchedAssets.usdc++;if(targetAddress(tx)===BASE_WETH)watchedAssets.weth++;unknownSelectors[selector]=(unknownSelectors[selector]||0)+1;const target=String(tx.to).toLowerCase();const key=target+'|'+selector;unknownTargets.set(key,(unknownTargets.get(key)||0)+1);continue;}
     counts.knownRouter++;routers[name]=(routers[name]||0)+1;
     const result=decode({...tx,input:data},name);
-    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;receiptTracker.track({hash:tx.hash,router:name,method:result.method});swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED',_txValue:tx.value||'0x0'});}
+    if(result.classification==='SUPPORTED_SWAP_METHOD'){counts.supportedSwapMethod++;swaps.push({hash:tx.hash,router:name,...result,status:'OBSERVED_NOT_SIMULATED',_txValue:tx.value||'0x0'});}
     else if(result.classification==='NESTED_MULTICALL')counts.nestedMulticall++;
     else counts.unsupportedRouterMethod++;
    }
    for(const swap of swaps.filter(x=>x.router==='AERODROME_ROUTER').slice(0,2)){swap.impact=await simulateAerodrome({value:swap._txValue},swap,chain,rpc);}
-   for(const swap of swaps)delete swap._txValue;
+   for(const swap of swaps){receiptTracker.track(swap);delete swap._txValue;}
    state.lastResult={success:true,build:state.build,chainId:8453,scanSource:source,newPendingObservations,pendingObservationStore:pendingObservations.stats(),tokenMethods,watchedAssets,reportedPendingTransactions:transactions.length,inspectedTransactions:samples.length,inspectionCoveragePct:transactions.length?Math.round(samples.length/transactions.length*10000)/100:100,inspectionTruncated:transactions.length>samples.length,inspectionLimit:1000,counts,knownRouterHits:routers,dominantUnknownTarget:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,1).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,shareOfInspectedPct:samples.length?Math.round(count/samples.length*10000)/100:0,verifiedIdentity:false};})[0]||null,topUnknownDestinations:[...unknownTargets.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15).map(([key,count])=>{const [to,selector]=key.split('|');return {to,selector,count,classification:to===BASE_USDC&&erc20Selectors[selector]?'VERIFIED_USDC_'+erc20Selectors[selector]:erc20Selectors[selector]?'ERC20_'+erc20Selectors[selector]+'_SELECTOR_UNVERIFIED_TARGET':'UNKNOWN_CONTRACT_METHOD'};}),topUnknownSelectors:Object.entries(unknownSelectors).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([selector,count])=>({selector,count})),decodedSupportedSwaps:swaps.length,swaps:swaps.slice(0,30),visibility:transactions.length?'RPC_PENDING_BLOCK_SAMPLE_NOT_FULL_MEMPOOL':'NO_PENDING_TRANSACTIONS_VISIBLE',limitations:['UNKNOWN_CONTRACT_IDENTITY_NOT_VERIFIED','TOKEN_METHODS_NOT_SWAP_SIGNALS','UNKNOWN_DESTINATIONS_REQUIRE_VERIFIED_ABIS','ROUTER_REGISTRY_PARTIAL','MULTICALL_INNER_CALLS_NOT_DECODED','NO_PRIVATE_ORDER_FLOW','INDICATIVE_ZERO_FEE_VOLATILE_MODEL_ONLY','NO_CONCENTRATED_LIQUIDITY_SIMULATION','NO_PROFIT_VALIDATION','NO_EXECUTION'],qualified:0,safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};
   }catch(e){if(source==='auto'){state.autoFailures++;state.autoLastError=safeError(e);}state.lastResult={success:false,build:state.build,error:safeError(e),visibility:'RPC_PENDING_BLOCK_UNAVAILABLE',safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}};}
   finally{state.running=false;}
