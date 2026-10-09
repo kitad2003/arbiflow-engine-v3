@@ -1,0 +1,39 @@
+name: ArbiFlow 12.9.81 Historical Arbitrage Evidence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'HistoricalArbitrage12981.js'
+      - '.github/workflows/historical-arbitrage-12981.yml'
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+      HISTORICAL_ARB_BLOCKS: '120'
+      HISTORICAL_ARB_LOG_CHUNK: '10'
+      HISTORICAL_ARB_TX_CAP: '30'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check HistoricalArbitrage12981.js
+      - name: Require at least one RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ] && [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "Both RPC secrets missing: investigation NOT TESTED"
+            exit 1
+          fi
+      - run: npm run test:historical-arbitrage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-arbitrage-12981
+          path: arbiflow-historical-arbitrage-12981.json
+          if-no-files-found: warn
