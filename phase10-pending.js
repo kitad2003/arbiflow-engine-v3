@@ -54,6 +54,7 @@ function decode(tx,routerName){
  }catch{return {classification:'UNSUPPORTED_METHOD',methodSelector:String(tx.input).slice(0,10)};}
 }
 function mount(app,{getBaseChain,rpc}){
+ require('./phase125-economics').mount(app);
  const state={build:'12.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
