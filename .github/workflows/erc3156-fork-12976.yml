@@ -23,7 +23,11 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: node --check ERC3156Fork12976.js
       - name: Confirm Ethereum RPC is configured
-        run: test -n "$ETHEREUM_RPC_URL" || (echo "ETHEREUM_RPC_URL secret missing: fork test NOT RUN" && exit 1)
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL secret missing: fork test NOT RUN"
+            exit 1
+          fi
       - run: npm run test:erc3156-fork
       - uses: actions/upload-artifact@v4
         if: always()
