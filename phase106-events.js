@@ -13,12 +13,13 @@ const safety={readOnly:true,mainnetBroadcast:false,executionEligible:false};
 const err=e=>String(e?.shortMessage||e?.message||e).slice(0,400);
 const hex=n=>'0x'+n.toString(16);
 function mount(app,{getBaseChain,rpc}){
- const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0};
+ const state={running:false,checks:0,lastResult:null,cursors:{},recentKeys:[],totalUniqueEvents:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,autoScanning:{enabled:true,intervalMs:15000,processLocal:true,maxBlocksPerPoolPerCycle:10}};
  const seen=new Set();const blockTimestamps=new Map();
  async function blockTimestamp(chain,number){if(blockTimestamps.has(number))return blockTimestamps.get(number);const b=await rpc(chain,'eth_getBlockByNumber',[hex(number),false]);const timestamp=b?.timestamp?Number(BigInt(b.timestamp))*1000:null;if(timestamp!==null){blockTimestamps.set(number,timestamp);if(blockTimestamps.size>100)blockTimestamps.delete(blockTimestamps.keys().next().value);}return timestamp;}
- app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'10.9.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,lastResult:state.lastResult,safety}));
- app.get('/api/phase10/events/probe',async(_req,res)=>{
-  if(state.running)return res.status(409).json({success:false,error:'PROBE_RUNNING'});
+ app.get('/api/phase10/events/status',(_req,res)=>res.json({success:true,build:'11.0.0',running:state.running,checks:state.checks,cursors:state.cursors,totalUniqueEvents:state.totalUniqueEvents,lastResult:state.lastResult,safety}));
+ async function runProbe(res,source='manual'){
+  if(state.running){if(res)return res.status(409).json({success:false,error:'PROBE_RUNNING'});return;}
+  if(source==='auto'){state.autoChecks++;state.autoLastRunAt=new Date().toISOString();}else state.manualChecks++;
   state.running=true;state.checks++;
   try{
    const chain=getBaseChain();if(!chain||chain.chainId!==8453)throw Error('BASE_NOT_CONFIGURED');
@@ -76,10 +77,13 @@ function mount(app,{getBaseChain,rpc}){
     }catch(e){logFailures++;pool.error=err(e);logDiagnostics.push({fee,attempt:'POOL_SCAN',error:err(e)});}
     pools.push(pool);
    }
-   state.lastResult={success:logFailures===0,build:'10.9.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,matchedPendingSwaps,unmatchedConfirmedSwaps,observedBeforeBlock,matchRatePct:observations.length?Math.round(matchedPendingSwaps/observations.length*10000)/100:null,pendingObservationStore:pendingObservations.stats(),observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,pendingHashMatchingImplemented:true,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','PENDING_HASH_MATCHING_REQUIRES_PRIOR_PENDING_PROBES','BLOCK_TIMESTAMP_NOT_LOCAL_RECEIPT_TIME','MATCH_RATE_IS_SAMPLED_NOT_NETWORK_WIDE','NO_PROFIT_VALIDATION'],safety};
-  }catch(e){state.lastResult={success:false,build:'10.9.0',error:err(e),safety};}
+   state.lastResult={success:logFailures===0,build:'11.0.0',chainId:8453,latestBlock:latest,pools,scannedBlocks,confirmedSwapEvents:observations.length,matchedPendingSwaps,unmatchedConfirmedSwaps,observedBeforeBlock,scanSource:source,matchRatePct:observations.length?Math.round(matchedPendingSwaps/observations.length*10000)/100:null,pendingObservationStore:pendingObservations.stats(),observations:observations.slice(-30),duplicatesSkipped,totalUniqueEvents:state.totalUniqueEvents,cursors:state.cursors,logFailures,logDiagnostics,pendingHashMatchingImplemented:true,predictionMatchingImplemented:false,limitations:['CURSORS_RESET_ON_RESTART','MAX_10_BLOCKS_PER_POOL_PER_PROBE','CATCHUP_REQUIRES_REPEATED_PROBES','CONFIRMED_EVENTS_ONLY','PENDING_HASH_MATCHING_REQUIRES_PRIOR_PENDING_PROBES','BLOCK_TIMESTAMP_NOT_LOCAL_RECEIPT_TIME','MATCH_RATE_IS_SAMPLED_NOT_NETWORK_WIDE','NO_PROFIT_VALIDATION'],safety};
+  }catch(e){if(source==='auto'){state.autoFailures++;state.autoLastError=err(e);}state.lastResult={success:false,build:'11.0.0',error:err(e),safety};}
   finally{state.running=false;}
-  res.json(state.lastResult);
- });
+  if(res)res.json(state.lastResult);
+ }
+ app.get('/api/phase10/events/probe',async(_req,res)=>runProbe(res,'manual'));
+ const autoTimer=setInterval(()=>{runProbe(null,'auto').catch(e=>{state.autoFailures++;state.autoLastError=err(e);});},15000);
+ autoTimer.unref?.();
 }
 module.exports={mount};
