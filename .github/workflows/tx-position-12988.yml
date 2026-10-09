@@ -1,0 +1,29 @@
+name: ArbiFlow Tx Position 12.9.88
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TxPosition12988.js'
+      - '.github/workflows/tx-position-12988.yml'
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check TxPosition12988.js
+      - run: npm run test:tx-position
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tx-position-12988
+          path: arbiflow-tx-position-12988.json
+          if-no-files-found: warn
