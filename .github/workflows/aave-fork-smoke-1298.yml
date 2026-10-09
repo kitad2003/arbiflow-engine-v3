@@ -1,5 +1,5 @@
 name: ArbiFlow Base Aave Fork Smoke
-# Retry Aave fork smoke after latest RPC credential update.
+# Retry with corrected Base Mainnet HTTPS RPC secret.
 on:
   workflow_dispatch:
   push:
