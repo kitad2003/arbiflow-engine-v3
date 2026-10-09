@@ -9,6 +9,7 @@ const { evaluateTrace } = require('./BaseTraceValidation12991');
 const { verdict } = require('./BaseEvidenceGate12992');
 const { readiness } = require('./BaseReconstructionReadiness12993');
 const { continuity } = require('./BaseTraceContinuity12995');
+const { inspect } = require('./BasePrestateInspect129100');
 const BLOCK = 52392050;
 const TARGET_INDEX = 2;
 const TARGET_HASH = '0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
@@ -74,12 +75,7 @@ async function main() {
     try {
       const snapshot=await rpc.send('debug_traceTransaction',[TARGET_HASH,
         {tracer:'prestateTracer',timeout:'20s'}]);
-      const accounts=snapshot&&typeof snapshot==='object'&&!Array.isArray(snapshot)?Object.entries(snapshot):[];
-      const addressValid=a=>/^0x[0-9a-fA-F]{40}$/.test(a);
-      const valid=accounts.length>0&&accounts.every(([a,v])=>addressValid(a)&&v&&typeof v==='object'&&!Array.isArray(v));
-      result.targetPrestateSnapshot={available:valid,accountsAccessed:valid?accounts.length:0,
-        scope:'ACCESSED_ACCOUNTS_ONLY',fullCheckpoint:false,verifiedAgainstFork:false,
-        reason:valid?'TARGET_TRACE_PRESTATE_CAPTURED_NOT_FULL_STATE':'MALFORMED_OR_EMPTY_PRESTATE'};
+      result.targetPrestateSnapshot=inspect(snapshot);
     }catch(e){result.targetPrestateSnapshot={available:false,fullCheckpoint:false,error:short(e)};}
    }catch(e){result.rpcTraceSupported=false;result.traceError=short(e)}
   }
