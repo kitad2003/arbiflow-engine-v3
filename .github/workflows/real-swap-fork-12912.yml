@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.12 Real DEX Fork Swaps
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'RealSwapFork12912.js'
+      - '.github/workflows/real-swap-fork-12912.yml'
+jobs:
+  fork-only-swaps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run disposable Base fork DEX swaps
+        run: npm run test:real-swap-fork
