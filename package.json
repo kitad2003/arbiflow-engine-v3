@@ -84,7 +84,8 @@
     "test:gho-profit-discovery": "node GhoProfitDiscovery12977.js",
     "test:gho-cross-venue": "node GhoCrossVenue12978.js",
     "test:gho-atomic-fork": "hardhat run --config hardhat.ethereum12976.config.js GhoAtomicFork12979.js",
-    "test:gho-execution-diagnostics": "hardhat run --config hardhat.ethereum12976.config.js GhoExecutionDiagnostics12980.js"
+    "test:gho-execution-diagnostics": "hardhat run --config hardhat.ethereum12976.config.js GhoExecutionDiagnostics12980.js",
+    "test:historical-arbitrage": "node HistoricalArbitrage12981.js"
   },
   "engines": {
     "node": ">=20"
