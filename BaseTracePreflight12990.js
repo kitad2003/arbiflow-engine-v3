@@ -23,6 +23,7 @@ async function main() {
   rpcTraceSupported:null,traceProbed:false,traceTargetSuccessful:false,
   preTransactionStateReconstructed:false,receiptMatches:0,
   postTransactionPoolStateVerified:false,netProfitVerified:false,
+  targetPrestateSnapshot:null,
   readOnly:true,mainnetBroadcast:false,fundsMovedOnMainnet:false,executionEligible:false
  };
  let rpc;
@@ -67,6 +68,19 @@ async function main() {
     result.traceTargetSuccessful=validated.traceShapeValid;
     result.traceValidation=validated;
     result.traceShape=trace && typeof trace==='object' ? Object.keys(trace).slice(0,8) : [];
+    // Separate, read-only pre-transaction account snapshot from the target's own trace.
+    // prestateTracer without diffMode captures *accessed* account prestate only;
+    // it is not a complete executable fork checkpoint.
+    try {
+      const snapshot=await rpc.send('debug_traceTransaction',[TARGET_HASH,
+        {tracer:'prestateTracer',timeout:'20s'}]);
+      const accounts=snapshot&&typeof snapshot==='object'&&!Array.isArray(snapshot)?Object.entries(snapshot):[];
+      const addressValid=a=>/^0x[0-9a-fA-F]{40}$/.test(a);
+      const valid=accounts.length>0&&accounts.every(([a,v])=>addressValid(a)&&v&&typeof v==='object'&&!Array.isArray(v));
+      result.targetPrestateSnapshot={available:valid,accountsAccessed:valid?accounts.length:0,
+        scope:'ACCESSED_ACCOUNTS_ONLY',fullCheckpoint:false,verifiedAgainstFork:false,
+        reason:valid?'TARGET_TRACE_PRESTATE_CAPTURED_NOT_FULL_STATE':'MALFORMED_OR_EMPTY_PRESTATE'};
+    }catch(e){result.targetPrestateSnapshot={available:false,fullCheckpoint:false,error:short(e)};}
    }catch(e){result.rpcTraceSupported=false;result.traceError=short(e)}
   }
   result.status='PREFLIGHT_COMPLETE_REPLAY_NOT_PROVEN';
