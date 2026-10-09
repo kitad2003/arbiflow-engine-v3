@@ -82,19 +82,21 @@ async function scan(chain,rpc,amountUsdc){
 function mount(app,{getBaseChain,rpc}){
  let running=false,lastResult=null,lastCheckedAt=null,startedAt=null;
  app.get('/api/phase12/routes/status',(_req,res)=>res.json({success:true,build:'12.7.7',running,startedAt,lastCheckedAt,lastResult,safety}));
- app.get('/api/phase12/routes/probe',(req,res)=>{
-  if(running)return res.status(409).json({success:false,error:'ROUTE_PROBE_RUNNING',startedAt,statusRoute:'/api/phase12/routes/status',safety});
-  const amount=Number(req.query.amountUsdc||100);
-  if(![100,500,1000].includes(amount))return res.status(400).json({success:false,error:'ALLOWED_AMOUNTS_100_500_1000',safety});
-  running=true;startedAt=new Date().toISOString();
-  lastResult=null;
-  res.json({success:true,build:'12.7.7',status:'SCAN_STARTED',amountUsdc:amount,startedAt,statusRoute:'/api/phase12/routes/status',safety});
+ function startScan(amount){
+  if(running)return {success:false,error:'ROUTE_PROBE_RUNNING',startedAt};
+  if(![100,500,1000].includes(amount))return {success:false,error:'ALLOWED_AMOUNTS_100_500_1000'};
+  running=true;startedAt=new Date().toISOString();lastResult=null;
   setImmediate(async()=>{
    try{lastResult=await scan(getBaseChain(),rpc,amount)}
    catch(e){lastResult={success:false,error:safe(e),qualified:0,alerts:[],safety}}
    finally{running=false;startedAt=null;lastCheckedAt=new Date().toISOString()}
   });
+  return {success:true,build:'12.7.7',status:'SCAN_STARTED',amountUsdc:amount,startedAt};
+ }
+ app.get('/api/phase12/routes/probe',(req,res)=>{
+  const result=startScan(Number(req.query.amountUsdc||100));
+  res.status(result.success?200:result.error==='ROUTE_PROBE_RUNNING'?409:400).json({...result,statusRoute:'/api/phase12/routes/status',safety});
  });
- return {getLastResult:()=>lastResult};
+ return {getLastResult:()=>lastResult,getRunning:()=>running,startScan};
 }
 module.exports={scan,mount};
