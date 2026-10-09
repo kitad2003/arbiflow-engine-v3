@@ -15,6 +15,10 @@ const aeroAbi=['function exactInputSingle((address tokenIn,address tokenOut,int2
 async function main(){
  if(hre.network.name!=='hardhat'||!process.env.BASE_RPC_URL)throw Error('LOCAL_FORK_ONLY');
  const network=await e.provider.getNetwork();assert.equal(network.chainId,8453n);
+ // Hardhat EDR on Base may reject execution on the exact fork-source block.
+ // Mine a fresh disposable local block before ALL contract reads and transactions.
+ await hre.network.provider.send('evm_mine');
+ const forkExecutionBlock=await e.provider.getBlockNumber();
  const [user]=await e.getSigners();const usdc=new e.Contract(USDC,tokenAbi,user),weth=new e.Contract(WETH,tokenAbi,user);
  for(const a of [UNI,AERO])assert.notEqual(await e.provider.getCode(a),'0x','ROUTER_MISSING_'+a);
  const pool=new e.Contract(AAVE_POOL,['function getReserveData(address) view returns((uint256 configuration,uint128 liquidityIndex,uint128 currentLiquidityRate,uint128 variableBorrowIndex,uint128 currentVariableBorrowRate,uint128 currentStableBorrowRate,uint40 lastUpdateTimestamp,uint16 id,address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress,address interestRateStrategyAddress,uint128 accruedToTreasury,uint128 unbacked,uint128 isolationModeTotalDebt))'],e.provider);
@@ -47,6 +51,6 @@ async function main(){
   results.push({direction,wethOutRaw:buy.amount.toString(),usdcReturnedRaw:sell.amount.toString(),grossUsdcRaw:(sell.amount-amount).toString(),firstSwapGasUsed:buy.gasUsed,secondSwapGasUsed:sell.gasUsed,swapReceiptsVerified:true});
   await hre.network.provider.send('evm_revert',[snapshot]);
  }
- console.log(JSON.stringify({success:true,build:'12.9.12',mode:'DISPOSABLE_BASE_FORK_REAL_DEX_SWAP_TEST',results,flashLoanUsed:false,atomicRoundTripVerified:false,gasScope:'SEPARATE_REAL_DEX_SWAPS_EXCLUDES_AAVE_AND_ATOMIC_EXECUTOR',netProfitVerified:false,qualified:0,alerts:[],mainnetBroadcast:false,executionEligible:false}));
+ console.log(JSON.stringify({success:true,build:'12.9.12',mode:'DISPOSABLE_BASE_FORK_REAL_DEX_SWAP_TEST',forkExecutionBlock,results,flashLoanUsed:false,atomicRoundTripVerified:false,gasScope:'SEPARATE_REAL_DEX_SWAPS_EXCLUDES_AAVE_AND_ATOMIC_EXECUTOR',netProfitVerified:false,qualified:0,alerts:[],mainnetBroadcast:false,executionEligible:false}));
 }
 main().catch(err=>{console.error('REAL_SWAP_FORK_FAILED',String(err?.shortMessage||err?.message||err).replace(/https?:\/\/\S+/g,'[RPC_REDACTED]').slice(0,350));process.exitCode=1});
