@@ -20,7 +20,8 @@
     "test:aave-dex-atomic-fork": "hardhat run --config hardhat.aave1299.config.js AaveDexAtomicForkTest12913.js",
     "test:atomic-two-swaps-probe": "hardhat run --config hardhat.aave1299.config.js AaveDexProbe12914.js",
     "test:atomic-profit-gate": "hardhat run --config hardhat.aave1299.config.js AaveDexProfitGate12915.js",
-    "test:multi-loan-cost-fork": "hardhat run --config hardhat.aave1299.config.js AaveMultiLoanCost12916.js"
+    "test:multi-loan-cost-fork": "hardhat run --config hardhat.aave1299.config.js AaveMultiLoanCost12916.js",
+    "test:net-profit-gate": "node NetProfitGate12917.js"
   },
   "engines": {
     "node": ">=20"
