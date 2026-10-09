@@ -1,0 +1,19 @@
+name: ArbiFlow 12.9.31 Settlement Analysis
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SettlementAnalysis12931.js'
+      - '.github/workflows/settlement-analysis-12931.yml'
+jobs:
+  settlement-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check settlement analysis safety assertions
+        run: npm run test:settlement-analysis
