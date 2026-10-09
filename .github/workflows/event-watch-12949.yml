@@ -1,0 +1,46 @@
+name: ArbiFlow 12.9.49 Multi Route Event Watch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'EventWatch12949.js'
+      - '.github/workflows/event-watch-12949.yml'
+jobs:
+  multi-route-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      WATCH_SECONDS: 45
+      ROUTE_LIMIT: 600
+      ROUTES_PER_EVENT: 5
+      QUOTE_WORKERS: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Restore verified pool cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .arbiflow-pools-12949.json
+          key: base-pools-12949-${{ github.run_id }}
+          restore-keys: |
+            base-pools-12949-
+      - name: Require endpoint secrets
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+          if [ -z "$BASE_FLASHBLOCKS_WSS_URL" ]; then echo "::error::BASE_FLASHBLOCKS_WSS_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Test multi-route event ranking
+        run: npm run test:event-watch-multiroute
+      - name: Cache registry
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .arbiflow-pools-12949.json
+          key: base-pools-12949-${{ github.run_id }}
