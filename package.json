@@ -76,7 +76,8 @@
     "test:lst-research": "node LSTResearch12969.js",
     "test:lst-dynamic-sizing": "node LSTDynamicSizing12970.js",
     "test:research-validation": "node ResearchValidation12971.js",
-    "test:alternative-evidence": "node AlternativeEvidence12972.js"
+    "test:alternative-evidence": "node AlternativeEvidence12972.js",
+    "test:liquidation-intelligence": "node LiquidationIntelligence12973.js"
   },
   "engines": {
     "node": ">=20"
