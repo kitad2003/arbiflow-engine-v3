@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'RealDexFork12985.js'
+      - 'hardhat.real12985.config.js'
+      - 'package.json'
       - '.github/workflows/real-dex-fork-12985.yml'
 jobs:
   test:
@@ -26,7 +28,11 @@ jobs:
             echo "ETHEREUM_RPC_URL required"
             exit 1
           fi
-      - run: npm run test:real-dex-fork
+      - name: Confirm updated fork configuration
+        run: |
+          node -e "const p=require('./package.json'); if(!p.scripts['test:real-dex-fork'].includes('hardhat.real12985.config.js')) process.exit(1); console.log(p.scripts['test:real-dex-fork'])"
+      - name: Execute real DEX fork using gas-capped config
+        run: npx hardhat run --config hardhat.real12985.config.js RealDexFork12985.js
       - uses: actions/upload-artifact@v4
         if: always()
         with:
