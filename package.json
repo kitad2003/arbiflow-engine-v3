@@ -93,7 +93,8 @@
     "test:real-dex-fork": "hardhat run --config hardhat.real12985.config.js RealDexFork12985.js",
     "test:cross-venue-sized": "node RealCrossVenue12986.js",
     "test:swap-events": "node SwapEventDiscovery12987.js",
-    "test:tx-position": "node TxPosition12988.js"
+    "test:tx-position": "node TxPosition12988.js",
+    "test:tx-replay": "hardhat run --config hardhat.txreplay12989.config.js TxReplay12989.js"
   },
   "engines": {
     "node": ">=20"
