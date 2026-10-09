@@ -56,7 +56,7 @@ function decode(tx,routerName){
 function mount(app,{getBaseChain,rpc}){
  require('./phase125-economics').mount(app);
  require('./phase126-balancer').mount(app,{getBaseChain,rpc});
- require('./phase127-routes').mount(app,{getBaseChain,rpc});
+ const phase127Routes=require('./phase127-routes').mount(app,{getBaseChain,rpc});
  const state={build:'12.4.0',running:false,checks:0,autoChecks:0,manualChecks:0,autoFailures:0,autoLastRunAt:null,autoLastError:null,lastResult:null,startedAt:new Date().toISOString()};
  app.get('/api/phase10/status',(_req,res)=>res.json({success:true,...state,sharedPendingObservationStore:pendingObservations.stats(),safety:{readOnly:true,mainnetBroadcast:false,executionEligible:false}}));
  async function runProbe(res,source='manual'){
@@ -111,6 +111,7 @@ function mount(app,{getBaseChain,rpc}){
  let previouslySaved=null,restoreError=null;
  try{previouslySaved=JSON.parse(fs.readFileSync(aaveStateFile,'utf8'));}catch(e){if(e.code!=='ENOENT')restoreError=e.message;}
  const aaveState={running:false,checks:0,failures:0,lastRunAt:null,lastError:null,lastResult:previouslySaved?.lastResult||null,lastStep:'IDLE',lastStepAt:null,restoredFromLocalFile:!!previouslySaved,instanceId:aaveInstanceId,instanceStartedAt:aaveStartedAt,persistenceScope:'INSTANCE_LOCAL_TEMP_FILE_ONLY_NOT_DURABLE_ACROSS_REDEPLOY',persistenceError:restoreError};
+ require('./phase128-profit').mount(app,{getRoutes:()=>phase127Routes.getLastResult(),getAave:()=>aaveState.lastResult});
  function saveAaveState(){
   try{const tmp=aaveStateFile+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify({lastResult:aaveState.lastResult,savedAt:new Date().toISOString()}),{mode:0o600});fs.renameSync(tmp,aaveStateFile);aaveState.persistenceError=null;}
   catch(e){aaveState.persistenceError=String(e.message||e).slice(0,200);}
