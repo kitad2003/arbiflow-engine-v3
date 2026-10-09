@@ -1,0 +1,31 @@
+name: ArbiFlow 12.9.47 Event Watch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'EventWatch12947.js'
+      - '.github/workflows/event-watch-12947.yml'
+jobs:
+  event-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      WATCH_SECONDS: 35
+      WATCH_MAX_EVENTS: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require RPC and Flashblocks WebSocket
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+          if [ -z "$BASE_FLASHBLOCKS_WSS_URL" ]; then echo "::error::BASE_FLASHBLOCKS_WSS_URL missing (Flashblocks WebSocket provider required)"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Verify event-driven read-only scanner
+        run: npm run test:event-watch
