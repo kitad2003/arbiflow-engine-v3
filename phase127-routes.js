@@ -25,9 +25,16 @@ async function scan(chain,rpc,amountUsdc){
  const deadline=Date.now()+90000;
  const bounded=async(method,params)=>{const remaining=deadline-Date.now();if(remaining<=0)throw Error('SCAN_DEADLINE_90000MS');let timer;try{return await Promise.race([rpc(chain,method,params),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('RPC_TIMEOUT_OR_SCAN_DEADLINE')),Math.min(15000,remaining));})]);}finally{clearTimeout(timer)}};
  const call=async(addr,abi,fn,args=[])=>abi.decodeFunctionResult(fn,await bounded('eth_call',[{to:addr,data:abi.encodeFunctionData(fn,args)},block]));
+ // Interleave venues so a slow Uniswap tier cannot consume the entire budget before Aerodrome.
  const possibilities=[
-  ...[100,500,3000].map(fee=>({...uni,tier:fee,factoryAbi:uniFactory,quoterAbi:uniQuote})),
-  ...[1,10,50,100,200].map(tier=>({...aero,tier,factoryAbi:aeroFactory,quoterAbi:aeroQuote}))
+  {...uni,tier:500,factoryAbi:uniFactory,quoterAbi:uniQuote},
+  {...aero,tier:100,factoryAbi:aeroFactory,quoterAbi:aeroQuote},
+  {...aero,tier:1,factoryAbi:aeroFactory,quoterAbi:aeroQuote},
+  {...uni,tier:100,factoryAbi:uniFactory,quoterAbi:uniQuote},
+  {...aero,tier:10,factoryAbi:aeroFactory,quoterAbi:aeroQuote},
+  {...uni,tier:3000,factoryAbi:uniFactory,quoterAbi:uniQuote},
+  {...aero,tier:50,factoryAbi:aeroFactory,quoterAbi:aeroQuote},
+  {...aero,tier:200,factoryAbi:aeroFactory,quoterAbi:aeroQuote}
  ];
  const pools=[],failures=[];
  for(const p of possibilities){
@@ -64,7 +71,7 @@ async function scan(chain,rpc,amountUsdc){
   }catch(e){row.error=safe(e)}
   rows.push(row);
  }
- return {success:pools.length>0,build:'12.7.3',diagnostic:pools.length===0?'NO_VERIFIED_POOLS_CHECK_RPC_QUEUE_AND_PROVIDER_LATENCY':'POOL_DISCOVERY_COMPLETED',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
+ return {success:pools.length>0,build:'12.7.4',diagnostic:pools.length===0?'NO_VERIFIED_POOLS':new Set(pools.map(x=>x.name)).size<2?'ONLY_ONE_VENUE_VERIFIED':'MULTI_VENUE_POOLS_VERIFIED',network:'BASE',pair:'USDC/WETH',blockTag:block,loanSizeUsdc:amountUsdc,verifiedPools:pools.map(({quoterAbi,...rest})=>rest),routes:rows,failures,qualified:0,alerts:[],limitations:['PINNED_BLOCK_INDICATIVE_QUOTES_NOT_ATOMIC','NO_FLASH_LOAN_RESERVATION','NO_GAS_ESTIMATE','NO_PRIORITY_FEE_OR_L2_DATA_FEE','NO_FORK_EXECUTION','NO_DASHBOARD_ALERTS'],safety};
 }
 function mount(app,{getBaseChain,rpc}){
  let running=false,lastResult=null,lastCheckedAt=null,startedAt=null;
