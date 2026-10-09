@@ -1,0 +1,33 @@
+name: ArbiFlow 12.9.73 Liquidation Intelligence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LiquidationIntelligence12973.js'
+      - '.github/workflows/liquidation-intelligence-12973.yml'
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      LIQUIDATION_WINDOWS: 3
+      LIQUIDATION_BLOCKS_PER_WINDOW: 2000
+      LIQUIDATION_LOG_CHUNK: 10
+      LIQUIDATION_USER_LIMIT: 400
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - run: node --check LiquidationIntelligence12973.js
+      - run: npm run test:liquidation-intelligence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: liquidation-intelligence-12973
+          path: arbiflow-liquidation-intelligence-12973.json
+          if-no-files-found: warn
