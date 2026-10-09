@@ -42,7 +42,7 @@ async function run(rpc,wss){
   const events=[],queue=[],stats={notifications:0,matched:0,enqueued:0,processed:0,quoteSuccesses:0,quoteFailures:0,droppedQueueFull:0,ignoredUnwatched:0,ignoredLimit:0,queuePeak:0,workersPeak:0};
   let active=0,closing=false;
   const work=()=>{
-   while(!closing&&active<WORKERS&&queue.length){
+   while(active<WORKERS&&queue.length){
     const job=queue.shift();active++;stats.workersPeak=Math.max(stats.workersPeak,active);
     (async()=>{
      const route=job.routes[0],row={pool:job.address,path:'USDC>'+route.token+'>USDC',queueDelayMs:now()-job.receivedAt,qualified:false};
@@ -73,7 +73,7 @@ async function run(rpc,wss){
    });
   });
   // Drain in-flight and queued work for at most 10s, then keep final counters stable.
-  const drainUntil=now()+10000;while((queue.length||active)&&now()<drainUntil)await new Promise(done=>setTimeout(done,100));
+  const drainUntil=now()+10000;work();while((queue.length||active)&&now()<drainUntil)await new Promise(done=>setTimeout(done,100));
   const latencies=events.map(e=>e.eventToQuoteMs).sort((a,b)=>a-b),delays=events.map(e=>e.queueDelayMs).sort((a,b)=>a-b),pct=(a,q)=>a.length?a[Math.max(0,Math.ceil(a.length*q)-1)]:null;
   return {success:wsResult.ack,build:'12.9.48',mode:'PERSISTED_REGISTRY_WIDE_EVENT_WATCH_READ_ONLY',registry:{poolCount:reg.pools.length,cacheHit:reg.cacheHit,discoveryMs:reg.discoveryMs},routeCandidates:routeSet.total,routesIndexed:routeSet.selected.length,watchedPoolAddresses:index.size,subscriptionAcknowledged:wsResult.ack,elapsedMs:now()-t,stats,latencyMs:{queueMedian:pct(delays,.5),eventToQuoteMedian:pct(latencies,.5),eventToQuoteP95:pct(latencies,.95)},events:events.slice(0,12),qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false,warning:'NO_EVENT_ORIGIN_LATENCY_MEASURED; NON_ATOMIC_QUOTES; AAVE_GAS_SLIPPAGE_NOT_INCLUDED'};
  }finally{provider.destroy()}
