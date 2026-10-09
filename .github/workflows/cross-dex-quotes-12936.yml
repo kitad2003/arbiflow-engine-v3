@@ -1,0 +1,27 @@
+name: ArbiFlow 12.9.36 Cross-DEX Quotes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'CrossDexQuotes12936.js'
+      - '.github/workflows/cross-dex-quotes-12936.yml'
+jobs:
+  compare-verified-venues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require Base RPC
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "::error::BASE_RPC_URL missing"; exit 1; fi
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Quote Uniswap tiers and Aerodrome both directions
+        run: npm run test:cross-dex-quotes
