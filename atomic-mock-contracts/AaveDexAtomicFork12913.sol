@@ -6,11 +6,11 @@ interface IU12913 { struct P {address tokenIn;address tokenOut;uint24 fee;addres
 interface IS12913 { struct P {address tokenIn;address tokenOut;int24 tickSpacing;address recipient;uint256 deadline;uint256 amountIn;uint256 amountOutMinimum;uint160 sqrtPriceLimitX96;} function exactInputSingle(P calldata) external payable returns(uint256); }
 /// @notice Aave + 2 real venues FORK-ONLY experiment. Test harness must not deploy on mainnet.
 contract AaveDexAtomicFork12913 {
- address constant POOL=0xa238dd80c259a72e81d7e4664a9801593f98d1c5;
- address constant USDC=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913;
+ address constant POOL=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5;
+ address constant USDC=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
  address constant WETH=0x4200000000000000000000000000000000000006;
- address constant UNI=0x2626664c2603336e57b271c5c0b26f421741e481;
- address constant AERO=0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5;
+ address constant UNI=0x2626664c2603336E57B271c5C0b26F421741e481;
+ address constant AERO=0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5;
  address public immutable owner;
  bool private entered;
  struct Plan {uint256 amount;uint256 minWeth;uint256 minUsdc;uint256 minProfit;uint256 deadline;bool uniFirst;}
