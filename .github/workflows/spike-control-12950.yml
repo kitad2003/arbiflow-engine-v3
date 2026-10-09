@@ -1,0 +1,49 @@
+name: ArbiFlow 12.9.50 Spike Control
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'RpcPacer12950.js'
+      - 'EventWatch12950.js'
+      - '.github/workflows/spike-control-12950.yml'
+jobs:
+  spike-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-spike-control
+      cancel-in-progress: false
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+      BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+      WATCH_SECONDS: 45
+      ROUTES_PER_EVENT: 3
+      QUOTE_WORKERS: 2
+      RPC_GAP_MS: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Restore cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .arbiflow-pools-12950.json
+          key: base-12950-${{ github.run_id }}
+          restore-keys: |
+            base-12950-
+      - name: Require endpoints
+        run: |
+          test -n "$BASE_RPC_URL" && test -n "$BASE_FLASHBLOCKS_WSS_URL"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Run spike-controlled pending event scanner
+        run: npm run test:spike-control
+      - name: Save registry
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .arbiflow-pools-12950.json
+          key: base-12950-${{ github.run_id }}
