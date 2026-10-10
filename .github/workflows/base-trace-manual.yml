@@ -40,6 +40,16 @@ jobs:
           ARBIFLOW_ENABLE_TRACE_PROBE: '1'
           ARBIFLOW_REQUIRE_HISTORICAL_TRACE: '1'
         run: npm run test:base-trace
+      - name: Install Foundry for isolated transaction fork
+        if: steps.capabilities.outcome == 'success'
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Transaction-position fork startup probe
+        if: steps.capabilities.outcome == 'success'
+        env:
+          BASE_TRACE_RPC_URL: ${{ secrets.BASE_TRACE_RPC_URL }}
+        run: npm run test:base-tx-fork
       - name: Explain diagnostic result
         if: always()
         run: |
@@ -53,7 +63,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: base-trace-evidence
-          path: arbiflow-base-trace-12990.json
+          path: |
+            arbiflow-base-trace-12990.json
+            arbiflow-base-tx-fork-129113.json
           if-no-files-found: warn
       - name: Fail if RPC capability probe failed
         if: steps.capabilities.outcome == 'failure'
