@@ -25,6 +25,20 @@ jobs:
             echo '::error::Missing BASE_RPC_URL GitHub Actions secret'
             exit 1
           fi
+      - name: Verify checked-out atomic test revision
+        run: |
+          echo "Checked-out commit: $(git rev-parse HEAD)"
+          echo "Checked-out branch: $(git branch --show-current)"
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const script=fs.readFileSync('AtomicSettlementGas12930.js','utf8');
+          const expected="build:'12.9.138'";
+          if(!script.includes(expected)){
+            console.error('::error::STALE_ATOMIC_TEST_REVISION expected 12.9.138. Start a NEW workflow run, not Re-run jobs from an old run.');
+            process.exit(1);
+          }
+          console.log('Atomic test source revision: 12.9.138');
+          NODE
       - name: Fork-only Aave two-swap atomic settlement evidence
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
