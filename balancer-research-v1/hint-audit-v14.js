@@ -2,7 +2,6 @@
 // Flashbots MEV-Share research: disclose event log addresses/topics and
 // distinguish hinted swaps from complete transactions. No new trading strategy.
 const {SWAP_TOPIC}=require('./bot');
-const {observe:observeV13}=require('./live-pair-v13');
 const HASH=/^0x[0-9a-f]{64}$/i;
 function audit(events){
  const seen=new Set(),topicCounts=new Map(),addressCounts=new Map();
