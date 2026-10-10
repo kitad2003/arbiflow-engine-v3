@@ -1,0 +1,20 @@
+name: Clean Balancer Callback Mock V2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  balancer-mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run standalone callback and atomic rollback tests
+        run: npx hardhat run --config balancer-research-v1/hardhat.config.js balancer-research-v1/mock-test.js
