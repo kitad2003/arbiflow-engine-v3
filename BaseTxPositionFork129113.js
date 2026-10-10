@@ -9,13 +9,20 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.127',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.129',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
  const body=await response.json();if(body.error)throw Error('LOCAL_RPC_ERROR_'+body.error.code);return body.result;
 }
 async function remote(url,method,params){const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(30000)});const value=await response.json();if(!response.ok||value.error)throw Error('REMOTE_TRACE_UNAVAILABLE');return value.result}
+async function metadataRead(traceUrl,method,params){
+ const primary=process.env.BASE_RPC_URL;
+ if(primary&&/^https:\/\//.test(primary)){
+  try{return await remote(primary,method,params)}catch{}
+ }
+ return remote(traceUrl,method,params);
+}
 async function classifyMismatches(url,snapshot,mismatches){
  const output={checked:0,parentMatches:0,blockEndMatches:0,neither:0,referenceErrors:0,items:[]};
  for(const x of mismatches.slice(0,30)){
@@ -148,7 +155,7 @@ async function run(){
       if(report.comparison.mismatches.length===2 && report.comparison.mismatches.every(m=>m.field==='balance'&&['0x4200000000000000000000000000000000000011','0x4200000000000000000000000000000000000019'].includes(m.address.toLowerCase()))){
        try{report.diagnosticFeeVaultOverlay=await diagnosticFeeVaultOverlay(snapshot)}catch{report.diagnosticFeeVaultOverlay={localOnly:true,status:'OVERLAY_TEST_FAILED',originalForkVerified:false}}
        if(report.diagnosticFeeVaultOverlay?.comparison?.matched){
-        try{report.localTargetSimulation=await simulate(rpc,(method,params)=>remote(url,method,params))}catch{report.localTargetSimulation={status:'LOCAL_SIMULATION_FAILED',mainnetBroadcast:false,originalTxReplayed:false,receiptMatches:false}}
+        try{report.localTargetSimulation=await simulate(rpc,(method,params)=>metadataRead(url,method,params))}catch{report.localTargetSimulation={status:'LOCAL_SIMULATION_FAILED',mainnetBroadcast:false,originalTxReplayed:false,receiptMatches:false}}
        }
       }
     }
