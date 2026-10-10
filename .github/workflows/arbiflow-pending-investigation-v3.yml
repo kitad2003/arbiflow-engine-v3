@@ -1,0 +1,25 @@
+name: ArbiFlow Ethereum Pending Investigation V3
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  investigation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/pending-investigation-v3.js
+      - run: node pending-research/pending-investigation-v3-test.js
+      - name: Sample and classify Ethereum pending transactions
+        env:
+          ETHEREUM_WSS_URL: ${{ secrets.ETHEREUM_WSS_URL }}
+          PENDING_DURATION_MS: '60000'
+          PENDING_MAX_LOOKUPS: '120'
+          PENDING_MAX_IN_FLIGHT: '4'
+          PENDING_LOOKUP_INTERVAL_MS: '500'
+        run: node pending-research/pending-investigation-v3.js
