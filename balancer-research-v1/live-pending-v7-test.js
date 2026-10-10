@@ -1,6 +1,7 @@
 'use strict';
 const assert=require('node:assert/strict');
 const {makeSubscription,normalizeNotification}=require('./live-pending-v7');
+const {TOPICS,classifyTopic,classifyHint}=require('./event-signatures-v8');
 const addr='0x'+'a'.repeat(40),tx='0x'+'b'.repeat(64),topic='0x'+'c'.repeat(64);
 const sub=makeSubscription([addr,addr]);
 assert.equal(sub.method,'eth_subscribe');
@@ -12,4 +13,9 @@ assert.equal(normalizeNotification(raw,'sid',new Set([addr])).hash,tx);
 assert.equal(normalizeNotification(raw,'wrong',new Set([addr])),null);
 assert.equal(normalizeNotification(raw,'sid',new Set()),null);
 assert.equal(normalizeNotification({...raw,params:{...raw.params,result:{...raw.params.result,transactionHash:'invalid'}}},'sid',new Set([addr])),null);
-console.log(JSON.stringify({build:'BALANCER_RESEARCH_V7',unitAssertionsPassed:8,liveFeedConnected:false,mainnetBroadcast:false}));
+assert.equal(classifyTopic(TOPICS.V3_SWAP),'V3_SWAP');
+assert.equal(classifyTopic(TOPICS.V3_BURN),'V3_BURN');
+assert.equal(classifyHint({logs:[{topics:[TOPICS.V3_SWAP]}]}).swapHint,true);
+assert.equal(classifyHint({logs:[{topics:[TOPICS.V3_COLLECT]}]}).swapHint,false);
+assert.equal(classifyHint({logs:[{topics:[TOPICS.V3_SWAP]}]}).poolIdentityVerified,false);
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V8',unitAssertionsPassed:13,liveFeedConnected:false,mainnetBroadcast:false}));
