@@ -1,0 +1,26 @@
+name: Clean Balancer V33 Verified Pool Reserve Quotes
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reserve-quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test V2 reserve quote arithmetic
+        run: |
+          node --check balancer-research-v1/reserve-quotes-v33.js
+          node balancer-research-v1/reserve-quotes-v33-test.js
+      - name: Read confirmed Ethereum pair reserves for both directions
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/reserve-quotes-v33.js
