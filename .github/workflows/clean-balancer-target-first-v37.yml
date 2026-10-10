@@ -1,0 +1,24 @@
+name: Clean Balancer V37 Target First Matched Simulation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  matched-simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test fully matched target-first mev_simBundle request offline
+        run: |
+          node --check balancer-research-v1/target-first-sim-v37.js
+          node balancer-research-v1/target-first-sim-v37-test.js
+      - name: Verify real-input prerequisites without simulation or broadcast
+        run: node balancer-research-v1/target-first-sim-v37.js
