@@ -1,0 +1,22 @@
+name: Clean Balancer V50 Pending Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check balancer-research-v1/pending-integrated-v50.js
+      - run: node balancer-research-v1/pending-integrated-v50-test.js
+      - name: Bounded 60-second live read-only MEV-Share monitor
+        run: node balancer-research-v1/pending-integrated-v50.js
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V50_DURATION_MS: '60000'
