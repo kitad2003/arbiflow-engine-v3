@@ -20,15 +20,15 @@ jobs:
         run: |
           node --check balancer-research-v1/verify-vault.js
           node balancer-research-v1/verify-vault-test.js
-      - name: Verify user-selected Vault and token on target chain (read-only)
+      - name: Verify documented Base Balancer V2 Vault and Base USDC (read-only)
         env:
           BALANCER_RESEARCH_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          BALANCER_RESEARCH_VAULT_ADDRESS: ${{ vars.BALANCER_RESEARCH_VAULT_ADDRESS }}
-          BALANCER_RESEARCH_TOKEN_ADDRESS: ${{ vars.BALANCER_RESEARCH_TOKEN_ADDRESS }}
+          BALANCER_RESEARCH_VAULT_ADDRESS: '0xBA12222222228d8Ba445958a75a0704d566BF2C8'
+          BALANCER_RESEARCH_TOKEN_ADDRESS: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
           BALANCER_RESEARCH_CHAIN_ID: '8453'
         run: |
-          if [ -z "$BALANCER_RESEARCH_VAULT_ADDRESS" ] || [ -z "$BALANCER_RESEARCH_TOKEN_ADDRESS" ] || [ -z "$BALANCER_RESEARCH_RPC_URL" ]; then
-            echo "VAULT_TOKEN_OR_RPC_NOT_CONFIGURED: select addresses based on verified research; no address guess is permitted"
+          if [ -z "$BALANCER_RESEARCH_RPC_URL" ]; then
+            echo "BASE_RPC_URL_SECRET_MISSING: Add an HTTPS Base RPC URL in Actions repository secrets"
             exit 1
           fi
           node balancer-research-v1/verify-vault.js
