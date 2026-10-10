@@ -20,6 +20,7 @@ jobs:
       - name: Validate and stage fork receiver
         run: |
           node --check ResearchAaveTwoSwapFork.js
+          node --check ResearchAaveTwoSwapQuotes.js
           mkdir -p .research-aave-sources
           cp ResearchAaveTwoSwapReceiver.sol .research-aave-sources/
       - name: Verify Aave reserves and readiness
@@ -33,6 +34,10 @@ jobs:
           node -e 'const f=require("fs");const r=require("./ResearchAaveForkReadiness").gate(JSON.parse(f.readFileSync("arbiflow-aave-read-only.json","utf8")),JSON.parse(f.readFileSync("arbiflow-aave-cost-screen.json","utf8")));f.writeFileSync("arbiflow-aave-fork-readiness.json",JSON.stringify(r,null,2));console.log(JSON.stringify(r));if(!r.readyToDevelopForkTest)process.exitCode=1'
       - name: Compile fork only two-swap receiver
         run: npx hardhat compile --config hardhat.research.aave.config.js
+      - name: Quote both swap legs on local Base fork
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npx hardhat run --no-compile --config hardhat.research.aave.config.js ResearchAaveTwoSwapQuotes.js
       - name: Test actual atomic two-swap repayment on Base fork
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
@@ -47,4 +52,5 @@ jobs:
             arbiflow-aave-cost-screen.json
             arbiflow-aave-fork-readiness.json
             arbiflow-aave-two-swap-fork.json
+            arbiflow-aave-two-swap-quotes.json
           if-no-files-found: warn
