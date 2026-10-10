@@ -1,0 +1,59 @@
+name: ArbiFlow Research Discovery 12.9.139
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout research implementation
+        uses: actions/checkout@v4
+        with:
+          ref: build-12.9.90-base-trace-diagnostics
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify research engine revision
+        run: |
+          git rev-parse HEAD
+          node - <<'NODE'
+          const fs=require('fs');
+          for(const file of ['PoolUniverse12939.js','DynamicSizing12961.js','EventWatch12950.js']){
+            if(!fs.existsSync(file))throw Error('RESEARCH_ENGINE_FILE_MISSING_'+file);
+          }
+          console.log('RESEARCH_DISCOVERY_ENGINE_READY=12.9.139');
+          NODE
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Multi-DEX pool and loan-size research
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          SIZE_OPT_ROUTE_LIMIT: '45'
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo 'Missing BASE_RPC_URL'; exit 1; fi
+          npm run test:dynamic-sizing
+      - name: Base Flashblocks event monitoring (optional research feed)
+        continue-on-error: true
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+          WATCH_SECONDS: '30'
+          ROUTE_LIMIT: '300'
+          QUOTE_WORKERS: '2'
+        run: |
+          if [ -z "$BASE_FLASHBLOCKS_WSS_URL" ]; then
+            echo 'FLASHBLOCKS_FEED_NOT_CONFIGURED: Skipping optional preconfirmed-event research'
+            exit 0
+          fi
+          node EventWatch12950.js
+      - name: Archive research observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-research-discovery-129139
+          path: |
+            arbiflow-sizing-12961.json
+          if-no-files-found: warn
