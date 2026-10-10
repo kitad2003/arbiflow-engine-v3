@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {sources,plan,assess}=require('./deployment-plan-v42');
+(async()=>{
+ assert.equal(sources.length,6);
+ assert.equal(new Set(sources.map(x=>x.id)).size,6);
+ const empty=plan();
+ assert.equal(empty.deploymentAuthorized,false);
+ assert.equal(empty.estimatedDeploymentCostWei,null);
+ assert.ok(empty.blockers.includes('DEPLOYMENT_GAS_NOT_MEASURED'));
+ const ok=plan({operator:'0x'+'1'.repeat(40),gasPriceWei:100n,estimatedDeploymentGas:100000});
+ assert.equal(ok.estimatedDeploymentCostWei,'10000000');
+ assert.equal(ok.checks.operatorProvided,true);
+ assert.equal(ok.signing,false);
+ assert.equal(ok.mainnetBroadcast,false);
+ const live=await assess({provider:{getNetwork:async()=>({chainId:1n}),getFeeData:async()=>({gasPrice:123n})}});
+ assert.equal(live.ethereumMainnetConfirmed,true);
+ assert.equal(live.observedGasPriceWei,'123');
+ assert.equal(live.estimatedDeploymentCostWei,null);
+ assert.equal(live.bundlesSubmitted,0);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V42',unitAssertionsPassed:12,sixSourcesTracked:true,mainnetBroadcast:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
