@@ -8,7 +8,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.123',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.124',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -58,6 +58,9 @@ async function feeVaultDeltas(url,snapshot){
    record.parentMinusPrestateWei=String(parent-before);
    record.blockEndMinusPrestateWei=String(blockEnd-before);
    record.localMatchesPrestate=local===before;
+   record.forkCreditFromParentWei=String(local-parent);
+   record.historicalCreditFromParentWei=String(before-parent);
+   record.missingCreditWei=String(before-local);
   }catch{record.status='REFERENCE_UNAVAILABLE'}
   results.push(record);
  }
@@ -88,7 +91,11 @@ async function prefixFeeEvidence(url,snapshot){
  const bv=delta.vaults.find(v=>v.name==='BaseFeeVault');
  const seqGap=sv?.forkMinusPrestateWei? -BigInt(sv.forkMinusPrestateWei):null;
  const baseGap=bv?.forkMinusPrestateWei? -BigInt(bv.forkMinusPrestateWei):null;
- return {readOnly:true,blockBaseFeePerGasWei:baseFee?.toString()??null,txs,totals:{estimatedPriorityFeeWei:totalPriority.toString(),estimatedBaseFeeWei:totalBase.toString(),receiptL1FeeWei:totalL1.toString()},gaps:{sequencerWei:seqGap?.toString()??null,baseWei:baseGap?.toString()??null},comparison:{sequencerGapEqualsEstimatedPriority:seqGap!==null&&seqGap===totalPriority,baseGapEqualsEstimatedBase:baseGap!==null&&baseGap===totalBase,baseParentToPrestateEqualsEstimatedBase: bv?.parentMinusPrestateWei!=null && -BigInt(bv.parentMinusPrestateWei)===totalBase,sequencerParentToPrestateEqualsEstimatedPriority: sv?.parentMinusPrestateWei!=null && -BigInt(sv.parentMinusPrestateWei)===totalPriority},notes:'Fee estimates are diagnostics only; OP Stack fee routing and deposit handling require independent validation'};
+ return {readOnly:true,blockBaseFeePerGasWei:baseFee?.toString()??null,txs,totals:{estimatedPriorityFeeWei:totalPriority.toString(),estimatedBaseFeeWei:totalBase.toString(),receiptL1FeeWei:totalL1.toString()},gaps:{sequencerWei:seqGap?.toString()??null,baseWei:baseGap?.toString()??null},comparison:{sequencerGapEqualsEstimatedPriority:seqGap!==null&&seqGap===totalPriority,baseGapEqualsEstimatedBase:baseGap!==null&&baseGap===totalBase,baseParentToPrestateEqualsEstimatedBase: bv?.parentMinusPrestateWei!=null && -BigInt(bv.parentMinusPrestateWei)===totalBase,
+  baseForkCreditWei: bv?.forkCreditFromParentWei??null,
+  baseHistoricalCreditWei: bv?.historicalCreditFromParentWei??null,
+  baseResidualWei: bv?.missingCreditWei??null,
+  baseForkCreditPlusResidualEqualsHistorical: bv?.forkCreditFromParentWei!=null&&bv?.missingCreditWei!=null&&bv?.historicalCreditFromParentWei!=null&&(BigInt(bv.forkCreditFromParentWei)+BigInt(bv.missingCreditWei)===BigInt(bv.historicalCreditFromParentWei)),sequencerParentToPrestateEqualsEstimatedPriority: sv?.parentMinusPrestateWei!=null && -BigInt(sv.parentMinusPrestateWei)===totalPriority},notes:'Fee estimates are diagnostics only; OP Stack fee routing and deposit handling require independent validation'};
 }
 async function run(){
  const url=process.env.BASE_TRACE_RPC_URL||'';
