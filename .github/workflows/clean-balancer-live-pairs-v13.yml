@@ -1,0 +1,31 @@
+name: Clean Balancer V13 Live Ethereum Pair Discovery
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Check V13 discovery and unit assertions
+        run: |
+          node --check balancer-research-v1/live-pair-v13.js
+          node balancer-research-v1/live-pair-v13-test.js
+      - name: Read-only live Flashbots pair discovery
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL secret required for Ethereum chain reads"
+            exit 1
+          fi
+          node balancer-research-v1/live-pair-v13.js
