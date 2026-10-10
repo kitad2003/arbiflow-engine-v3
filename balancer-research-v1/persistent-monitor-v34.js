@@ -3,6 +3,7 @@
 // Never interprets event-level logs as proof of a profitable transaction.
 const {ENDPOINT,parseSSE}=require('./mevshare-v9');
 const {SWAP_TOPIC}=require('./bot');
+const {makeParser}=require('./stream-parser-v39');
 const HASH=/^0x[0-9a-f]{64}$/i,ADDR=/^0x[0-9a-f]{40}$/i;
 function classify(e){
  if(!HASH.test(e?.hash||''))return null;
@@ -35,23 +36,21 @@ async function run({fetchImpl=fetch,onEvent=()=>{},runtimeMs=240000,
    if(!(response.headers.get('content-type')||'').includes('text/event-stream'))throw Error('NOT_SSE_RESPONSE');
    totals.connectedSessions++;
    reader=response.body.getReader();const decoder=new TextDecoder();
-   let buffer='';
+   const parser=makeParser();
    while(Date.now()<end&&!controller.signal.aborted){
     const part=await reader.read();if(part.done)break;
-    buffer+=decoder.decode(part.value,{stream:true});
-    if(buffer.length>250000)throw Error('SSE_BUFFER_TOO_LARGE');
-    let m;
-    while((m=/\r?\n\r?\n/.exec(buffer))!==null){
-     const section=buffer.slice(0,m.index);buffer=buffer.slice(m.index+m[0].length);
-     for(const raw of parseSSE(section+'\n\n')){
+    for(const raw of parser.push(decoder.decode(part.value,{stream:true}))){
       const event=classify(raw);if(!event)continue;
       if(seen.has(event.eventHash)){totals.duplicateEvents++;continue}
       seen.set(event.eventHash,Date.now());totals.uniqueEvents++;
       if(event.kind==='BUNDLE')totals.bundles++;else totals.pendingTransactions++;
       if(event.swapPools.length)totals.eventsWithSwapHints++;
       await onEvent(event);
-     }
     }
+    const diag=parser.snapshot();
+    totals.oversizedFrames=(totals.oversizedFrames||0)+diag.oversizedFrames-(parser.dropSnapshot?.oversizedFrames||0);
+    totals.invalidFrames=(totals.invalidFrames||0)+diag.invalidFrames-(parser.dropSnapshot?.invalidFrames||0);
+    parser.dropSnapshot=diag;
     // Sliding dedup window bounded in memory.
     if(seen.size>10000){const earliest=[...seen.keys()].slice(0,3000);for(const key of earliest)seen.delete(key)}
    }
