@@ -1,0 +1,19 @@
+name: Clean Balancer V47 Security Review
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm install --no-save --ignore-scripts --no-audit --no-fund solc@0.8.24
+      - run: node --check balancer-research-v1/security-review-v47.js
+      - run: node balancer-research-v1/security-review-v47-test.js
+      - run: node balancer-research-v1/security-review-v47.js
