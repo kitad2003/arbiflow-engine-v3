@@ -28,6 +28,8 @@ jobs:
           node ResearchV3Spot.js
           node --check ResearchSpotComparison.js
           node ResearchSpotComparison.js
+          node --check ResearchOrderingEvidence.js
+          node ResearchOrderingEvidence.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
