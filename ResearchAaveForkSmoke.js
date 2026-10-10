@@ -20,8 +20,8 @@ async function main(){
  await network.provider.send('hardhat_impersonateAccount',[usdc.aToken]);
  await network.provider.send('hardhat_setBalance',[usdc.aToken,ethers.toBeHex(ethers.parseEther('2'))]);
  const reserveSigner=await ethers.getSigner(usdc.aToken);
- const preFund=await token.connect(reserveSigner).transfer(address,premium);await preFund.wait();
  const before=BigInt(await token.balanceOf(usdc.aToken));
+ const preFund=await token.connect(reserveSigner).transfer(address,premium);await preFund.wait();
  const tx=await receiver.request(usdc.asset,amount,{gasLimit:3000000});
  const receipt=await tx.wait();
  const after=BigInt(await token.balanceOf(usdc.aToken));
