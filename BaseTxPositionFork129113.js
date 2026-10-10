@@ -5,13 +5,42 @@ const fs=require('node:fs');
 const {compare}=require('./BaseForkCompare129115');
 const TARGET='0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
 const PORT=18545;
-const report={build:'12.9.113',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.116',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
  const body=await response.json();if(body.error)throw Error('LOCAL_RPC_ERROR_'+body.error.code);return body.result;
 }
 async function remote(url,method,params){const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(30000)});const value=await response.json();if(!response.ok||value.error)throw Error('REMOTE_TRACE_UNAVAILABLE');return value.result}
+async function classifyMismatches(url,snapshot,mismatches){
+ const output={checked:0,parentMatches:0,blockEndMatches:0,neither:0,referenceErrors:0,items:[]};
+ for(const x of mismatches.slice(0,30)){
+  let method,params;
+  if(x.field==='storage'){method='eth_getStorageAt';params=[x.address,x.slot]}
+  else if(x.field==='nonce'){method='eth_getTransactionCount';params=[x.address]}
+  else if(x.field==='balance'){method='eth_getBalance';params=[x.address]}
+  else if(x.field==='code'){method='eth_getCode';params=[x.address]}
+  else continue;
+  const expected=x.field==='storage'?snapshot[x.address]?.storage?.[x.slot]:snapshot[x.address]?.[x.field];
+  const eq=(a,b)=>{try{return x.field==='code'?String(a).toLowerCase()===String(b).toLowerCase():BigInt(a)===BigInt(b)}catch{return false}};
+  const local=await rpc(method,[...params,'latest']);
+  const result={address:x.address,field:x.field,...(x.slot?{slot:x.slot}:{})};
+  try{
+   const parent=await remote(url,method,[...params,'0x'+(52392049).toString(16)]);
+   const end=await remote(url,method,[...params,'0x'+(52392050).toString(16)]);
+   result.localMatchesParent=eq(local,parent);
+   result.localMatchesBlockEnd=eq(local,end);
+   result.traceMatchesParent=eq(expected,parent);
+   result.traceMatchesBlockEnd=eq(expected,end);
+   output.checked++;
+   if(result.localMatchesParent)output.parentMatches++;
+   if(result.localMatchesBlockEnd)output.blockEndMatches++;
+   if(!result.localMatchesParent&&!result.localMatchesBlockEnd)output.neither++;
+  }catch{output.referenceErrors++;result.referenceError=true}
+  output.items.push(result);
+ }
+ return output;
+}
 async function run(){
  const url=process.env.BASE_TRACE_RPC_URL||'';
  if(!/^https:\/\//.test(url)){report.reason='BASE_TRACE_RPC_URL_HTTPS_REQUIRED';return}
@@ -37,6 +66,7 @@ async function run(){
     }else{
       report.status='FORK_PRESTATE_MISMATCH';
       report.reason='ANVIL_FORK_DOES_NOT_MATCH_HISTORICAL_TARGET_PRESTATE';
+      try{report.mismatchOrigins=await classifyMismatches(url,snapshot,report.comparison.mismatches)}catch{report.mismatchOriginError='REFERENCE_CLASSIFICATION_FAILED'}
     }
     return;
    }catch{}
