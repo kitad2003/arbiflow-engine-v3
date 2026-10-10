@@ -22,3 +22,4 @@ jobs:
       - run: node --check balancer-research-v1/dynamic-pair-cache-v51.js
       - run: node --check balancer-research-v1/pending-integrated-v51.js
       - run: node balancer-research-v1/dynamic-pair-cache-v51-test.js
+      - run: node balancer-research-v1/pending-integrated-v51-test.js
