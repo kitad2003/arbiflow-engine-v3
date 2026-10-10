@@ -1,8 +1,10 @@
 'use strict';
 // Research-only cross-pool price observations. Not an executable arbitrage signal.
 // Compare ONLY events carrying identical non-null block identifiers; provider ordering is not guaranteed.
+const ZERO_HASH='0x'+'0'.repeat(64);
+function validBlockHash(hash){return typeof hash==='string'&&/^0x[0-9a-f]{64}$/i.test(hash)&&hash.toLowerCase()!==ZERO_HASH}
 function summarize(events){
- const valid=(events||[]).filter(x=>x?.postSwapSpot?.available===true&&x.tokenAddressesVerified===true&&x?.tokens?.token0?.address&&x?.tokens?.token1?.address&&typeof x.blockHash==='string'&&/^0x[0-9a-f]{64}$/i.test(x.blockHash));
+ const valid=(events||[]).filter(x=>x?.postSwapSpot?.available===true&&x.tokenAddressesVerified===true&&x?.tokens?.token0?.address&&x?.tokens?.token1?.address&&validBlockHash(x.blockHash));
  const grouped=new Map();
  for(const e of valid){
   const a=e.tokens.token0.address.toLowerCase(),b=e.tokens.token1.address.toLowerCase();
@@ -28,9 +30,9 @@ function summarize(events){
      executableQuotesVerified:false,feesVerified:false,profitVerified:false,qualified:false,executionEligible:false});
   }
  }
- return {build:'RESEARCH_ONLY_7',mode:'SAME_BLOCK_CROSS_POOL_SPOT_OBSERVATION',eligibleObservations:valid.length,
+ return {build:'RESEARCH_ONLY_8',mode:'VALID_HASH_GROUPED_CROSS_POOL_SPOT_OBSERVATION',eligibleObservations:valid.length,unresolvedBlockHashObservations:(events||[]).filter(x=>x?.postSwapSpot?.available===true&&!validBlockHash(x.blockHash)).length,
   comparablePairs:comparisons.length,comparisons:comparisons.slice(0,40),alerts:[],executionEligible:false,
-  limitations:['ONLY_IDENTICAL_BLOCK_HASH_GROUPS','FINAL_STATE_AND_EVENT_ORDER_NOT_RECONSTRUCTED','V3_SPOT_NOT_EXECUTABLE_QUOTE','NO_ATOMIC_FORK_SIMULATION','NO_TRANSACTION_SUBMISSION']};
+  limitations:['ZERO_OR_UNRESOLVED_BLOCK_HASH_EXCLUDED','ONLY_IDENTICAL_NONZERO_BLOCK_HASH_GROUPS','FINAL_STATE_AND_EVENT_ORDER_NOT_RECONSTRUCTED','V3_SPOT_NOT_EXECUTABLE_QUOTE','NO_ATOMIC_FORK_SIMULATION','NO_TRANSACTION_SUBMISSION']};
 }
 if(require.main===module){
  const assert=require('node:assert/strict');
@@ -41,6 +43,8 @@ if(require.main===module){
  assert.equal(summarize([e(a,2500),e(b,2501)]).comparablePairs,1);
  assert.equal(summarize([e(a,2500),e(b,2501,'0x'+'b'.repeat(64))]).comparablePairs,0);
  assert.equal(summarize([e(a,2500),e(b,2501)]).executionEligible,false);
- console.log(JSON.stringify({build:'RESEARCH_ONLY_7',unitAssertionsPassed:3}));
+ assert.equal(summarize([e(a,2500,ZERO_HASH),e(b,2501,ZERO_HASH)]).comparablePairs,0);
+ assert.equal(summarize([e(a,2500,ZERO_HASH),e(b,2501,ZERO_HASH)]).unresolvedBlockHashObservations,2);
+ console.log(JSON.stringify({build:'RESEARCH_ONLY_8',unitAssertionsPassed:5}));
 }
 module.exports={summarize};
