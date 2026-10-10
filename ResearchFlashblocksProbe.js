@@ -9,6 +9,7 @@ const {corroborate}=require('./ResearchReceiptCorroboration');
 const {sequence}=require('./ResearchTransactionSequence');
 const {orderedSnapshots}=require('./ResearchOrderedPoolSnapshots');
 const {census}=require('./ResearchEventSignatureCensus');
+const {build:buildPoolGraph,dirty:findRelatedPools}=require('./ResearchEventLiquidityGraph');
 const validAddress=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x);
 function parseNotification(message,subscriptionId,allowed){
  if(message?.method!=='eth_subscription'||message.params?.subscription!==subscriptionId)return null;
@@ -50,9 +51,9 @@ async function run({url,addresses,seconds=25}){
  ws.close();
  const metadata={};let metadataProvider=null;
  const rpc=process.env.BASE_RPC_URL||'';
- if(/^https:\/\//.test(rpc)&&decoded.some(x=>x.decoded.recognized)){
+ if(/^https:\/\//.test(rpc)&&stats.acknowledged){
   metadataProvider=new ethers.JsonRpcProvider(rpc,8453,{staticNetwork:true});
-  try{for(const pool of [...new Set(decoded.filter(x=>x.decoded.recognized).map(x=>x.pool))])metadata[pool.toLowerCase()]=await identify(metadataProvider,pool)}
+  try{for(const pool of [...allowed])metadata[pool]=await identify(metadataProvider,pool)}
   finally{metadataProvider.destroy()}
  }
  const decodedWithTokens=decoded.map(x=>{const enriched=enrich(x,metadata[x.pool.toLowerCase()]);return {...enriched,postSwapSpot:spot(enriched)}});
@@ -66,9 +67,10 @@ async function run({url,addresses,seconds=25}){
  const transactionSequence=sequence(decodedWithTokens,receiptCorroboration);
  const orderedPoolSnapshots=orderedSnapshots(decodedWithTokens,receiptCorroboration);
  const eventSignatureCensus=census(rawEventHeaders);
+ const eventLiquidityGraph=findRelatedPools(buildPoolGraph(Object.values(metadata)),decodedWithTokens);
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_13',mode:'BASE_FLASHBLOCKS_EVENT_SIGNATURE_INVENTORY',providerSupportsPendingLogs:stats.acknowledged,
-  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,receiptCorroboration,transactionSequence,orderedPoolSnapshots,eventSignatureCensus,assessment,
+ return {build:'RESEARCH_ONLY_EVENT_GRAPH_2',mode:'BASE_FLASHBLOCKS_VERIFIED_EVENT_POOL_GRAPH',providerSupportsPendingLogs:stats.acknowledged,
+  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,receiptCorroboration,transactionSequence,orderedPoolSnapshots,eventSignatureCensus,eventLiquidityGraph,assessment,
   limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','POST_SWAP_SPOT_IS_NOT_PRICE_IMPACT_SIMULATION','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
 }
