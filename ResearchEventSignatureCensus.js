@@ -4,7 +4,7 @@ const {id}=require('ethers');
 const names=[
  ['Transfer(address,address,uint256)','ERC20_TRANSFER'],
  ['Approval(address,address,uint256)','ERC20_APPROVAL'],
- ['Mint(address,address,uint128,uint256,uint256)','V3_MINT'],
+ ['Mint(address,address,int24,int24,uint128,uint256,uint256)','V3_MINT'],
  ['Burn(address,int24,int24,uint128,uint256,uint256)','V3_BURN'],
  ['Collect(address,address,int24,int24,uint128,uint128)','V3_COLLECT'],
  ['Flash(address,address,uint256,uint256,uint256,uint256)','V3_FLASH'],
@@ -34,6 +34,9 @@ if(require.main===module){
  {address:'0x'+'1'.repeat(40),topics:['0x'+'f'.repeat(64)]}]);
  assert.equal(a.validSignatureEvents,2);assert.equal(a.unidentifiedSignatureEvents,1);
  assert.equal(a.signatureGroups.some(x=>x.knownKind==='ERC20_TRANSFER'),true);
- console.log(JSON.stringify({build:'RESEARCH_ONLY_13',unitAssertionsPassed:3}));
+ const mint='0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde';
+ assert.equal(id('Mint(address,address,int24,int24,uint128,uint256,uint256)').toLowerCase(),mint);
+ assert.equal(census([{address:'0x'+'1'.repeat(40),topics:[mint]}]).signatureGroups[0].knownKind,'V3_MINT');
+ console.log(JSON.stringify({build:'RESEARCH_ONLY_14',unitAssertionsPassed:5}));
 }
 module.exports={census};
