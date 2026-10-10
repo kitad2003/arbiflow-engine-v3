@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {run}=require('./pending-integrated-v51');
+const A='0x'+'a'.repeat(40),B='0x'+'b'.repeat(40);
+(async()=>{
+ let evaluated=0;
+ const cache={resolve:async(_provider,pool)=>{evaluated++;return {verified:true,trigger:{token0:A,token1:B,venue:'UNISWAP_V2'},alternative:{pool:B,venue:'SUSHISWAP_V2'},blockNumber:123,cacheHit:evaluated>1}}};
+ const event={kind:'PENDING_TRANSACTION',pendingHash:'0x'+'f'.repeat(64),swapPools:[A]};
+ const monitorImpl=async({onEvent})=>{await onEvent({kind:'BUNDLE'});await onEvent(event);await onEvent(event);return {connectedSessions:1}};
+ const provider={getNetwork:async()=>({chainId:1n})};
+ const result=await run({provider,cache,monitorImpl,maxEvents:1});
+ assert.equal(result.bundlesExcluded,1);
+ assert.equal(result.pendingEvents,2);
+ assert.equal(result.eventsInspected,1);
+ assert.equal(result.eventsSkipped,1);
+ assert.equal(result.verifiedCrossVenuePairs,1);
+ assert.equal(evaluated,1);
+ assert.equal(result.examples[0].pairs[0].executable,false);
+ assert.equal(result.executionEligible,false);
+ assert.equal(result.simulationAttempted,false);
+ assert.equal(result.mainnetBroadcast,false);
+ assert.equal(result.bundlesSubmitted,0);
+ assert.deepEqual(result.alerts,[]);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V51',integrationAssertionsPassed:12,readOnly:true}));
+})().catch(e=>{console.error(e);process.exitCode=1});
