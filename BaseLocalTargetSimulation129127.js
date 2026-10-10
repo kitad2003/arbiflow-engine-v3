@@ -17,6 +17,13 @@ async function simulate(local,remote){
  if(tx.maxFeePerGas!=null&&tx.maxPriorityFeePerGas!=null){
   request.maxFeePerGas=tx.maxFeePerGas;request.maxPriorityFeePerGas=tx.maxPriorityFeePerGas;request.type='0x2';
  }else if(tx.gasPrice!=null)request.gasPrice=tx.gasPrice;
+ stage='READ_HISTORICAL_BLOCK_CONTEXT';
+ const historicBlock=await remote('eth_getBlockByNumber',[receipt.blockNumber,false]);
+ if(!historicBlock?.timestamp||!historicBlock?.baseFeePerGas){report.reason='HISTORICAL_BLOCK_CONTEXT_UNAVAILABLE';return report}
+ stage='LOCAL_BLOCK_CONTEXT';
+ await local('anvil_setNextBlockBaseFeePerGas',[historicBlock.baseFeePerGas]);
+ await local('evm_setNextBlockTimestamp',[Number(BigInt(historicBlock.timestamp))]);
+ report.historicalBlockContextApplied=true;
  stage='LOCAL_IMPERSONATION';
  await local('anvil_impersonateAccount',[tx.from]);
  try{
@@ -38,7 +45,6 @@ async function simulate(local,remote){
   const hlogs=(receipt.logs||[]).map(normalizeLog),llogs=(actual.logs||[]).map(normalizeLog);
   report.logsComparison={historicalCount:hlogs.length,localCount:llogs.length,matched:JSON.stringify(hlogs)===JSON.stringify(llogs),firstDifferentIndex:null};
   for(let i=0;i<Math.max(hlogs.length,llogs.length);i++){if(JSON.stringify(hlogs[i])!==JSON.stringify(llogs[i])){report.logsComparison.firstDifferentIndex=i;break}}
-  const historicBlock=await remote('eth_getBlockByNumber',[receipt.blockNumber,false]);
   const localBlock=await local('eth_getBlockByNumber',[actual.blockNumber,false]);
   report.blockEnvironment={historical:{timestamp:historicBlock?.timestamp,baseFeePerGas:historicBlock?.baseFeePerGas,gasLimit:historicBlock?.gasLimit},local:{timestamp:localBlock?.timestamp,baseFeePerGas:localBlock?.baseFeePerGas,gasLimit:localBlock?.gasLimit}};
   report.historicalReceiptStatus=receipt.status;
