@@ -1,0 +1,24 @@
+name: Clean Balancer V29 Live MEV-Share V26 Gate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate target-hint filtering and V26 signed transaction structure
+        run: |
+          node --check balancer-research-v1/live-v26-gate-v29.js
+          node balancer-research-v1/live-v26-gate-v29-test.js
+      - name: Observe live MEV-Share events with fail-closed V26 validation
+        run: node balancer-research-v1/live-v26-gate-v29.js
