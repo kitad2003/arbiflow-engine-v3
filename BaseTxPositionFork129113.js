@@ -11,7 +11,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.136',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.137',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -168,6 +168,21 @@ async function run(){
           if(!report.localPoststateComparison.matched){
            report.localPoststateMismatchDetails=await diagnose(diff.post,report.localPoststateComparison.mismatches,rpc);
            report.targetFeeAttribution=attribute(report.localTargetSimulation,report.localPoststateComparison,report.localPoststateMismatchDetails);
+           const feeAddresses=new Set(['0x4200000000000000000000000000000000000011','0x4200000000000000000000000000000000000019','0x420000000000000000000000000000000000001a', '0xd14602c85a25a4e520441c47a97a2c9da63ae1be']);
+           const nonFeeMismatches=report.localPoststateComparison.mismatches.filter(m=>!(m.field==='balance'&&feeAddresses.has(m.address.toLowerCase())));
+           report.executionStateAssessment={
+            scope:'TARGET_TRACE_DIFF_POST_FIELDS_ONLY',
+            totalFieldsChecked:report.localPoststateComparison.fieldsChecked,
+            feeRelatedBalanceMismatches:report.localPoststateComparison.mismatches.length-nonFeeMismatches.length,
+            nonFeeMismatches,
+            nonFeeFieldsMatched:nonFeeMismatches.length===0&&report.localPoststateComparison.readFailures===0,
+            logsMatched:report.localTargetSimulation.logsComparison?.matched===true,
+            receiptFieldsMatched:report.localTargetSimulation.receiptMatches===true,
+            feeAttributionIdentitiesMatched:report.targetFeeAttribution.priorityFeeIdentityVerified&&report.targetFeeAttribution.operatorFeeTransferIdentityVerified,
+            fullHistoricalReplayVerified:false,
+            executionEligible:false,
+            note:'Partial target execution evidence; full state and OP Stack fee routing remain unverified'
+           };
           }
          }catch{report.localPoststateComparison={status:'POSTSTATE_COMPARISON_UNAVAILABLE',provesCompleteReplay:false}}
         }
