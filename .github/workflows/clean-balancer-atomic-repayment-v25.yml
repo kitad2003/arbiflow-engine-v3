@@ -1,0 +1,24 @@
+name: Clean Balancer V25 Atomic Repayment Fork
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repayment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: V25 artificial local fork repayment and gas accounting
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          node --check balancer-research-v1/ethereum-fork-v25.js
+          npx hardhat run --config balancer-research-v1/ethereum-fork-v17.config.js balancer-research-v1/ethereum-fork-v25.js
