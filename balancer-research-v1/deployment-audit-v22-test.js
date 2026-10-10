@@ -1,0 +1,22 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+const {audit}=require('./deployment-audit-v22');
+const src=fs.readFileSync(path.join(__dirname,'BalancerEthereumAtomicV17.sol'),'utf8');
+const result=audit(src),byId=Object.fromEntries(result.checks.map(c=>[c.id,c.pass]));
+assert.equal(result.build,'BALANCER_RESEARCH_V22');
+assert.equal(byId.CALLBACK_RESTRICTED_TO_VAULT,true);
+assert.equal(byId.OPERATOR_START_GATE,true);
+assert.equal(byId.BALANCER_LOAN_CALLBACK,true);
+assert.equal(byId.FLASH_LOAN_TOKEN_AND_PRINCIPAL_CHECK,true);
+assert.equal(byId.REPAYMENT_ENFORCED,true);
+assert.equal(byId.POSITIVE_ONCHAIN_SURPLUS_GATE,true);
+assert.equal(byId.POOL_FACTORY_AUTHENTICATION,false);
+assert.equal(byId.FIRST_AND_SECOND_LEG_MIN_OUTPUT_INPUTS,false);
+assert.equal(byId.GAS_ADJUSTED_PROFIT_PROOF,false);
+assert.equal(byId.PENDING_TARGET_FIRST_SIMULATION_PROOF,false);
+assert.equal(result.deploymentReady,false);
+assert.equal(result.mainnetBroadcast,false);
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V22',unitAssertionsPassed:12,
+ auditedSource:true,securityAuditCompleted:false,deploymentReady:false,mainnetBroadcast:false}));
