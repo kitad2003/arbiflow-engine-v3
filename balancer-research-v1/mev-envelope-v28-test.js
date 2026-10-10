@@ -18,7 +18,7 @@ const {prepare,report,IFACE}=require('./mev-envelope-v28');
  assert.equal(p.request.params[0].body[1].canRevert,false);
  assert.equal(prepare({...base,targetKind:'BUNDLE'}).ready,false);
  assert.equal(prepare({...base,operatorAddress:second}).reason,'WRONG_OPERATOR_SIGNER');
- assert.equal(prepare({...base,verifiedFirstPool:second}).reason,'BACKRUN_POOL_INPUT_MISMATCH');
+ assert.equal(prepare({...base,verifiedFirstPool:'0x'+'6'.repeat(40)}).reason,'BACKRUN_POOL_INPUT_MISMATCH');
  assert.equal(prepare({...base,backrunSignedTx:''}).reason,'SIGNED_BACKRUN_TX_REQUIRED');
  const legacyIface=new ethers.Interface(['function makeFlashLoan(address,address,uint256,uint256)']);
  const legacy=await wallet.signTransaction({chainId:1,nonce:1,to:contract,gasLimit:400000,gasPrice:1000000000n,
