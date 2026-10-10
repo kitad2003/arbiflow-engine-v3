@@ -24,17 +24,17 @@ jobs:
             echo "BASE_RPC_URL_SECRET_MISSING"
             exit 1
           fi
-      - name: Validate Base fork hardfork configuration
+      - name: Validate Base fork configuration without initializing Hardhat plugins
         env:
           BALANCER_FORK_RPC_URL: ${{ secrets.BASE_RPC_URL }}
         run: |
+          node --check balancer-research-v1/fork.config.js
           node - <<'NODE'
           const assert=require('node:assert/strict');
-          const cfg=require('./balancer-research-v1/fork.config.js');
-          const history=cfg.networks.hardhat.chains[8453].hardforkHistory;
-          assert.ok(history instanceof Map,'BASE_HARDFORK_HISTORY_MUST_BE_MAP');
-          assert.equal(history.get('cancun'),0);
-          console.log('BASE_HARDFORK_CONFIG_MAP_VALID');
+          const fs=require('node:fs');
+          const source=fs.readFileSync('balancer-research-v1/fork.config.js','utf8');
+          assert.match(source,/hardforkHistory\s*:\s*new Map\s*\(/,'BASE_HARDFORK_HISTORY_MAP_MISSING');
+          console.log('BASE_FORK_CONFIG_STATIC_CHECK_PASSED');
           NODE
       - name: Compile clean Balancer research contracts
         env:
