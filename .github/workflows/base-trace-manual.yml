@@ -45,6 +45,11 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+      - name: Record Foundry version
+        if: steps.capabilities.outcome == 'success'
+        run: |
+          anvil --version
+          forge --version
       - name: Transaction-position fork startup probe
         if: steps.capabilities.outcome == 'success'
         env:
