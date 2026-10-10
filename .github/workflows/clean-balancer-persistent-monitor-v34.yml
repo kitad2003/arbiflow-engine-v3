@@ -1,0 +1,26 @@
+name: Clean Balancer V34 Persistent MEV Share Monitor
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test pending transaction and bundle separation
+        run: |
+          node --check balancer-research-v1/persistent-monitor-v34.js
+          node balancer-research-v1/persistent-monitor-v34-test.js
+      - name: Observe live MEV-Share for four minutes
+        env:
+          V34_DURATION_MS: '240000'
+        run: node balancer-research-v1/persistent-monitor-v34.js
