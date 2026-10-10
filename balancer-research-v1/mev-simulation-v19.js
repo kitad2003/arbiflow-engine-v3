@@ -25,13 +25,13 @@ function prepare({targetHash,targetKind='TRANSACTION',backrunSignedTx,backrunCon
    return {ready:false,reason:'INVALID_BALANCER_FLASH_LOAN_CALL'};
  }catch{return {ready:false,reason:'BACKRUN_NOT_BALANCER_FLASH_LOAN_CALL'}}
  const params={
-  version:'v0.1',
+  version:'beta-1',
   inclusion:{block:'0x'+blockNumber.toString(16)},
   body:[{hash:targetHash.toLowerCase()},{tx:backrunSignedTx,canRevert:false}],
   validity:{refund:[],refundConfig:[]}
  };
  return {ready:true,backrunHash:tx.hash,targetHash:targetHash.toLowerCase(),params,
-  request:{jsonrpc:'2.0',id:1,method:METHOD,params:[params,{}]}};
+  request:{jsonrpc:'2.0',id:1,method:METHOD,params:[params]}};
 }
 async function simulate(input,{fetchImpl=fetch,endpoint=RPC,allowRequest=false}={}){
  const prepared=prepare(input);
