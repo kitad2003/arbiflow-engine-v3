@@ -18,6 +18,8 @@ async function main(){
  const [signer]=await e.getSigners(),F=await e.getContractFactory('AaveDexAtomicFork12913');
  const ex=await F.deploy();await ex.waitForDeployment();
  const usdc=new e.Contract('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',['function balanceOf(address) view returns(uint256)'],e.provider);
+ const aavePool=new e.Contract('0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',['function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)'],e.provider);
+ const premiumBps=BigInt(await aavePool.FLASHLOAN_PREMIUM_TOTAL());
  const reports=[];
  for(const item of candidates){
   const amount=BigInt(item.loanUsdc)*1000000n;
@@ -28,6 +30,16 @@ async function main(){
   catch(err){const d=decoded(err,ex);if(d?.name==='BothSwapsReached'){row.bothSwapsReached=true;outputs={wethRaw:d.args[0].toString(),usdcRaw:d.args[1].toString()};}}
   if(!outputs){row.blockedReasons.push('BOTH_REAL_SWAPS_NOT_REACHED');reports.push(row);continue;}
   row.actualReturnRaw=outputs.usdcRaw;
+  const premiumRaw=(amount*premiumBps+9999n)/10000n;
+  const swapDeltaRaw=BigInt(outputs.usdcRaw)-amount;
+  const afterPremiumRaw=swapDeltaRaw-premiumRaw;
+  row.actualSwapDeltaUsdcRaw=swapDeltaRaw.toString();
+  row.aavePremiumBps=premiumBps.toString();
+  row.aavePremiumUsdcRaw=premiumRaw.toString();
+  row.actualAfterPremiumBeforeGasUsdcRaw=afterPremiumRaw.toString();
+  row.actualAfterPremiumBeforeGasPositive=afterPremiumRaw>0n;
+  row.quotedVsActualBeforeGasDifferenceRaw=item.preGasAfterAavePremiumUsdcRaw==null?null:(afterPremiumRaw-BigInt(item.preGasAfterAavePremiumUsdcRaw)).toString();
+  if(afterPremiumRaw<=0n)row.blockedReasons.push('ACTUAL_LOSS_AFTER_AAVE_PREMIUM_BEFORE_GAS');
   const normal={...plan,probeAfterSwaps:false};
   let allowed=false,revertReason=null;
   try{await ex.start.staticCall(normal,{gasLimit:10000000});allowed=true;}
@@ -52,6 +64,6 @@ async function main(){
   reports.push(row);
  }
  assert(reports.every(r=>r.qualified===false&&r.alerts.length===0),'UNVERIFIED_DASHBOARD_ALERT');
- console.log(JSON.stringify({success:true,build:'12.9.30',mode:'FORK_ONLY_ATOMIC_SETTLEMENT_AND_GAS_DIAGNOSTIC',rankedCandidatesTested:reports.length,rows:reports,successfulForkSettlements:reports.filter(r=>r.forkSettlementSucceeded).length,netProfitVerified:false,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false}));
+ console.log(JSON.stringify({success:true,build:'12.9.138',mode:'FORK_ONLY_ATOMIC_SETTLEMENT_AND_GAS_DIAGNOSTIC',rankedCandidatesTested:reports.length,rows:reports,successfulForkSettlements:reports.filter(r=>r.forkSettlementSucceeded).length,netProfitVerified:false,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false}));
 }
 main().catch(err=>{console.error('ATOMIC_SETTLEMENT_GAS_FAILED',String(err?.shortMessage||err?.message||err).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,300));process.exitCode=1});
