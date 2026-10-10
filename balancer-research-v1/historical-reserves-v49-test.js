@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {quote,evaluate,inspect}=require('./historical-reserves-v49');
+(async()=>{
+ assert.equal(quote(0n,100n,100n),0n);
+ assert.equal(quote(1000n,0n,100n),0n);
+ assert.equal(quote(1000n,100000n,200000n),1974n);
+ const e=evaluate({amount:1000n,reservesA:[100000n,200000n],reservesB:[200000n,100000n]});
+ assert.equal(e.borrowed,'1000');
+ assert.equal(e.gasAdjustedNetProfitVerified,false);
+ assert.equal(e.targetFirstSimulated,false);
+ const noRpc=await inspect();
+ assert.equal(noRpc.status,'BLOCKED');
+ assert.equal(noRpc.reason,'RPC_NOT_CONFIGURED');
+ assert.equal(noRpc.mainnetBroadcast,false);
+ assert.equal(noRpc.localForkExecution,false);
+ const wrongChain=await inspect({provider:{getNetwork:async()=>({chainId:8453n})}});
+ assert.equal(wrongChain.reason,'ETHEREUM_MAINNET_REQUIRED');
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V49',unitAssertionsPassed:11,readOnly:true,historicalStateMustBeVerifiedLive:true}));
+})().catch(e=>{console.error(e);process.exitCode=1});
