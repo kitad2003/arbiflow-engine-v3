@@ -38,6 +38,8 @@ jobs:
           node ResearchOrderedPoolSnapshots.js
           node --check ResearchEventSignatureCensus.js
           node ResearchEventSignatureCensus.js
+          node --check ResearchAaveBaseFlashLoan.js
+          node ResearchAaveBaseFlashLoan.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
@@ -50,10 +52,22 @@ jobs:
             exit 1
           fi
           node ResearchFlashblocksProbe.js
+      - name: Verify Aave V3 Base flash-loan prerequisites (read-only)
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          AAVE_RESEARCH_LIVE: '1'
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "AAVE_RESEARCH_RPC_MISSING"
+            exit 1
+          fi
+          node ResearchAaveBaseFlashLoan.js
       - name: Archive capability result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: flashblocks-capability
-          path: arbiflow-flashblocks-capability.json
+          path: |
+            arbiflow-flashblocks-capability.json
+            arbiflow-aave-read-only.json
           if-no-files-found: warn
