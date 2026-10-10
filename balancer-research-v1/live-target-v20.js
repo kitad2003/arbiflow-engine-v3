@@ -5,6 +5,8 @@
 const {ENDPOINT,parseSSE}=require('./mevshare-v9');
 const {SWAP_TOPIC}=require('./bot');
 const {prepare}=require('./mev-simulation-v19');
+// Verified against both exchange factories in live Ethereum V15.
+const V15_VERIFIED_ORIGIN_POOL='0x15ab0333985fd1e289adf4fbbe19261454776642';
 const HASH=/^0x[0-9a-f]{64}$/i,ADDRESS=/^0x[0-9a-f]{40}$/i;
 function select(events,{verifiedPools=[]}={}){
  const pools=new Set(verifiedPools.filter(p=>ADDRESS.test(p)).map(p=>p.toLowerCase()));
@@ -74,7 +76,7 @@ async function run({fetchImpl=fetch,verifiedPools=[],backrunContract,backrunSign
 }
 module.exports={select,listen,run};
 if(require.main===module)run({
- verifiedPools:(process.env.V20_VERIFIED_POOL_ADDRESSES||'').split(',').map(x=>x.trim()),
+ verifiedPools:[V15_VERIFIED_ORIGIN_POOL,...(process.env.V20_VERIFIED_POOL_ADDRESSES||'').split(',').map(x=>x.trim())],
  backrunContract:process.env.V19_BACKRUN_CONTRACT,
  backrunSignedTx:process.env.V19_SIGNED_BACKRUN_TX,
  blockNumber:process.env.V19_BLOCK_NUMBER?Number(process.env.V19_BLOCK_NUMBER):undefined
