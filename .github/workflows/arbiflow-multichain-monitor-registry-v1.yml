@@ -1,0 +1,17 @@
+name: ArbiFlow Multichain Monitoring Registry V1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  registry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: node --check pending-research/multichain-monitor-registry-v1.js
+      - run: node pending-research/multichain-monitor-registry-v1-test.js
+      - run: node pending-research/multichain-monitor-registry-v1.js
