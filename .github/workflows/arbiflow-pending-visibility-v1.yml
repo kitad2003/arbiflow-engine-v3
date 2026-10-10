@@ -1,0 +1,23 @@
+name: ArbiFlow Ethereum Pending Visibility V1
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/pending-visibility-v1.js
+      - run: node pending-research/pending-visibility-v1-test.js
+      - name: Observe broad pending hashes for up to 60 seconds
+        env:
+          ETHEREUM_WSS_URL: ${{ secrets.ETHEREUM_WSS_URL }}
+          PENDING_DURATION_MS: '60000'
+          PENDING_MAX_EVENTS: '10000'
+        run: node pending-research/pending-visibility-v1.js
