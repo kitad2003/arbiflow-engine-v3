@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {CHAINS,status}=require('./multichain-monitor-registry-v1');
+const r=status({ETHEREUM_WSS_URL:'wss://test.invalid'});
+assert.equal(CHAINS.length,15);assert.equal(new Set(CHAINS.map(c=>c.chainId)).size,15);
+assert.equal(r.chains.filter(c=>c.active).length,0);
+assert.equal(r.chains.find(c=>c.name==='ethereum').configured,true);
+assert.equal(r.chains.find(c=>c.name==='base').feedType,'flashblocks_provider_required');
+assert.equal(r.cexRosterModified,false);assert.equal(r.executionEnabled,false);
+console.log('MULTICHAIN_MONITOR_REGISTRY_V1_TEST_PASS');
