@@ -18,6 +18,7 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Check research-only adapter and unit tests
         run: |
+          node --check balancer-research-v1/event-signatures-v8.js
           node --check balancer-research-v1/live-pending-v7.js
           node balancer-research-v1/live-pending-v7-test.js
       - name: Observe live Base preconfirmed event hints, without trade submission
