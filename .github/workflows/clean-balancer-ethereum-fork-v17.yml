@@ -1,0 +1,31 @@
+name: Clean Balancer V17 Ethereum Atomic Fork Test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  atomic-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Compile isolated Ethereum Balancer research contract
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL secret required"
+            exit 1
+          fi
+          npx hardhat compile --config balancer-research-v1/ethereum-fork-v17.config.js
+      - name: Test real Balancer flash loan and both pair swap directions on local fork
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: npx hardhat run --no-compile --config balancer-research-v1/ethereum-fork-v17.config.js balancer-research-v1/ethereum-fork-v17.js
