@@ -1,0 +1,22 @@
+name: Balancer V53 Disclosure Diagnostics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test disclosure classification
+        run: node balancer-research-v1/event-disclosure-v53-test.js
+      - name: Observe read-only event disclosure
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/event-disclosure-live-v53.js
