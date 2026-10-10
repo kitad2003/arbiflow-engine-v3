@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {screen,audit}=require('./solana-safety-v4');
+const mint='GTBxUiw6wJdmmkCGZgRHLyYxqu1vG4KtRpeox6yDpump';
+const legacy='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const account=(freeze=null,mintAuthority=null)=>({owner:legacy,data:{program:'spl-token',parsed:{type:'mint',info:{freezeAuthority:freeze,mintAuthority}}}});
+assert.equal(screen(mint,account()).accepted,true);
+assert.equal(screen(mint,account('abc')).reason,'FREEZE_AUTHORITY_NOT_REVOKED');
+assert.equal(screen(mint,account(null,'abc')).reason,'MINT_AUTHORITY_NOT_RENOUNCED');
+assert.equal(screen(mint,null).accepted,false);
+assert.equal(screen(mint,{...account(),owner:'unknown'}).accepted,false);
+(async()=>{const out=await audit([mint],{rpcUrl:'https://example.invalid',fetchImpl:async()=>({ok:true,json:async()=>({result:{value:account()}})})});assert.equal(out.mintAuthorityScreenPassed,1);assert.equal(out.results[0].taxVerified,false);console.log(JSON.stringify({build:'ARBIFLOW_SOLANA_SAFETY_V4',tests:'PASS'}))})().catch(e=>{console.error(e);process.exitCode=1});
