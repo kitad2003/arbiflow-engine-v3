@@ -1,0 +1,26 @@
+name: Clean Balancer V36 Positive Estimate Evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  positive-estimates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test cost arithmetic and positive evidence retention
+        run: |
+          node --check balancer-research-v1/positive-evidence-v36.js
+          node balancer-research-v1/positive-evidence-v36-test.js
+      - name: Monitor pending transactions and retain gross-positive evidence
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/positive-evidence-v36.js
