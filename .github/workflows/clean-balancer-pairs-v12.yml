@@ -1,0 +1,22 @@
+name: Clean Balancer V12 Verified Exchange-Pair Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-v2-factories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Standalone research unit assertions
+        run: |
+          node --check balancer-research-v1/verified-pairs-v12.js
+          node balancer-research-v1/verified-pairs-v12-test.js
