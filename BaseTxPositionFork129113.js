@@ -4,10 +4,11 @@ const {spawn}=require('node:child_process');
 const fs=require('node:fs');
 const {compare}=require('./BaseForkCompare129115');
 const TARGET='0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
+const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e9967063c';
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.118',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.119',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -48,7 +49,7 @@ async function run(){
  if(!/^https:\/\//.test(url)){report.reason='BASE_TRACE_RPC_URL_HTTPS_REQUIRED';return}
  let child;let ended=false;let launchError=false;
  try{
-  child=spawn('anvil',['--fork-url',url,'--fork-transaction-hash',TARGET,'--host','127.0.0.1','--port',String(PORT),'--silent'],{stdio:'ignore'});
+  child=spawn('anvil',['--fork-url',url,'--fork-transaction-hash',PREDECESSOR,'--host','127.0.0.1','--port',String(PORT),'--silent'],{stdio:'ignore'});
   child.on('error',()=>{launchError=true;ended=true});
   child.on('exit',()=>{ended=true});
   for(let i=0;i<45&&!ended;i++){
@@ -59,7 +60,8 @@ async function run(){
     const height=await rpc('eth_blockNumber');
     const forkBlock=await rpc('eth_getBlockByNumber',[height,true]);
     const localTransactions=Array.isArray(forkBlock?.transactions)?forkBlock.transactions:[];
-    report.positionEvidence={localBlock:height,transactionsInLocalBlock:localTransactions.length,transactionHashes:localTransactions.slice(0,4).map(t=>typeof t==='string'?t:t.hash),targetIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===TARGET)};
+    report.positionEvidence={forkCheckpointHash:PREDECESSOR,localBlock:height,transactionsInLocalBlock:localTransactions.length,transactionHashes:localTransactions.slice(0,4).map(t=>typeof t==='string'?t:t.hash),targetIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===TARGET),predecessorIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===PREDECESSOR)};
+    if(report.positionEvidence.targetIncluded||!report.positionEvidence.predecessorIncluded){report.status='FORK_WRONG_TRANSACTION_BOUNDARY';report.reason='TARGET_INCLUDED_OR_PREDECESSOR_MISSING';return}
     report.localChainId=chain;report.localBlock=height;
     report.status='FORK_STARTED_CHECKPOINT_UNVERIFIED';
     report.reason='NEED_COMPARE_TARGET_PRESTATE_STORAGE_AND_PREFIX_RECEIPTS';
