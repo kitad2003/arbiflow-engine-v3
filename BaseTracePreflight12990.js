@@ -29,8 +29,8 @@ async function main() {
  };
  let rpc;
  try {
-  assert(/^https:\/\//.test(process.env.BASE_RPC_URL || ''),'BASE_RPC_URL_HTTPS_REQUIRED');
-  rpc = new JsonRpcProvider(process.env.BASE_RPC_URL,8453,{staticNetwork:true});
+  assert(/^https:\/\//.test(process.env.BASE_TRACE_RPC_URL || ''),'BASE_TRACE_RPC_URL_HTTPS_REQUIRED');
+  rpc = new JsonRpcProvider(process.env.BASE_TRACE_RPC_URL,8453,{staticNetwork:true});
   const network=await rpc.getNetwork();
   assert(network.chainId===8453n,'NOT_BASE');
   const block=await rpc.send('eth_getBlockByNumber',['0x'+BLOCK.toString(16),true]);
