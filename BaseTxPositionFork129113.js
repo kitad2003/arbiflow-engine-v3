@@ -10,7 +10,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.132',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.133',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
