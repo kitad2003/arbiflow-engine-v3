@@ -54,6 +54,7 @@ jobs:
         if: steps.capabilities.outcome == 'success'
         env:
           BASE_TRACE_RPC_URL: ${{ secrets.BASE_TRACE_RPC_URL }}
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
         run: npm run test:base-tx-fork
       - name: Explain diagnostic result
         if: always()
