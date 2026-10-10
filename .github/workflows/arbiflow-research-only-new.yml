@@ -1,0 +1,25 @@
+name: ArbiFlow Research Only Foundation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-research-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify isolated research engine
+        run: |
+          node --check ResearchTransactionImpact.js
+          node ResearchTransactionImpact.js
+      - name: Archive research-only diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-research-only-foundation
+          path: arbiflow-research-impact.json
