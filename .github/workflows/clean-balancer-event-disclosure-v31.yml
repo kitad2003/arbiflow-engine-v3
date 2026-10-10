@@ -1,0 +1,24 @@
+name: Clean Balancer V31 MEV-Share Event Disclosure Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  event-disclosure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify Flashbots event hash and underlying transaction distinction
+        run: |
+          node --check balancer-research-v1/event-disclosure-v31.js
+          node balancer-research-v1/event-disclosure-v31-test.js
+      - name: Audit live MEV-Share disclosed event metadata
+        run: node balancer-research-v1/event-disclosure-v31.js
