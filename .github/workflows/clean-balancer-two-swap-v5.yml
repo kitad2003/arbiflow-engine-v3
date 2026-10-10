@@ -1,0 +1,22 @@
+name: Clean Balancer V5 Two-Swap Mock
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  atomic-two-swap-mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Compile isolated Balancer research contracts
+        run: npx hardhat compile --config balancer-research-v1/hardhat.config.js
+      - name: Test atomic two-swap callback and rollback with mock venues
+        run: npx hardhat run --no-compile --config balancer-research-v1/hardhat.config.js balancer-research-v1/two-swap-mock-test.js
