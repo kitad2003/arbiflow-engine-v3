@@ -1,0 +1,23 @@
+name: Balancer V59 Prioritized Live Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: V59 syntax
+        run: node --check balancer-research-v1/live-priority-pairs-v59.js
+      - name: V59 unit tests
+        run: node balancer-research-v1/live-priority-pairs-v59-test.js
+      - name: Live 60-second prioritized research
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/live-priority-pairs-v59.js
