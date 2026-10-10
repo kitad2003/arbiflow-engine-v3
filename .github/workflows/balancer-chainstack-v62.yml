@@ -1,0 +1,26 @@
+name: Balancer V62 Chainstack Comparison
+on:
+  workflow_dispatch:
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Check V62 syntax and tests
+        run: |
+          node --check balancer-research-v1/expanded-discovery-v62.js
+          node balancer-research-v1/expanded-discovery-v62-test.js
+      - name: Run Chainstack Ethereum research (read-only)
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.CHAINSTACK_RPC_URL }}
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "::error::CHAINSTACK_RPC_URL secret is missing"
+            exit 1
+          fi
+          node balancer-research-v1/expanded-discovery-v62.js
