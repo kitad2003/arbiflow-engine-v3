@@ -1,0 +1,23 @@
+name: Clean Balancer V22 Deployment Readiness Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deployment-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate isolated Balancer deployment audit
+        run: |
+          node --check balancer-research-v1/deployment-audit-v22.js
+          node balancer-research-v1/deployment-audit-v22-test.js
+      - name: Report blockers without deploying or signing
+        run: node balancer-research-v1/deployment-audit-v22.js
