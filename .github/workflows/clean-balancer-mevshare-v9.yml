@@ -1,0 +1,25 @@
+name: Clean Balancer V9 Flashbots Event Stream Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate standalone event stream reader
+        run: |
+          node --check balancer-research-v1/mevshare-v9.js
+          node balancer-research-v1/mevshare-v9-test.js
+      - name: Observe documented Ethereum MEV-Share pending event stream read-only
+        env:
+          MEV_SHARE_RESEARCH_NETWORK: ethereum-mainnet
+        run: node balancer-research-v1/mevshare-v9.js
