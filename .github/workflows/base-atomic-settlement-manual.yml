@@ -1,0 +1,31 @@
+name: ArbiFlow Base Atomic Fork Test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  atomic-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: build-12.9.90-base-trace-diagnostics
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify RPC secret exists
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo '::error::Missing BASE_RPC_URL GitHub Actions secret'
+            exit 1
+          fi
+      - name: Fork-only Aave two-swap atomic settlement evidence
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npm run test:atomic-settlement-gas
