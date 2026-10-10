@@ -1,0 +1,23 @@
+name: Clean Balancer V6 Event-Hint Monitor Tests
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pending-event-hints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate isolated monitoring module syntax
+        run: |
+          node --check balancer-research-v1/pending-monitor-v6.js
+          node --check balancer-research-v1/pending-monitor-v6-test.js
+      - name: Validate swap-event hints and verified alternative venues
+        run: node balancer-research-v1/pending-monitor-v6-test.js
