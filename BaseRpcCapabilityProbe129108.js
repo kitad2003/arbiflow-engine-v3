@@ -14,8 +14,8 @@ async function request(url,method,params){
  }catch(e){return {category:'TRANSPORT_FAILURE',errorCode:typeof e?.code==='string'?e.code:null}}
 }
 async function main(){
- const url=process.env.BASE_RPC_URL;
- if(!url||!url.startsWith('https://')){console.log(JSON.stringify({status:'BLOCKED',reason:'HTTPS_RPC_SECRET_MISSING'}));process.exitCode=2;return}
+ const url=process.env.BASE_TRACE_RPC_URL;
+ if(!url||!url.startsWith('https://')){console.log(JSON.stringify({status:'BLOCKED',reason:'BASE_TRACE_RPC_URL_HTTPS_REQUIRED'}));process.exitCode=2;return}
  const tests=[
   ['chainId','eth_chainId',[]],
   ['traceCall','debug_traceTransaction',[TARGET,{tracer:'callTracer',timeout:'10s'}]],
@@ -28,7 +28,7 @@ async function main(){
   if(result.diagnosis==='RATE_LIMIT')break; // Avoid further costly calls after throttling.
  }
  const traceReady=checks.length===3&&checks[1].resultPresent&&checks[2].resultPresent;
- console.log(JSON.stringify({build:'12.9.110',mode:'BASE_RPC_CAPABILITY_PROBE',readOnly:true,mainnetBroadcast:false,traceReady,checks}));
+ console.log(JSON.stringify({build:'12.9.111',mode:'BASE_RPC_CAPABILITY_PROBE',readOnly:true,mainnetBroadcast:false,traceReady,checks}));
  if(!traceReady)process.exitCode=2;
 }
 main().catch(()=>{console.log(JSON.stringify({status:'BLOCKED',reason:'PROBE_FAILURE'}));process.exitCode=2});
