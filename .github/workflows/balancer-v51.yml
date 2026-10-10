@@ -1,0 +1,24 @@
+name: Balancer V51 Dynamic Pair Research
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'balancer-research-v1/dynamic-pair-cache-v51.js'
+      - 'balancer-research-v1/dynamic-pair-cache-v51-test.js'
+      - 'balancer-research-v1/pending-integrated-v51.js'
+      - '.github/workflows/balancer-v51.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check balancer-research-v1/dynamic-pair-cache-v51.js
+      - run: node --check balancer-research-v1/pending-integrated-v51.js
+      - run: node balancer-research-v1/dynamic-pair-cache-v51-test.js
