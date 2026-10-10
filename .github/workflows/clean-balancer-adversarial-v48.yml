@@ -1,0 +1,19 @@
+name: Clean Balancer V48 Adversarial EVM
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-evm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm install --no-save --ignore-scripts --no-audit --no-fund solc@0.8.24
+      - run: node --check balancer-research-v1/adversarial-v48.js
+      - name: Execute adversarial tests on isolated local EVM only
+        run: npx hardhat run --no-compile --config hardhat.balancer-v48.config.js balancer-research-v1/adversarial-v48.js
