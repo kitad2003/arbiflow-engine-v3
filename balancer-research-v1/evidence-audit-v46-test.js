@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {audit}=require('./evidence-audit-v46');
+const r=audit();
+assert.equal(r.sourceCount,6);
+assert.equal(r.evidence.compilationReproducible,true);
+assert.equal(r.evidence.pinnedSolc024,true);
+assert.equal(r.evidence.operatorConfigured,false);
+assert.equal(r.evidence.deployedContractAddressConfigured,false);
+assert.equal(r.readyForLiveBackrun,false);
+assert.equal(r.mainnetBroadcast,false);
+assert.equal(r.simulationAttempted,false);
+assert.ok(r.blockers.includes('SIGNED_COMPATIBLE_BACKRUN_NOT_AVAILABLE'));
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V46',unitAssertionsPassed:9,readOnly:true}));
