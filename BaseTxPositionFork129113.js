@@ -8,7 +8,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.125',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.126',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -96,6 +96,20 @@ async function prefixFeeEvidence(url,delta){
   baseResidualWei: bv?.missingCreditWei??null,
   baseForkCreditPlusResidualEqualsHistorical: bv?.forkCreditFromParentWei!=null&&bv?.missingCreditWei!=null&&bv?.historicalCreditFromParentWei!=null&&(BigInt(bv.forkCreditFromParentWei)+BigInt(bv.missingCreditWei)===BigInt(bv.historicalCreditFromParentWei)),sequencerParentToPrestateEqualsEstimatedPriority: sv?.parentMinusPrestateWei!=null && -BigInt(sv.parentMinusPrestateWei)===totalPriority},notes:'Fee estimates are diagnostics only; OP Stack fee routing and deposit handling require independent validation'};
 }
+async function diagnosticFeeVaultOverlay(snapshot){
+ const vaults=['0x4200000000000000000000000000000000000011','0x4200000000000000000000000000000000000019'];
+ const result={localOnly:true,originalForkVerified:false,overlayIsHistoricalReplayProof:false,applied:[],comparison:null};
+ for(const address of vaults){
+  const original=snapshot[address]?.balance;
+  if(original===undefined)throw Error('MISSING_VAULT_TRACE_BALANCE');
+  const amount=BigInt(original);
+  if(amount<0n)throw Error('NEGATIVE_VAULT_BALANCE');
+  await rpc('anvil_setBalance',[address,'0x'+amount.toString(16)]);
+  result.applied.push(address);
+ }
+ result.comparison=await compare(snapshot,rpc);
+ return result;
+}
 async function run(){
  const url=process.env.BASE_TRACE_RPC_URL||'';
  if(!/^https:\/\//.test(url)){report.reason='BASE_TRACE_RPC_URL_HTTPS_REQUIRED';return}
@@ -130,6 +144,9 @@ async function run(){
       try{report.mismatchOrigins=await classifyMismatches(url,snapshot,report.comparison.mismatches)}catch{report.mismatchOriginError='REFERENCE_CLASSIFICATION_FAILED'}
       report.feeVaultDeltas=await feeVaultDeltas(url,snapshot);
       try{report.prefixFeeEvidence=await prefixFeeEvidence(url,report.feeVaultDeltas)}catch(e){report.prefixFeeEvidence={status:'PREFIX_RECEIPT_FEE_DIAGNOSTIC_UNAVAILABLE',errorClass:e?.message==='REMOTE_TRACE_UNAVAILABLE'?'REMOTE_RPC_UNAVAILABLE':e?.message==='PREFIX_RECEIPT_MISSING'?'PREFIX_RECEIPT_MISSING':'FEE_EVIDENCE_CALCULATION_FAILED'}}
+      if(report.comparison.mismatches.length===2 && report.comparison.mismatches.every(m=>m.field==='balance'&&['0x4200000000000000000000000000000000000011','0x4200000000000000000000000000000000000019'].includes(m.address.toLowerCase()))){
+       try{report.diagnosticFeeVaultOverlay=await diagnosticFeeVaultOverlay(snapshot)}catch{report.diagnosticFeeVaultOverlay={localOnly:true,status:'OVERLAY_TEST_FAILED',originalForkVerified:false}}
+      }
     }
     return;
    }catch(e){
