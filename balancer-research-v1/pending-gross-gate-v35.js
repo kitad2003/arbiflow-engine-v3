@@ -15,10 +15,10 @@ async function evaluate(event,{provider,discoverImpl=discover,reserveImpl}={}){
  if(event?.kind!=='PENDING_TRANSACTION'||!event.pendingHash)return {...base,reason:'NOT_PENDING_TRANSACTION'};
  if(!event.swapPools?.length)return {...base,reason:'NO_SWAP_HINT'};
  if(!provider)return {...base,reason:'ETHEREUM_RPC_REQUIRED'};
- const read=reserveImpl||async(address,blockNumber)=>{
+ const read=reserveImpl||(async (address,blockNumber)=>{
   const r=await new ethers.Contract(address,ABI,provider).getReserves({blockTag:blockNumber});
   return [BigInt(r[0]),BigInt(r[1])];
- };
+ });
  for(const pool of event.swapPools.slice(0,5)){
   let data;
   try{data=await discoverImpl(provider,{address:pool,topics:[require('./bot').SWAP_TOPIC]})}
