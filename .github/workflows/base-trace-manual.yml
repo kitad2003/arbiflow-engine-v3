@@ -21,22 +21,22 @@ jobs:
         run: npm run test:base-validation
       - name: Verify RPC secret exists
         env:
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_TRACE_RPC_URL: ${{ secrets.BASE_TRACE_RPC_URL }}
         run: |
-          if [ -z "$BASE_RPC_URL" ]; then
-            echo '::error::Missing BASE_RPC_URL GitHub Actions secret'
+          if [ -z "$BASE_TRACE_RPC_URL" ]; then
+            echo '::error::Missing BASE_TRACE_RPC_URL GitHub Actions secret'
             exit 1
           fi
       - name: Probe RPC capabilities
         id: capabilities
         continue-on-error: true
         env:
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_TRACE_RPC_URL: ${{ secrets.BASE_TRACE_RPC_URL }}
         run: npm run test:base-rpc-capabilities
       - name: Historical trace
         if: steps.capabilities.outcome == 'success'
         env:
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BASE_TRACE_RPC_URL: ${{ secrets.BASE_TRACE_RPC_URL }}
           ARBIFLOW_ENABLE_TRACE_PROBE: '1'
           ARBIFLOW_REQUIRE_HISTORICAL_TRACE: '1'
         run: npm run test:base-trace
