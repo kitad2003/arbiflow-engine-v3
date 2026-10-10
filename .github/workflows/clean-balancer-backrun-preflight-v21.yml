@@ -1,0 +1,27 @@
+name: Clean Balancer V21 Read-only Backrun Contract Preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify V21 preflight gates
+        run: |
+          node --check balancer-research-v1/backrun-preflight-v21.js
+          node balancer-research-v1/backrun-preflight-v21-test.js
+      - name: Check Ethereum contract readiness without signing or submitting
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V21_BALANCER_BACKRUN_CONTRACT: ${{ vars.V21_BALANCER_BACKRUN_CONTRACT }}
+        run: node balancer-research-v1/backrun-preflight-v21.js
