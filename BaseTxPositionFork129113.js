@@ -8,7 +8,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.120',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.121',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -44,6 +44,25 @@ async function classifyMismatches(url,snapshot,mismatches){
  }
  return output;
 }
+async function feeVaultDeltas(url,snapshot){
+ const vaults=[['SequencerFeeVault','0x4200000000000000000000000000000000000011'],['BaseFeeVault','0x4200000000000000000000000000000000000019']];
+ const results=[];
+ for(const [name,address] of vaults){
+  const record={name,address};
+  try{
+   const before=BigInt(snapshot[address].balance);
+   const local=BigInt(await rpc('eth_getBalance',[address,'latest']));
+   const parent=BigInt(await remote(url,'eth_getBalance',[address,'0x31f7071']));
+   const blockEnd=BigInt(await remote(url,'eth_getBalance',[address,'0x31f7072']));
+   record.forkMinusPrestateWei=String(local-before);
+   record.parentMinusPrestateWei=String(parent-before);
+   record.blockEndMinusPrestateWei=String(blockEnd-before);
+   record.localMatchesPrestate=local===before;
+  }catch{record.status='REFERENCE_UNAVAILABLE'}
+  results.push(record);
+ }
+ return {readOnly:true,proofOfFeeAttribution:false,vaults:results};
+}
 async function run(){
  const url=process.env.BASE_TRACE_RPC_URL||'';
  if(!/^https:\/\//.test(url)){report.reason='BASE_TRACE_RPC_URL_HTTPS_REQUIRED';return}
@@ -76,6 +95,7 @@ async function run(){
       report.status='FORK_PRESTATE_MISMATCH';
       report.reason='ANVIL_FORK_DOES_NOT_MATCH_HISTORICAL_TARGET_PRESTATE';
       try{report.mismatchOrigins=await classifyMismatches(url,snapshot,report.comparison.mismatches)}catch{report.mismatchOriginError='REFERENCE_CLASSIFICATION_FAILED'}
+      report.feeVaultDeltas=await feeVaultDeltas(url,snapshot);
     }
     return;
    }catch(e){
