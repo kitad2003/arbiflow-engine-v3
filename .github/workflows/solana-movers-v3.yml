@@ -1,0 +1,30 @@
+name: ArbiFlow Solana Movers V3
+on:
+  workflow_dispatch:
+    inputs:
+      max_tokens:
+        description: 'Targeted token lookups (1-18 recommended on public API)'
+        required: false
+        default: '12'
+      trending_pages:
+        description: 'Pages per trending period (1-3)'
+        required: false
+        default: '1'
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax and offline tests
+        run: |
+          node --check dex-registry/solana-movers-v3.js
+          node dex-registry/solana-movers-v3-test.js
+      - name: Read-only trending and targeted discovery
+        env:
+          MAX_TOKENS: ${{ inputs.max_tokens }}
+          TRENDING_PAGES: ${{ inputs.trending_pages }}
+        run: node dex-registry/solana-movers-v3.js
