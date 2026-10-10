@@ -23,6 +23,8 @@ jobs:
           node ResearchAaveBaseFlashLoan.js
           node --check ResearchAaveLoanCostScreen.js
           node ResearchAaveLoanCostScreen.js
+          node --check ResearchAaveForkReadiness.js
+          node ResearchAaveForkReadiness.js
       - name: Read Aave V3 Base reserve and premium
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
@@ -34,6 +36,9 @@ jobs:
           fi
           node ResearchAaveBaseFlashLoan.js
           node -e 'const fs=require("fs");const x=require("./ResearchAaveLoanCostScreen").screen(JSON.parse(fs.readFileSync("arbiflow-aave-read-only.json","utf8")));fs.writeFileSync("arbiflow-aave-cost-screen.json",JSON.stringify(x,null,2));console.log(JSON.stringify(x))'
+      - name: Validate fork prerequisites (research only)
+        run: |
+          node -e 'const fs=require("fs");const gate=require("./ResearchAaveForkReadiness").gate;const a=JSON.parse(fs.readFileSync("arbiflow-aave-read-only.json","utf8"));const b=JSON.parse(fs.readFileSync("arbiflow-aave-cost-screen.json","utf8"));const r=gate(a,b);fs.writeFileSync("arbiflow-aave-fork-readiness.json",JSON.stringify(r,null,2));console.log(JSON.stringify(r));if(!r.readyToDevelopForkTest)process.exitCode=1'
       - name: Archive Aave report
         if: always()
         uses: actions/upload-artifact@v4
@@ -42,4 +47,5 @@ jobs:
           path: |
             arbiflow-aave-read-only.json
             arbiflow-aave-cost-screen.json
+            arbiflow-aave-fork-readiness.json
           if-no-files-found: warn
