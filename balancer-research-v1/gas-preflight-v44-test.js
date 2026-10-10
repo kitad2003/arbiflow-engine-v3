@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {inspect}=require('./gas-preflight-v44');
+(async()=>{
+ const absent=await inspect();
+ assert.equal(absent.reproducible,true);
+ assert.equal(absent.status,'BLOCKED');
+ assert.equal(absent.reason,'RPC_MISSING');
+ assert.equal(absent.signing,false);
+ assert.equal(absent.mainnetBroadcast,false);
+ const provider={getNetwork:async()=>({chainId:1n}),getFeeData:async()=>({gasPrice:100n}),estimateGas:async()=>2000000n};
+ const noOperator=await inspect({provider});
+ assert.equal(noOperator.reason,'OPERATOR_ADDRESS_MISSING');
+ const estimated=await inspect({provider,operator:'0x'+'1'.repeat(40)});
+ assert.equal(estimated.status,'UNSIGNED_ESTIMATE_ONLY');
+ assert.equal(estimated.gasUnits,'2000000');
+ assert.equal(estimated.estimatedCostWei,'200000000');
+ assert.equal(estimated.contractDeployed,false);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V44',unitAssertionsPassed:10,offlineUnsignedGasMock:true,mainnetBroadcast:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
