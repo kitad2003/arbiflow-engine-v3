@@ -5,6 +5,7 @@ const fs=require('node:fs'),WebSocket=require('ws'),{ethers}=require('ethers'),{
 const {spot}=require('./ResearchV3Spot');
 const {summarize}=require('./ResearchSpotComparison');
 const {inspect}=require('./ResearchOrderingEvidence');
+const {corroborate}=require('./ResearchReceiptCorroboration');
 const validAddress=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x);
 function parseNotification(message,subscriptionId,allowed){
  if(message?.method!=='eth_subscription'||message.params?.subscription!==subscriptionId)return null;
@@ -54,9 +55,14 @@ async function run({url,addresses,seconds=25}){
  const decodedWithTokens=decoded.map(x=>{const enriched=enrich(x,metadata[x.pool.toLowerCase()]);return {...enriched,postSwapSpot:spot(enriched)}});
  const spotComparison=summarize(decodedWithTokens);
  const orderingEvidence=inspect(decodedWithTokens);
+ let receiptCorroboration=null;
+ if(/^https:\/\//.test(rpc)&&decodedWithTokens.length){
+  const receiptProvider=new ethers.JsonRpcProvider(rpc,8453,{staticNetwork:true});
+  try{receiptCorroboration=await corroborate(decodedWithTokens,receiptProvider)}finally{receiptProvider.destroy()}
+ }
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_9',mode:'BASE_FLASHBLOCKS_ORDERING_EVIDENCE_DIAGNOSTIC',providerSupportsPendingLogs:stats.acknowledged,
-  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,assessment,
+ return {build:'RESEARCH_ONLY_10',mode:'BASE_FLASHBLOCKS_RECEIPT_ORDER_CORROBORATION',providerSupportsPendingLogs:stats.acknowledged,
+  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,receiptCorroboration,assessment,
   limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','POST_SWAP_SPOT_IS_NOT_PRICE_IMPACT_SIMULATION','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
 }
