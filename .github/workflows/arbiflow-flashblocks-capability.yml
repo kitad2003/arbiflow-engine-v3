@@ -38,6 +38,8 @@ jobs:
           node ResearchOrderedPoolSnapshots.js
           node --check ResearchEventSignatureCensus.js
           node ResearchEventSignatureCensus.js
+          node --check ResearchEventLiquidityGraph.js
+          node ResearchEventLiquidityGraph.js
           node --check ResearchAaveBaseFlashLoan.js
           node ResearchAaveBaseFlashLoan.js
       - name: Probe preconfirmed pendingLogs support
