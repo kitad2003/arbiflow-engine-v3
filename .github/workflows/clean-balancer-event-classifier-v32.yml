@@ -1,0 +1,26 @@
+name: Clean Balancer V32 Safe MEV-Share Event Classification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  event-classification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test double-hash and transaction-reference handling
+        run: |
+          node --check balancer-research-v1/event-classifier-v32.js
+          node balancer-research-v1/event-classifier-v32-test.js
+      - name: Investigate live MEV-Share event references read-only
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/event-classifier-v32.js
