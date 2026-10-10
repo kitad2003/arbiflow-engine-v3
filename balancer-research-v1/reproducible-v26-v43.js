@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path');
 const {ethers}=require('ethers');
 const {expected}=require('./v26-mainnet-gate-v40');
 const SOURCE=path.join(__dirname,'BalancerEthereumAtomicV26.sol');
-const SETTINGS={optimizer:{enabled:true,runs:200},evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}};
+const SETTINGS={optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}};
 function compileTwice({solc=require('solc'),source=fs.readFileSync(SOURCE,'utf8')}={}){
  const version=solc.version();
  if(!version.startsWith('0.8.24+'))throw Error('SOLC_VERSION_NOT_PINNED_0_8_24: '+version);
