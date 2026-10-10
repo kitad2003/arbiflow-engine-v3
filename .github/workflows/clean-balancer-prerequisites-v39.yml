@@ -1,0 +1,31 @@
+name: Clean Balancer V39 Stream and Contract Prerequisites
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prerequisite-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify syntax and bounded SSE recovery
+        run: |
+          node --check balancer-research-v1/stream-parser-v39.js
+          node --check balancer-research-v1/persistent-monitor-v34.js
+          node --check balancer-research-v1/contract-gate-v39.js
+          node balancer-research-v1/contract-gate-v39-test.js
+      - name: Read-only contract deployment gate
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/contract-gate-v39.js
+      - name: Verify hardened SSE stream observation
+        env:
+          V34_DURATION_MS: '60000'
+        run: node balancer-research-v1/persistent-monitor-v34.js
