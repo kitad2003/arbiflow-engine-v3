@@ -1,0 +1,23 @@
+name: Balancer V58 Live Target Matching
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: V58 syntax
+        run: node --check balancer-research-v1/live-target-matching-v58.js
+      - name: V58 unit tests
+        run: node balancer-research-v1/live-target-matching-v58-test.js
+      - name: Live 60 second target resolution audit
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/live-target-matching-v58.js
