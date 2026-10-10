@@ -1,0 +1,39 @@
+name: ArbiFlow NEW Atomic Test 12.9.138
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  new-atomic-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout latest main (not historical branch)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Show actual source revision
+        run: |
+          git rev-parse HEAD
+          node - <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('AtomicSettlementGas12930.js','utf8');
+          if (!src.includes("build:'12.9.138'") || !src.includes('actualAfterPremiumBeforeGasUsdcRaw')) {
+            console.error('WRONG_SOURCE_VERSION: expected Build 12.9.138');
+            process.exit(1);
+          }
+          console.log('VERIFIED_ATOMIC_SOURCE_VERSION=12.9.138');
+          NODE
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Fork-only Aave and two-DEX atomic test
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo 'Missing BASE_RPC_URL'; exit 1; fi
+          npm run test:atomic-settlement-gas
