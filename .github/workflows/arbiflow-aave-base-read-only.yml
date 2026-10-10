@@ -1,0 +1,40 @@
+name: ArbiFlow Aave Base Read Only Verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  aave-reserve-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install research dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate Aave reserve and fee code
+        run: |
+          node --check ResearchAaveBaseFlashLoan.js
+          node ResearchAaveBaseFlashLoan.js
+      - name: Read Aave V3 Base reserve and premium
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          AAVE_RESEARCH_LIVE: '1'
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then
+            echo "BASE_RPC_URL_REQUIRED"
+            exit 1
+          fi
+          node ResearchAaveBaseFlashLoan.js
+      - name: Archive Aave report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aave-base-read-only-report
+          path: arbiflow-aave-read-only.json
+          if-no-files-found: warn
