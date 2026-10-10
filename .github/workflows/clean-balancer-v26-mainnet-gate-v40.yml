@@ -1,0 +1,23 @@
+name: Clean Balancer V40 V26 Mainnet Prerequisites
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-v26:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check balancer-research-v1/v26-mainnet-gate-v40.js
+      - run: node balancer-research-v1/v26-mainnet-gate-v40-test.js
+      - name: Check configured deployed contract on Ethereum
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V40_CONTRACT_ADDRESS: ${{ vars.V40_CONTRACT_ADDRESS }}
+          V40_EXPECTED_OPERATOR: ${{ vars.V40_EXPECTED_OPERATOR }}
+        run: node balancer-research-v1/v26-mainnet-gate-v40.js
