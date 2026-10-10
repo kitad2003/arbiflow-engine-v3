@@ -41,6 +41,28 @@ async function simulate(local,remote){
   }
   if(!actual){report.reason='LOCAL_RECEIPT_MISSING_AFTER_MINE';return report}
   report.localHash=hash;
+  const quantity=v=>v==null?null:BigInt(v);
+  const historicalEffective=quantity(receipt.effectiveGasPrice);
+  const localEffective=quantity(actual.effectiveGasPrice);
+  const gas=quantity(receipt.gasUsed);
+  const l1Fee=quantity(receipt.l1Fee);
+  const historicalL2=historicalEffective==null?null:historicalEffective*gas;
+  const localL2=localEffective==null?null:localEffective*quantity(actual.gasUsed);
+  report.targetFeeReconciliation={
+   historicalL2ExecutionWei:historicalL2?.toString()??null,
+   localL2ExecutionWei:localL2?.toString()??null,
+   historicalL1DataFeeWei:l1Fee?.toString()??null,
+   historicalOtherReceiptFees:{
+    operatorFeeWei:receipt.operatorFee==null?null:String(BigInt(receipt.operatorFee)),
+    operatorFeeScalar:receipt.operatorFeeScalar??null,
+    operatorFeeConstant:receipt.operatorFeeConstant??null
+   },
+   localL1DataFeeWei:actual.l1Fee==null?null:String(BigInt(actual.l1Fee)),
+   historicalTotalKnownWei:historicalL2==null?null:(historicalL2+(l1Fee??0n)+(quantity(receipt.operatorFee)??0n)).toString(),
+   localTotalKnownWei:localL2==null?null:(localL2+(quantity(actual.l1Fee)??0n)+(quantity(actual.operatorFee)??0n)).toString(),
+   explanatoryOnly:true
+  };
+
   const normalizeLog=l=>({address:l.address?.toLowerCase(),topics:(l.topics||[]).map(t=>t.toLowerCase()),data:l.data?.toLowerCase()});
   const hlogs=(receipt.logs||[]).map(normalizeLog),llogs=(actual.logs||[]).map(normalizeLog);
   report.logsComparison={historicalCount:hlogs.length,localCount:llogs.length,matched:JSON.stringify(hlogs)===JSON.stringify(llogs),firstDifferentIndex:null};
