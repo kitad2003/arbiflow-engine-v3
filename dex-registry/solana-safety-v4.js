@@ -15,6 +15,7 @@ function screen(mint,account){
  const p=data.parsed;
  if(!p||p.type!=='mint'||!p.info)return fail('NOT_PARSED_MINT');
  const info=p.info;
+ if(!Object.prototype.hasOwnProperty.call(info,'freezeAuthority')||!Object.prototype.hasOwnProperty.call(info,'mintAuthority'))return fail('AUTHORITY_FIELDS_MISSING');
  if(info.freezeAuthority!==null)return fail('FREEZE_AUTHORITY_NOT_REVOKED');
  if(info.mintAuthority!==null)return fail('MINT_AUTHORITY_NOT_RENOUNCED');
  if(account.owner===TOKEN2022_CANONICAL){
