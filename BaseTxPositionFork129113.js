@@ -5,7 +5,9 @@ const fs=require('node:fs');
 const {compare}=require('./BaseForkCompare129115');
 const TARGET='0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
 const PORT=18545;
-const report={build:'12.9.116',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const BLOCK=52392050;
+const TARGET_INDEX=2;
+const report={build:'12.9.118',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -55,6 +57,9 @@ async function run(){
     const chain=await rpc('eth_chainId');
     if(BigInt(chain)!==8453n){report.reason='LOCAL_FORK_WRONG_CHAIN';return}
     const height=await rpc('eth_blockNumber');
+    const forkBlock=await rpc('eth_getBlockByNumber',[height,true]);
+    const localTransactions=Array.isArray(forkBlock?.transactions)?forkBlock.transactions:[];
+    report.positionEvidence={localBlock:height,transactionsInLocalBlock:localTransactions.length,transactionHashes:localTransactions.slice(0,4).map(t=>typeof t==='string'?t:t.hash),targetIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===TARGET)};
     report.localChainId=chain;report.localBlock=height;
     report.status='FORK_STARTED_CHECKPOINT_UNVERIFIED';
     report.reason='NEED_COMPARE_TARGET_PRESTATE_STORAGE_AND_PREFIX_RECEIPTS';
