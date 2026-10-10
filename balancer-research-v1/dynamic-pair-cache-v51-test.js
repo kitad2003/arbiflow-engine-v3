@@ -21,6 +21,14 @@ const discoverImpl=async(_provider,log)=>{
  const concurrent=new VerifiedPoolCache({discoverImpl});
  await Promise.all([concurrent.resolve(provider,A),concurrent.resolve(provider,A)]);
  assert.equal(calls,3);
+ // Two distinct disclosed pools must be inspected without any token allowlist.
+ const multi=await inspect({kind:'PENDING_TRANSACTION',pendingHash:event.pendingHash,
+  swapPools:[A,B]},{provider,cache});
+ assert.equal(multi.pairs.length,2);
+ assert.equal(multi.pairs[0].pool,A);
+ assert.equal(multi.pairs[1].pool,B);
+ assert.equal(multi.pairs[0].token1,D);
+ assert.equal(multi.executionEligible,false);
  const bundle=await inspect({kind:'BUNDLE',swapPools:[A]},{provider,cache});
  assert.equal(bundle.pairs.length,0);
  assert.equal(first.executionEligible,false);assert.equal(first.mainnetBroadcast,false);
