@@ -34,6 +34,8 @@ jobs:
           node ResearchReceiptCorroboration.js
           node --check ResearchTransactionSequence.js
           node ResearchTransactionSequence.js
+          node --check ResearchOrderedPoolSnapshots.js
+          node ResearchOrderedPoolSnapshots.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
