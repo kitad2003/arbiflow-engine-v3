@@ -1,0 +1,23 @@
+name: Balancer V60 Historical and Live Pair Revalidation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: V60 syntax
+        run: node --check balancer-research-v1/persistent-pair-revalidation-v60.js
+      - name: V60 unit tests
+        run: node balancer-research-v1/persistent-pair-revalidation-v60-test.js
+      - name: V60 live and historical confirmed-block revalidation
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/persistent-pair-revalidation-v60.js
