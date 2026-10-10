@@ -11,6 +11,20 @@ async function main(){
  if(!usdc?.eligibleForFurtherFlashLoanTesting||!weth?.eligibleForFurtherFlashLoanTesting)throw Error('RESERVES_NOT_ELIGIBLE');
  const router=process.env.AAVE5_V3_ROUTER||'0x2626664c2603336E57B271c5C0b26F421741e481';
  if((await ethers.provider.getCode(router))==='0x')throw Error('V3_ROUTER_NOT_A_CONTRACT');
+ const quotePath='arbiflow-aave-two-swap-quotes.json';
+ if(fs.existsSync(quotePath)){
+  const quote=JSON.parse(fs.readFileSync(quotePath,'utf8'));
+  if(quote.quoteError||!quote.repaymentFeasibleFromQuotes){
+   const blocked={build:'RESEARCH_ONLY_AAVE_5',mode:'BASE_FORK_TWO_V3_POOL_ROUND_TRIP',forkOnly:true,
+    skippedAtomicAttempt:true,reason:quote.quoteError?'QUOTE_UNAVAILABLE':'QUOTED_RETURN_BELOW_AAVE_REPAYMENT',
+    quoteError:quote.quoteError||null,quotedSurplusRaw:quote.expectedSurplusRaw??null,
+    borrowAndRepaySucceeded:false,realSwapExecuted:false,premiumPreFunded:false,profitVerified:false,
+    qualified:false,mainnetBroadcast:false,executionEligible:false};
+   fs.writeFileSync('arbiflow-aave-two-swap-fork.json',JSON.stringify(blocked,null,2)+'\\n');
+   console.log(JSON.stringify(blocked));
+   return;
+  }
+ }
  const [operator]=await ethers.getSigners();
  const factory=await ethers.getContractFactory('ResearchAaveTwoSwapReceiver');
  const receiver=await factory.deploy(reserve.pool);await receiver.waitForDeployment();
