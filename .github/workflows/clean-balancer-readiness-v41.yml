@@ -1,0 +1,23 @@
+name: Clean Balancer V41 Deployment Readiness Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check balancer-research-v1/balancer-readiness-v41.js
+      - run: node balancer-research-v1/balancer-readiness-v41-test.js
+      - name: Read only Ethereum Balancer live prerequisites
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V40_CONTRACT_ADDRESS: ${{ vars.V40_CONTRACT_ADDRESS }}
+          V40_EXPECTED_OPERATOR: ${{ vars.V40_EXPECTED_OPERATOR }}
+        run: node balancer-research-v1/balancer-readiness-v41.js
