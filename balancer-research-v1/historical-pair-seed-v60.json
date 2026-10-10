@@ -1,0 +1,36 @@
+{
+  "schema": "AR BIFLOW_RESEARCH_SEED_V60",
+  "provenance": "User-supplied V54 and V58 live output; historical discovery evidence only; reverify on current Ethereum state",
+  "pairs": [
+    {
+      "source": "V54",
+      "a": "0x15e86e6f65ef7ea1dbb72a5e51a07926fb1c82e3",
+      "b": "0x08650bb9dc722C9c8C62E79C2BAfA2d3fc5B3293"
+    },
+    {
+      "source": "V54",
+      "a": "0x3dd49f67e9d5bc4c5e6634b3f70bfd9dc1b6bd74",
+      "b": "0x0D7a61C28B3ad47bb9dbB139260915E29b6efC45"
+    },
+    {
+      "source": "V58",
+      "a": "0x2fdbadf3c4d5a8666bc06645b8358ab803996e28",
+      "b": "0x088ee5007C98a9677165D78dD2109AE4a3D04d0C"
+    },
+    {
+      "source": "V58",
+      "a": "0x0d4a11d5eeaac28ec3f61d100daf4d40471f1852",
+      "b": "0x06da0fd433C1A5d7a4faa01111c044910A184553"
+    },
+    {
+      "source": "V58",
+      "a": "0xfc74ecdee4e9fff2f2ef4cdf4f1c777b2ef0e905",
+      "b": "0x2979fa622CcB9F6B8925ca831f30C405077730c6"
+    },
+    {
+      "source": "V58",
+      "a": "0xb4d0d9df2738abe81b87b66c80851292492d1404",
+      "b": "0x760166FA4f227dA29ecAC3BeC348f5fA853a1f3C"
+    }
+  ]
+}
