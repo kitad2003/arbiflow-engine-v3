@@ -1,0 +1,27 @@
+name: Clean Balancer V20 Live MEV-Share Target Selection
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify V20 selection, duplicate and bundle restrictions
+        run: |
+          node --check balancer-research-v1/live-target-v20.js
+          node balancer-research-v1/live-target-v20-test.js
+      - name: Receive live MEV-Share transaction hints without simulation or execution
+        env:
+          V20_VERIFIED_POOL_ADDRESSES: ${{ vars.V20_VERIFIED_POOL_ADDRESSES }}
+        run: node balancer-research-v1/live-target-v20.js
