@@ -8,6 +8,7 @@ const {inspect}=require('./ResearchOrderingEvidence');
 const {corroborate}=require('./ResearchReceiptCorroboration');
 const {sequence}=require('./ResearchTransactionSequence');
 const {orderedSnapshots}=require('./ResearchOrderedPoolSnapshots');
+const {census}=require('./ResearchEventSignatureCensus');
 const validAddress=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x);
 function parseNotification(message,subscriptionId,allowed){
  if(message?.method!=='eth_subscription'||message.params?.subscription!==subscriptionId)return null;
@@ -22,7 +23,7 @@ async function run({url,addresses,seconds=25}){
  if(!Number.isInteger(seconds)||seconds<1||seconds>90)throw Error('BAD_SECONDS');
  const allowed=new Set(addresses.map(a=>a.toLowerCase())),ws=new WebSocket(url,{handshakeTimeout:10000});
  const stats={acknowledged:false,providerError:null,notifications:0,invalid:0,duplicates:0,decodedSwaps:0,unsupportedLogs:0,subscriptionType:'pendingLogs'};
- const observations=[],decoded=[],seen=new Set();let sub=null,done=false;
+ const observations=[],decoded=[],rawEventHeaders=[],seen=new Set();let sub=null,done=false;
  await new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>{reject(Error('SUBSCRIPTION_ACK_TIMEOUT'));ws.terminate()},15000);
   ws.once('error',e=>{clearTimeout(timer);reject(e)});
@@ -42,7 +43,7 @@ async function run({url,addresses,seconds=25}){
    if(!x){stats.invalid++;return}
    const k=x.txHash+':'+x.pool.toLowerCase()+':'+String(m.params.result.logIndex??'');
    if(seen.has(k)){stats.duplicates++;return}
-   seen.add(k);const decodedEvent=decode(m.params.result);if(decodedEvent.recognized)stats.decodedSwaps++;else stats.unsupportedLogs++;decoded.push({txHash:x.txHash,pool:x.pool,phase:x.phase,logIndex:m.params.result.logIndex??null,blockHash:m.params.result.blockHash??null,blockNumber:m.params.result.blockNumber??null,transactionIndex:m.params.result.transactionIndex??null,decoded:decodedEvent});observations.push(x);
+   seen.add(k);rawEventHeaders.push({address:x.pool,topics:Array.isArray(m.params.result.topics)?m.params.result.topics.slice(0,4):[]});const decodedEvent=decode(m.params.result);if(decodedEvent.recognized)stats.decodedSwaps++;else stats.unsupportedLogs++;decoded.push({txHash:x.txHash,pool:x.pool,phase:x.phase,logIndex:m.params.result.logIndex??null,blockHash:m.params.result.blockHash??null,blockNumber:m.params.result.blockNumber??null,transactionIndex:m.params.result.transactionIndex??null,decoded:decodedEvent});observations.push(x);
   })
  });
  if(stats.acknowledged)await new Promise(resolve=>setTimeout(resolve,seconds*1000));
@@ -64,9 +65,10 @@ async function run({url,addresses,seconds=25}){
  }
  const transactionSequence=sequence(decodedWithTokens,receiptCorroboration);
  const orderedPoolSnapshots=orderedSnapshots(decodedWithTokens,receiptCorroboration);
+ const eventSignatureCensus=census(rawEventHeaders);
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_12',mode:'BASE_FLASHBLOCKS_HISTORICAL_POOL_SNAPSHOTS',providerSupportsPendingLogs:stats.acknowledged,
-  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,receiptCorroboration,transactionSequence,orderedPoolSnapshots,assessment,
+ return {build:'RESEARCH_ONLY_13',mode:'BASE_FLASHBLOCKS_EVENT_SIGNATURE_INVENTORY',providerSupportsPendingLogs:stats.acknowledged,
+  stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,orderingEvidence,receiptCorroboration,transactionSequence,orderedPoolSnapshots,eventSignatureCensus,assessment,
   limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','POST_SWAP_SPOT_IS_NOT_PRICE_IMPACT_SIMULATION','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
 }
