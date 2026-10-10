@@ -14,4 +14,5 @@ jobs:
           node-version: '24'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check balancer-research-v1/pending-target-bridge-v38.js
+      - run: node balancer-research-v1/pending-target-bridge-v38-test.js
       - run: node balancer-research-v1/pending-target-bridge-v38.js
