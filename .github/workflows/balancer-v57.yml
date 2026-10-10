@@ -1,0 +1,23 @@
+name: Balancer V57 Live Target Provenance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: V57 syntax
+        run: node --check balancer-research-v1/live-target-provenance-v57.js
+      - name: V57 unit tests
+        run: node balancer-research-v1/live-target-provenance-v57-test.js
+      - name: Observe live MEV-Share hashes for 60 seconds
+        env:
+          V57_DURATION_MS: '60000'
+        run: node balancer-research-v1/live-target-provenance-v57.js
