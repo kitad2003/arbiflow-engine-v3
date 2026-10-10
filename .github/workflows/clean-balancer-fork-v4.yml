@@ -1,0 +1,34 @@
+name: Clean Balancer V4 Actual Vault Fork
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  local-base-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Ensure fork RPC is configured
+        env:
+          BALANCER_FORK_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          if [ -z "$BALANCER_FORK_RPC_URL" ]; then
+            echo "BASE_RPC_URL_SECRET_MISSING"
+            exit 1
+          fi
+      - name: Compile clean Balancer research contracts
+        env:
+          BALANCER_FORK_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npx hardhat compile --config balancer-research-v1/fork.config.js
+      - name: Test actual Vault on local Base fork only
+        env:
+          BALANCER_FORK_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npx hardhat run --no-compile --config balancer-research-v1/fork.config.js balancer-research-v1/fork-test.js
