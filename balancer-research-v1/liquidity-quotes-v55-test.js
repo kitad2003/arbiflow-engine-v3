@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {quote,roundTrip}=require('./liquidity-quotes-v55');
+assert.equal(quote(0n,1000n,1000n),0n);
+assert.equal(quote(100n,1000n,1000n),90n);
+assert.equal(quote(100n,0n,1000n),0n);
+const a={r0:1000000n,r1:2000000n},b={r0:1000000n,r1:1000000n};
+const r=roundTrip(a,b,1000n,0);
+assert.equal(r.positiveGross,true);
+assert.equal(typeof r.grossDeltaRaw,'string');
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V55',status:'UNIT_TEST_PASS',readOnly:true}));
