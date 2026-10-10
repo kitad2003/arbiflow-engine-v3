@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assess}=require('./simulation-prerequisites-v56');
+const a=assess({event:{kind:'BUNDLE',eventHash:'0x'+'a'.repeat(64),swapPools:['0x1']},quote:{positiveGross:true}});
+assert.equal(a.hashPresent,true);
+assert.equal(a.grossPositive,true);
+assert.equal(a.simulationVerified,false);
+assert.equal(a.executionEligible,false);
+assert.ok(a.blockers.includes('BUNDLE_MATCHING_NOT_PROVEN'));
+assert.ok(a.blockers.includes('SIGNED_BACKRUN_TRANSACTION_NOT_AVAILABLE'));
+const b=assess({event:{kind:'PENDING_TRANSACTION',pendingHash:'0x'+'b'.repeat(64)},quote:{positiveGross:false}});
+assert.ok(b.blockers.includes('TARGET_MATCHING_NOT_PROVEN'));
+assert.ok(b.blockers.includes('NO_POSITIVE_GROSS_QUOTE'));
+assert.equal(b.bundlesSubmitted,0);
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V56',status:'UNIT_TEST_PASS',assertions:9,readOnly:true}));
