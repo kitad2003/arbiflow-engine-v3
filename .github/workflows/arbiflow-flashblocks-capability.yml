@@ -18,7 +18,10 @@ jobs:
       - name: Install
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Validate pendingLogs probe syntax
-        run: node --check ResearchFlashblocksProbe.js
+        run: |
+          node --check ResearchFlashblocksProbe.js
+          node --check ResearchSwapDecoder.js
+          node ResearchSwapDecoder.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
