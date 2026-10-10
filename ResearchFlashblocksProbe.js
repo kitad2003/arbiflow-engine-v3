@@ -2,6 +2,7 @@
 // Base Flashblocks research-only pendingLogs probe. Explicitly detects provider capability.
 // No routing, simulated profit, signing or broadcast.
 const fs=require('node:fs'),WebSocket=require('ws'),{ethers}=require('ethers'),{assess}=require('./ResearchTransactionImpact'),{decode}=require('./ResearchSwapDecoder'),{identify,enrich}=require('./ResearchPoolIdentity');
+const {spot}=require('./ResearchV3Spot');
 const validAddress=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x);
 function parseNotification(message,subscriptionId,allowed){
  if(message?.method!=='eth_subscription'||message.params?.subscription!==subscriptionId)return null;
@@ -48,11 +49,11 @@ async function run({url,addresses,seconds=25}){
   try{for(const pool of [...new Set(decoded.filter(x=>x.decoded.recognized).map(x=>x.pool))])metadata[pool.toLowerCase()]=await identify(metadataProvider,pool)}
   finally{metadataProvider.destroy()}
  }
- const decodedWithTokens=decoded.map(x=>enrich(x,metadata[x.pool.toLowerCase()]));
+ const decodedWithTokens=decoded.map(x=>{const enriched=enrich(x,metadata[x.pool.toLowerCase()]);return {...enriched,postSwapSpot:spot(enriched)}});
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_5',mode:'BASE_FLASHBLOCKS_PENDING_SWAP_AND_TOKEN_METADATA',providerSupportsPendingLogs:stats.acknowledged,
+ return {build:'RESEARCH_ONLY_6',mode:'BASE_FLASHBLOCKS_PENDING_SWAP_TOKEN_SPOT',providerSupportsPendingLogs:stats.acknowledged,
   stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,assessment,
-  limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
+  limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','POST_SWAP_SPOT_IS_NOT_PRICE_IMPACT_SIMULATION','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
 }
 if(require.main===module){
