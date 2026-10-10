@@ -1,0 +1,53 @@
+name: ArbiFlow Aave Base Fork Smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  aave-fork-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate fork research source
+        run: |
+          node --check ResearchAaveBaseFlashLoan.js
+          node --check ResearchAaveLoanCostScreen.js
+          node --check ResearchAaveForkReadiness.js
+          node --check ResearchAaveForkSmoke.js
+          mkdir -p .research-aave-sources
+          cp ResearchAaveSimpleReceiver.sol .research-aave-sources/
+      - name: Read reserves and validate borrowing inputs
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          AAVE_RESEARCH_LIVE: '1'
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo "BASE_RPC_URL_REQUIRED"; exit 1; fi
+          node ResearchAaveBaseFlashLoan.js
+          node -e 'const f=require("fs");const r=require("./ResearchAaveLoanCostScreen").screen(JSON.parse(f.readFileSync("arbiflow-aave-read-only.json","utf8")));f.writeFileSync("arbiflow-aave-cost-screen.json",JSON.stringify(r,null,2))'
+          node -e 'const f=require("fs");const r=require("./ResearchAaveForkReadiness").gate(JSON.parse(f.readFileSync("arbiflow-aave-read-only.json","utf8")),JSON.parse(f.readFileSync("arbiflow-aave-cost-screen.json","utf8")));f.writeFileSync("arbiflow-aave-fork-readiness.json",JSON.stringify(r,null,2));console.log(JSON.stringify(r));if(!r.readyToDevelopForkTest)process.exitCode=1'
+      - name: Compile isolated fork receiver
+        run: npx hardhat compile --config hardhat.research.aave.config.js
+      - name: Test flash loan callback and repayment on local Base fork
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: npx hardhat run --no-compile --config hardhat.research.aave.config.js ResearchAaveForkSmoke.js
+      - name: Archive research-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aave-base-local-fork-smoke
+          path: |
+            arbiflow-aave-read-only.json
+            arbiflow-aave-cost-screen.json
+            arbiflow-aave-fork-readiness.json
+            arbiflow-aave-fork-smoke.json
+          if-no-files-found: warn
