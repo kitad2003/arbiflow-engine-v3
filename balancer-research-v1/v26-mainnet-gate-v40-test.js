@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {verify,expected}=require('./v26-mainnet-gate-v40');
+(async()=>{
+ const addr='0x'+'1'.repeat(40),operator='0x'+'2'.repeat(40);
+ assert.equal((await verify()).reason,'CONTRACT_ADDRESS_NOT_CONFIGURED');
+ assert.equal((await verify({address:addr})).reason,'ETHEREUM_RPC_REQUIRED');
+ const provider={getNetwork:async()=>({chainId:1n}),getCode:async()=> '0x60006000'};
+ const empty=await verify({address:addr,provider:{...provider,getCode:async()=> '0x'}});
+ assert.equal(empty.reason,'NO_DEPLOYED_BYTECODE');
+ const makeContract=()=>({...expected,operator});
+ const ok=await verify({address:addr,operator,provider,makeContract:()=>Object.fromEntries(Object.entries(makeContract()).map(([k,v])=>[k,async()=>v]))});
+ assert.equal(ok.deployed,true);
+ assert.equal(ok.configurationVerified,true);
+ assert.equal(ok.operatorVerified,true);
+ assert.equal(ok.simulationReady,false);
+ assert.equal(ok.mainnetBroadcast,false);
+ assert.equal(ok.reason,'RUNTIME_BYTECODE_IDENTITY_AND_SIGNED_BACKRUN_UNVERIFIED');
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V40',unitAssertionsPassed:9,mockedContractVerification:true,liveDeploymentVerified:false,mainnetBroadcast:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
