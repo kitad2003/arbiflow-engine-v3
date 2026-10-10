@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {makeSubscription,normalizeNotification}=require('./live-pending-v7');
+const addr='0x'+'a'.repeat(40),tx='0x'+'b'.repeat(64),topic='0x'+'c'.repeat(64);
+const sub=makeSubscription([addr,addr]);
+assert.equal(sub.method,'eth_subscribe');
+assert.equal(sub.params[0],'pendingLogs');
+assert.equal(sub.params[1].address.length,1);
+assert.throws(()=>makeSubscription(['invalid']),/VALID_WATCH/);
+const raw={method:'eth_subscription',params:{subscription:'sid',result:{address:addr,transactionHash:tx,topics:[topic],logIndex:'0x5'}}};
+assert.equal(normalizeNotification(raw,'sid',new Set([addr])).hash,tx);
+assert.equal(normalizeNotification(raw,'wrong',new Set([addr])),null);
+assert.equal(normalizeNotification(raw,'sid',new Set()),null);
+assert.equal(normalizeNotification({...raw,params:{...raw.params,result:{...raw.params.result,transactionHash:'invalid'}}},'sid',new Set([addr])),null);
+console.log(JSON.stringify({build:'BALANCER_RESEARCH_V7',unitAssertionsPassed:8,liveFeedConnected:false,mainnetBroadcast:false}));
