@@ -1,0 +1,26 @@
+name: Clean Balancer V35 Pending Swap Gross Gate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pending-gross-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify V35 fail-closed prefilter and mock research
+        run: |
+          node --check balancer-research-v1/pending-gross-gate-v35.js
+          node balancer-research-v1/pending-gross-gate-v35-test.js
+      - name: Monitor pending swaps and check factory-verified confirmed reserve quotes
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/pending-gross-gate-v35.js
