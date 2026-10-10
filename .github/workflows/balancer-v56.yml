@@ -1,0 +1,20 @@
+name: Balancer V56 Simulation Prerequisite Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Validate V56 source
+        run: node --check balancer-research-v1/simulation-prerequisites-v56.js
+      - name: Run V56 prerequisite unit tests
+        run: node balancer-research-v1/simulation-prerequisites-v56-test.js
+      - name: Report prerequisite blockers
+        run: node balancer-research-v1/simulation-prerequisites-v56.js
