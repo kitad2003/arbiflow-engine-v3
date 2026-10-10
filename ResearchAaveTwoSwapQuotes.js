@@ -14,7 +14,7 @@ async function main(){
  // Make read-only calls through Base RPC pinned to the same block number as the fork.
  const forkBlock=await ethers.provider.getBlockNumber();
  const remote=new ethers.JsonRpcProvider(rpc,8453,{staticNetwork:true});
- const q=new ethers.Contract(QUOTER,ABI,remote),amount=ethers.parseUnits('100',6);
+ const q=new ethers.Contract(QUOTER,ABI,remote),amount=ethers.parseUnits('25000',6);
  const fee=(amount*BigInt(report.premiumBps)+5000n)/10000n;
  const result={build:'RESEARCH_ONLY_AAVE_5_QUOTES',mode:'FORK_TWO_LEG_EXECUTABLE_SIZE_QUOTE',
   amountInRaw:amount.toString(),aaveFeeRaw:fee.toString(),debtRaw:(amount+fee).toString(),
