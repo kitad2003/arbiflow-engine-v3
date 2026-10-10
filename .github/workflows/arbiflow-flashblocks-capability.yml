@@ -24,6 +24,8 @@ jobs:
           node ResearchSwapDecoder.js
           node --check ResearchPoolIdentity.js
           node ResearchPoolIdentity.js
+          node --check ResearchV3Spot.js
+          node ResearchV3Spot.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
