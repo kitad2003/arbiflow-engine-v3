@@ -1,0 +1,23 @@
+name: Clean Balancer V10 MEV-Share Hint Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hint-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check source syntax
+        run: |
+          node --check balancer-research-v1/mevshare-v10.js
+          node --check balancer-research-v1/mevshare-v10-test.js
+      - name: Test event and bundle hint inspection
+        run: node balancer-research-v1/mevshare-v10-test.js
