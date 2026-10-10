@@ -1,4 +1,4 @@
-require('@nomicfoundation/hardhat-toolbox');
+require('@nomicfoundation/hardhat-ethers');
 const url=process.env.BASE_RPC_URL;
 module.exports={
  solidity:{version:'0.8.24',settings:{optimizer:{enabled:true,runs:200}}},
