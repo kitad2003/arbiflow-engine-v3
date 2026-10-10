@@ -1,0 +1,21 @@
+name: ArbiFlow Solana Safety V4
+on:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax and offline tests
+        run: |
+          node --check dex-registry/solana-safety-v4.js
+          node dex-registry/solana-safety-v4-test.js
+      - name: Read-only discovery and mint authority screening
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          MAX_TOKENS: '12'
+        run: node dex-registry/solana-safety-v4.js
