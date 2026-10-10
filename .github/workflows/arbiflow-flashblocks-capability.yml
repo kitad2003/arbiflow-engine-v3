@@ -22,9 +22,12 @@ jobs:
           node --check ResearchFlashblocksProbe.js
           node --check ResearchSwapDecoder.js
           node ResearchSwapDecoder.js
+          node --check ResearchPoolIdentity.js
+          node ResearchPoolIdentity.js
       - name: Probe preconfirmed pendingLogs support
         env:
           BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           BASE_RESEARCH_POOL_ADDRESSES: ${{ vars.BASE_RESEARCH_POOL_ADDRESSES }}
           RESEARCH_WATCH_SECONDS: '25'
         run: |
