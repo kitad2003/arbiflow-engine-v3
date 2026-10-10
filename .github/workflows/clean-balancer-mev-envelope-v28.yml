@@ -1,0 +1,24 @@
+name: Clean Balancer V28 MEV-Share V26 Envelope Validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Check six-argument V26 signed transaction and beta-1 envelope
+        run: |
+          node --check balancer-research-v1/mev-envelope-v28.js
+          node balancer-research-v1/mev-envelope-v28-test.js
+      - name: Verify fail-closed live input requirements without sending
+        run: node balancer-research-v1/mev-envelope-v28.js
