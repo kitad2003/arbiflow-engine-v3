@@ -1,0 +1,32 @@
+name: Clean Balancer V16 Ethereum Balancer and Pool Preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Test Ethereum read-only preflight
+        run: |
+          node --check balancer-research-v1/ethereum-preflight-v16.js
+          node balancer-research-v1/ethereum-preflight-v16-test.js
+      - name: Verify live Ethereum reserve and Balancer Vault reads
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL secret required"
+            exit 1
+          fi
+          node balancer-research-v1/ethereum-preflight-v16.js
