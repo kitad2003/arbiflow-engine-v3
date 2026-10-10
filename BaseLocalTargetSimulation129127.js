@@ -34,6 +34,13 @@ async function simulate(local,remote){
   }
   if(!actual){report.reason='LOCAL_RECEIPT_MISSING_AFTER_MINE';return report}
   report.localHash=hash;
+  const normalizeLog=l=>({address:l.address?.toLowerCase(),topics:(l.topics||[]).map(t=>t.toLowerCase()),data:l.data?.toLowerCase()});
+  const hlogs=(receipt.logs||[]).map(normalizeLog),llogs=(actual.logs||[]).map(normalizeLog);
+  report.logsComparison={historicalCount:hlogs.length,localCount:llogs.length,matched:JSON.stringify(hlogs)===JSON.stringify(llogs),firstDifferentIndex:null};
+  for(let i=0;i<Math.max(hlogs.length,llogs.length);i++){if(JSON.stringify(hlogs[i])!==JSON.stringify(llogs[i])){report.logsComparison.firstDifferentIndex=i;break}}
+  const historicBlock=await remote('eth_getBlockByNumber',[receipt.blockNumber,false]);
+  const localBlock=await local('eth_getBlockByNumber',[actual.blockNumber,false]);
+  report.blockEnvironment={historical:{timestamp:historicBlock?.timestamp,baseFeePerGas:historicBlock?.baseFeePerGas,gasLimit:historicBlock?.gasLimit},local:{timestamp:localBlock?.timestamp,baseFeePerGas:localBlock?.baseFeePerGas,gasLimit:localBlock?.gasLimit}};
   report.historicalReceiptStatus=receipt.status;
   report.localReceiptStatus=actual.status;
   report.historicalGasUsed=String(BigInt(receipt.gasUsed));
