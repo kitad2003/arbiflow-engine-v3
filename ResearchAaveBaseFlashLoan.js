@@ -20,7 +20,8 @@ function flags(bitmap){
 function feeFor(amountRaw,premiumBps){
  const amount=BigInt(amountRaw),bps=BigInt(premiumBps);
  if(amount<0n||bps<0n||bps>10000n)throw Error('BAD_FLASHLOAN_FEE_INPUT');
- return (amount*bps+9999n)/10000n;
+ // Aave V3 PercentageMath.percentMul uses half-up rounding.
+ return (amount*bps+5000n)/10000n;
 }
 async function check(provider){
  const network=await provider.getNetwork();
@@ -63,7 +64,8 @@ if(require.main===module){
  assert.equal(flags(1n<<63n).flashLoanEnabled,true);
  assert.equal(flags(1n<<60n).paused,true);
  assert.equal(feeFor(10000n,5n),5n);
- assert.equal(feeFor(10001n,5n),6n);
+ assert.equal(feeFor(10001n,5n),5n);
+ assert.equal(feeFor(11000n,5n),6n);
  if(process.env.AAVE_RESEARCH_LIVE==='1'){
   const rpc=process.env.BASE_RPC_URL||'';
   if(!/^https:\/\//.test(rpc))throw Error('BASE_RPC_URL_REQUIRED');
@@ -71,6 +73,6 @@ if(require.main===module){
   check(provider).then(r=>{fs.writeFileSync('arbiflow-aave-read-only.json',JSON.stringify(r,null,2)+'\n');console.log(JSON.stringify(r))})
   .catch(e=>{console.error('AAVE_READ_ONLY_ERROR',String(e.message).slice(0,160));process.exitCode=1})
   .finally(()=>provider.destroy());
- }else console.log(JSON.stringify({build:'RESEARCH_ONLY_AAVE_1',unitAssertionsPassed:4}));
+ }else console.log(JSON.stringify({build:'RESEARCH_ONLY_AAVE_1',unitAssertionsPassed:5}));
 }
 module.exports={check,flags,feeFor};
