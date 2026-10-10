@@ -1,0 +1,24 @@
+name: Clean Balancer V27 Local Fork Lifecycle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fork-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify local Balancer repayment and withdrawal lifecycle
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          node --check balancer-research-v1/full-lifecycle-fork-v27.js
+          npx hardhat run --config balancer-research-v1/ethereum-fork-v17.config.js balancer-research-v1/full-lifecycle-fork-v27.js
