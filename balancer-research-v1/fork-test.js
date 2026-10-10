@@ -4,6 +4,11 @@ const {ethers}=require('hardhat');
 const assert=require('node:assert/strict');
 const VAULT='0xBA12222222228d8Ba445958a75a0704d566BF2C8';
 const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+async function forkTokenBalance(provider,token,vault) {
+ const abi=new ethers.Interface(['function balanceOf(address) view returns(uint256)']);
+ const raw=await provider.send('eth_call',[{to:token,data:abi.encodeFunctionData('balanceOf',[vault])},'latest']);
+ return abi.decodeFunctionResult('balanceOf',raw)[0];
+}
 async function main(){
  const provider=ethers.provider;
  const network=await provider.getNetwork();
@@ -15,20 +20,25 @@ async function main(){
  await provider.send('evm_mine',[]);
  const localHeight=await provider.getBlockNumber();
  assert.equal(localHeight,forkHeight+1,'LOCAL_POST_FORK_BLOCK_NOT_MINED');
- const vaultCode=await provider.getCode(VAULT);
+ // Confirmed-state eth_call requests use the upstream RPC, not Hardhat's
+ // unsupported Base historical-block execution path.
+ const remote=new ethers.JsonRpcProvider(process.env.BALANCER_FORK_RPC_URL,8453,{staticNetwork:true});
+ const upstream=await remote.getNetwork();
+ assert.equal(upstream.chainId,8453n,'REMOTE_BASE_REQUIRED');
+ const vaultCode=await remote.getCode(VAULT);
  assert.notEqual(vaultCode,'0x','NO_VAULT_CODE');
  const token=new ethers.Contract(USDC,[
   'function balanceOf(address) view returns(uint256)',
   'function decimals() view returns(uint8)'
- ],provider);
- const vault=new ethers.Contract(VAULT,['function getProtocolFeesCollector() view returns(address)'],provider);
+ ],remote);
+ const vault=new ethers.Contract(VAULT,['function getProtocolFeesCollector() view returns(address)'],remote);
  const feeCollector=await vault.getProtocolFeesCollector();
- const fees=new ethers.Contract(feeCollector,['function getFlashLoanFeePercentage() view returns(uint256)'],provider);
+ const fees=new ethers.Contract(feeCollector,['function getFlashLoanFeePercentage() view returns(uint256)'],remote);
  const feePct=await fees.getFlashLoanFeePercentage();
  const decimals=Number(await token.decimals());
  assert.equal(decimals,6,'UNEXPECTED_USDC_DECIMALS');
  const principal=ethers.parseUnits('100',decimals);
- const before=await token.balanceOf(VAULT);
+ const before=await forkTokenBalance(provider,USDC,VAULT);
  const base={build:'BALANCER_RESEARCH_V4',mode:'ISOLATED_BASE_FORK_REAL_BALANCER_VAULT',
   forkBlockNumber:forkHeight,localBlockNumber:localHeight,vault:VAULT,token:USDC,
   vaultBalanceRaw:before.toString(),principalRaw:principal.toString(),
@@ -47,9 +57,11 @@ async function main(){
  await receiver.waitForDeployment();
  const tx=await receiver.begin([USDC],[principal]);
  const receipt=await tx.wait();
- const after=await token.balanceOf(VAULT);
+ // Forked state must be read from the local chain, NOT the upstream RPC.
+ const forkToken=new ethers.Contract(USDC,['function balanceOf(address) view returns(uint256)'],provider);
+ const after=await forkToken.balanceOf(VAULT);
  assert.equal(after,before,'VAULT_BALANCE_NOT_RESTORED');
- assert.equal(await token.balanceOf(await receiver.getAddress()),0n,'RECEIVER_HAS_UNEXPECTED_BALANCE');
+ assert.equal(await forkToken.balanceOf(await receiver.getAddress()),0n,'RECEIVER_HAS_UNEXPECTED_BALANCE');
  const iface=new ethers.Interface(['event RepaymentTest(address indexed token,uint256 amount,uint256 fee)']);
  const repayment=receipt.logs.some(log=>{
   if(log.address.toLowerCase()!==(receiver.target).toLowerCase())return false;
