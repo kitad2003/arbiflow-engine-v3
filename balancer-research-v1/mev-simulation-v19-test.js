@@ -16,6 +16,8 @@ const wallet=new ethers.Wallet('0x'+'1'.repeat(64));
  const good=prepare(args);
  assert.equal(good.ready,true);
  assert.equal(good.request.method,METHOD);
+ assert.equal(good.request.params[0].version,'beta-1');
+ assert.equal(good.request.params.length,1);
  assert.equal(good.request.params[0].body[0].hash,target);
  assert.equal(good.request.params[0].body[1].canRevert,false);
  const blocked=await simulate(args);
