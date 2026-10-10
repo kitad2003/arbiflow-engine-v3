@@ -53,7 +53,7 @@ async function run({url,addresses,seconds=25}){
  const decodedWithTokens=decoded.map(x=>{const enriched=enrich(x,metadata[x.pool.toLowerCase()]);return {...enriched,postSwapSpot:spot(enriched)}});
  const spotComparison=summarize(decodedWithTokens);
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_7',mode:'BASE_FLASHBLOCKS_SAME_BLOCK_SPOT_COMPARISON',providerSupportsPendingLogs:stats.acknowledged,
+ return {build:'RESEARCH_ONLY_8',mode:'BASE_FLASHBLOCKS_BLOCK_HASH_EVIDENCE_GATED',providerSupportsPendingLogs:stats.acknowledged,
   stats,observedEvents:observations.length,decodedEvents:decodedWithTokens.slice(0,25),verifiedPoolMetadata:Object.values(metadata).filter(x=>x.verified).length,spotComparison,assessment,
   limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','CONFIRMED_STATE_TOKEN_METADATA_NOT_PENDING_STATE','POST_SWAP_SPOT_IS_NOT_PRICE_IMPACT_SIMULATION','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
