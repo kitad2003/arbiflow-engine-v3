@@ -24,8 +24,15 @@ async function simulate(local,remote){
   stage='LOCAL_EXECUTE_TRANSACTION';
   const hash=await local('eth_sendTransaction',[request]);
   stage='LOCAL_RECEIPT';
-  const actual=await local('eth_getTransactionReceipt',[hash]);
-  if(!actual){report.reason='LOCAL_RECEIPT_MISSING';return report}
+  let actual=await local('eth_getTransactionReceipt',[hash]);
+  if(!actual){
+   report.receiptInitiallyMissing=true;
+   stage='LOCAL_MINE_PENDING_TRANSACTION';
+   await local('evm_mine',[]);
+   stage='LOCAL_RECEIPT_AFTER_MINE';
+   actual=await local('eth_getTransactionReceipt',[hash]);
+  }
+  if(!actual){report.reason='LOCAL_RECEIPT_MISSING_AFTER_MINE';return report}
   report.localHash=hash;
   report.historicalReceiptStatus=receipt.status;
   report.localReceiptStatus=actual.status;
