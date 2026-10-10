@@ -1,0 +1,25 @@
+name: Clean Balancer V19 MEV-Share Simulation Validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulation-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify corrected Flashbots simulation request
+        run: |
+          node --check balancer-research-v1/mev-simulation-v19.js
+          node balancer-research-v1/mev-simulation-v19-test.js
+      - name: Verify default no-submission gate
+        run: node balancer-research-v1/mev-simulation-v19.js
