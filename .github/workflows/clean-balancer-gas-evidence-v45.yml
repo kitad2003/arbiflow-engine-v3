@@ -1,0 +1,22 @@
+name: Clean Balancer V45 Gas Evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm install --no-save --ignore-scripts --no-audit --no-fund solc@0.8.24
+      - run: node --check balancer-research-v1/gas-evidence-v45.js
+      - run: node balancer-research-v1/gas-evidence-v45-test.js
+      - run: node balancer-research-v1/gas-evidence-v45.js
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V42_OPERATOR_ADDRESS: ${{ vars.V42_OPERATOR_ADDRESS }}
