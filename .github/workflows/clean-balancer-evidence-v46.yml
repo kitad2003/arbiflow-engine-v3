@@ -1,0 +1,22 @@
+name: Clean Balancer V46 Evidence Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm install --no-save --ignore-scripts --no-audit --no-fund solc@0.8.24
+      - run: node --check balancer-research-v1/evidence-audit-v46.js
+      - run: node balancer-research-v1/evidence-audit-v46-test.js
+      - run: node balancer-research-v1/evidence-audit-v46.js
+        env:
+          V42_OPERATOR_ADDRESS: ${{ vars.V42_OPERATOR_ADDRESS }}
+          V40_CONTRACT_ADDRESS: ${{ vars.V40_CONTRACT_ADDRESS }}
