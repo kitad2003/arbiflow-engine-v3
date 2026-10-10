@@ -31,7 +31,20 @@ async function run(){
   const contract=c.connect(from);const args=[first,second,amount,minFirst,minSecond,minProfit,{gasLimit:4000000}];
   return estimate?contract.makeFlashLoan.estimateGas(...args):contract.makeFlashLoan(...args);
  };
- await test('unauthorized_operator','NOT_OPERATOR_OR_BUSY',e=>call(UNI,SUSHI,1,1,1,outsider,e));
+ // eth_call preserves Solidity Error(string) returndata for precise operator authorization checks.
+ // This avoids Hardhat's non-decoded error text for an actual reverted transaction.
+ const unauthData=c.interface.encodeFunctionData('makeFlashLoan',[UNI,SUSHI,amount,1n,1n,1n]);
+ let operatorRevertData=null,operatorReason=null;
+ try{await ethers.provider.call({from:outsider.address,to:await c.getAddress(),data:unauthData});}
+ catch(e){
+  const hex=[e.data,e.error?.data,e.info?.error?.data].find(x=>typeof x==='string'&&ethers.isHexString(x));
+  if(hex){operatorRevertData=hex;try{operatorReason=ethers.AbiCoder.defaultAbiCoder().decode(['string'],'0x'+hex.slice(10))[0]}catch{}}
+ }
+ const operatorExact=operatorRevertData?.slice(0,10)==='0x08c379a0'&&operatorReason==='NOT_OPERATOR_OR_BUSY';
+ tests.push({label:'unauthorized_operator',expected:'NOT_OPERATOR_OR_BUSY',
+  reverted:operatorRevertData!==null,exact:operatorExact,gasEstimate:null,
+  reason:operatorReason||'NO_DECODABLE_REVERT_DATA',pass:operatorExact});
+
  // A real EOA lacks the pair.factory() interface. Revert may have no reason.
  await test('wrong_factory_order','WRONG_FACTORY',e=>call(SUSHI,UNI,1,1,1,operator,e));
  await test('first_leg_min_output','SLIPPAGE_OR_NO_OUTPUT',e=>call(UNI,SUSHI,ethers.MaxUint256,1,1,operator,e));
