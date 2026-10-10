@@ -4,8 +4,7 @@
 const {run}=require('./solana-movers-v3');
 const WRAPPED_SOL='So11111111111111111111111111111111111111112';
 const LEGACY='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN2022='TokenzQdBNbLqP5VEhdkAS6EPF2kVbAD6hYtGr4R'; // replaced below with canonical value at runtime if needed
-const TOKEN2022_CANONICAL='TokenzQdBNbLqP5VEhdkAS6EPF2kVbAD6hYtGr4R';
+const TOKEN2022_CANONICAL='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function screen(mint,account){
  const fail=(reason,extra={})=>({mint,accepted:false,reason,...extra});
