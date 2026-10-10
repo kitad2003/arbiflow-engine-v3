@@ -1,0 +1,24 @@
+name: Clean Balancer V23 Guardrail Fork Tests
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  guardrail-fork-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Compile and run V23 Ethereum fork guardrail tests
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          node --check balancer-research-v1/ethereum-fork-v23.js
+          npx hardhat run --config balancer-research-v1/ethereum-fork-v17.config.js balancer-research-v1/ethereum-fork-v23.js
