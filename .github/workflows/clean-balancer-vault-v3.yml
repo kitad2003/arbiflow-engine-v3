@@ -1,0 +1,34 @@
+name: Clean Balancer V3 Read-Only Vault Check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-vault:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax and fail-closed research tests
+        run: |
+          node --check balancer-research-v1/verify-vault.js
+          node balancer-research-v1/verify-vault-test.js
+      - name: Verify user-selected Vault and token on target chain (read-only)
+        env:
+          BALANCER_RESEARCH_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          BALANCER_RESEARCH_VAULT_ADDRESS: ${{ vars.BALANCER_RESEARCH_VAULT_ADDRESS }}
+          BALANCER_RESEARCH_TOKEN_ADDRESS: ${{ vars.BALANCER_RESEARCH_TOKEN_ADDRESS }}
+          BALANCER_RESEARCH_CHAIN_ID: '8453'
+        run: |
+          if [ -z "$BALANCER_RESEARCH_VAULT_ADDRESS" ] || [ -z "$BALANCER_RESEARCH_TOKEN_ADDRESS" ] || [ -z "$BALANCER_RESEARCH_RPC_URL" ]; then
+            echo "VAULT_TOKEN_OR_RPC_NOT_CONFIGURED: select addresses based on verified research; no address guess is permitted"
+            exit 1
+          fi
+          node balancer-research-v1/verify-vault.js
