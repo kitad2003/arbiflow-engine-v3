@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {normalize,select,discover}=require('./solana-movers-v2');
+const A='So11111111111111111111111111111111111111112',B='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',C='Es9vMFrzaCERmJfrF4H2FY9PDbE9bnDoxVQ9Z4YHn7P';
+const pool=(address,dex,base=A,quote=B,tvl='25000')=>({attributes:{address,name:'TEST/SOL',reserve_in_usd:tvl,price_change_percentage:{m5:'4',h1:'10'}},relationships:{base_token:{data:{id:'solana_'+base}},quote_token:{data:{id:'solana_'+quote}},dex:{data:{id:dex}}}});
+const p1=pool(A,'raydium'),p2=pool(B,'meteora'),p3=pool(C,'orca',A,C),p4=pool(C,'orca',A,B,'19999');
+assert.equal(normalize(p1).safetyVerified,false);
+assert.equal(select([p1,p2,p3,p4]).crossDexPairs,1);
+assert.equal(select([p1,p2,p3,p4]).crossDexPools.length,2);
+assert.equal(select([p1,p2,p3,p4]).allLiquidityQualified,3);
+(async()=>{const out=await discover({pages:1,delayMs:0,fetchImpl:async()=>({ok:true,json:async()=>({data:[p1,p2]})})});assert.equal(out.crossDexPairs,1);assert.equal(out.verifiedSafePools,0);assert.equal(out.verifiedProfitableRoutes,0);assert.equal(out.mainnetBroadcast,false);console.log(JSON.stringify({build:out.build,tests:'PASS'}))})().catch(e=>{console.error(e);process.exitCode=1});
