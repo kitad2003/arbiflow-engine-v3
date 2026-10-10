@@ -1,0 +1,44 @@
+name: ArbiFlow Research Feed Validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research-feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify research-only modules
+        run: |
+          node --check ResearchTransactionImpact.js
+          node --check ResearchBaseFeed.js
+          node ResearchTransactionImpact.js
+      - name: Capture provider pool observations when configured
+        env:
+          BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
+          BASE_RESEARCH_POOL_ADDRESSES: ${{ vars.BASE_RESEARCH_POOL_ADDRESSES }}
+          RESEARCH_WATCH_SECONDS: '25'
+        run: |
+          if [ -z "$BASE_RESEARCH_WSS_URL" ] || [ -z "$BASE_RESEARCH_POOL_ADDRESSES" ]; then
+            echo 'LIVE_FEED_NOT_CONFIGURED: offline research validation completed'
+            exit 0
+          fi
+          node ResearchBaseFeed.js
+      - name: Archive observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-research-feed
+          path: |
+            arbiflow-research-impact.json
+            arbiflow-research-feed.json
+          if-no-files-found: warn
