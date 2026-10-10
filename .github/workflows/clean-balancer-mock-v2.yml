@@ -16,5 +16,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - name: Run standalone callback and atomic rollback tests
-        run: npx hardhat run --config balancer-research-v1/hardhat.config.js balancer-research-v1/mock-test.js
+      - name: Compile isolated Balancer research contracts
+        run: npx hardhat compile --config balancer-research-v1/hardhat.config.js
+      - name: Run callback and atomic rollback tests
+        run: npx hardhat run --no-compile --config balancer-research-v1/hardhat.config.js balancer-research-v1/mock-test.js
