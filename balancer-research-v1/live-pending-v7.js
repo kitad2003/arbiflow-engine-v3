@@ -4,6 +4,7 @@
 const WebSocket=require('ws');
 const {examineHint}=require('./pending-monitor-v6');
 const {verifiedPairIndex}=require('./bot');
+const {classifyHint}=require('./event-signatures-v8');
 const HASH=/^0x[0-9a-f]{64}$/i,ADDR=/^0x[0-9a-f]{40}$/i;
 function makeSubscription(addresses,id=7007){
  if(!Array.isArray(addresses)||!addresses.length||addresses.length>100||!addresses.every(a=>ADDR.test(a)))throw Error('VALID_WATCH_ADDRESSES_REQUIRED');
@@ -25,7 +26,7 @@ async function monitor({url,addresses,verifiedPairs=[],seconds=20,Socket=WebSock
  const ws=new Socket(url);
  const state={build:'BALANCER_RESEARCH_V7',mode:'BASE_PROVIDER_PRECONFIRMED_LOGS_RESEARCH',
   subscriptionAcknowledged:false,subscriptionError:null,notifications:0,invalid:0,duplicateLogs:0,
-  recognizedSwapHints:0,verifiedVenueCandidates:0,observations:[],verifiedPairRecords:index.size,
+  recognizedSwapHints:0,verifiedVenueCandidates:0,eventKindCounts:{},observations:[],verifiedPairRecords:index.size,
   providerIsEthereumMEVShare:false,fullPendingTransactionFeedProven:false,
   transactionOrderingProven:false,realExecutableQuotes:0,alerts:[],
   mainnetBroadcast:false,executionEligible:false};
@@ -50,12 +51,14 @@ async function monitor({url,addresses,verifiedPairs=[],seconds=20,Socket=WebSock
    const key=e.hash.toLowerCase()+':'+e.logs[0].address.toLowerCase()+':'+String(e.logIndex);
    if(seen.has(key)){state.duplicateLogs++;return}
    seen.add(key);
+   const classification=classifyHint(e);
+   state.eventKindCounts[classification.kind]=(state.eventKindCounts[classification.kind]||0)+1;
    const evaluation=examineHint(e,index);
-   state.recognizedSwapHints+=evaluation.swapHints||0;
+   state.recognizedSwapHints+=classification.swapHint?1:0;
    state.verifiedVenueCandidates+=evaluation.candidates?.length||0;
    if(state.observations.length<25)state.observations.push({txHash:e.hash,pool:e.logs[0].address,
     blockNumber:e.blockNumber,blockHash:e.blockHash,transactionIndex:e.transactionIndex,logIndex:e.logIndex,
-    topic0:e.logs[0].topics[0],candidateCount:evaluation.candidates.length,
+    topic0:e.logs[0].topics[0],eventKind:classification.kind,swapHint:classification.swapHint,candidateCount:evaluation.candidates.length,
     candidateRoutes:evaluation.candidates,transactionBodyAvailable:false,executionEligible:false});
   });
  });
@@ -63,7 +66,7 @@ async function monitor({url,addresses,verifiedPairs=[],seconds=20,Socket=WebSock
  ws.close();
  return {...state,limitations:['SUBSCRIPTION_ACK_NOT_PROOF_OF_DELIVERY',
   'PRECONFIRMED_LOG_NOT_COMPLETE_PENDING_TRANSACTION',
-  'NO_MEASURED_TX_ORDERING','VERIFIED_PAIR_METADATA_REQUIRED_FOR_CANDIDATES',
+  'EVENT_SIGNATURE_NOT_POOL_IDENTITY','V3_SWAP_HINTS_NOT_YET_IN_V1_VENUE_SCREEN','NO_MEASURED_TX_ORDERING','VERIFIED_PAIR_METADATA_REQUIRED_FOR_CANDIDATES',
   'NO_REAL_QUOTES_OR_ATOMIC_SIMULATION','NO_BUNDLE_SUBMISSION']};
 }
 if(require.main===module){
