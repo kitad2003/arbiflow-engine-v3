@@ -1,7 +1,7 @@
 'use strict';
 // Base Flashblocks research-only pendingLogs probe. Explicitly detects provider capability.
 // No routing, simulated profit, signing or broadcast.
-const fs=require('node:fs'),WebSocket=require('ws'),{assess}=require('./ResearchTransactionImpact');
+const fs=require('node:fs'),WebSocket=require('ws'),{assess}=require('./ResearchTransactionImpact'),{decode}=require('./ResearchSwapDecoder');
 const validAddress=x=>typeof x==='string'&&/^0x[0-9a-f]{40}$/i.test(x);
 function parseNotification(message,subscriptionId,allowed){
  if(message?.method!=='eth_subscription'||message.params?.subscription!==subscriptionId)return null;
@@ -15,8 +15,8 @@ async function run({url,addresses,seconds=25}){
  if(!Array.isArray(addresses)||!addresses.length||addresses.length>100||!addresses.every(validAddress))throw Error('VALID_POOL_ADDRESSES_REQUIRED');
  if(!Number.isInteger(seconds)||seconds<1||seconds>90)throw Error('BAD_SECONDS');
  const allowed=new Set(addresses.map(a=>a.toLowerCase())),ws=new WebSocket(url,{handshakeTimeout:10000});
- const stats={acknowledged:false,providerError:null,notifications:0,invalid:0,duplicates:0,subscriptionType:'pendingLogs'};
- const observations=[],seen=new Set();let sub=null,done=false;
+ const stats={acknowledged:false,providerError:null,notifications:0,invalid:0,duplicates:0,decodedSwaps:0,unsupportedLogs:0,subscriptionType:'pendingLogs'};
+ const observations=[],decoded=[],seen=new Set();let sub=null,done=false;
  await new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>{reject(Error('SUBSCRIPTION_ACK_TIMEOUT'));ws.terminate()},15000);
   ws.once('error',e=>{clearTimeout(timer);reject(e)});
@@ -34,17 +34,17 @@ async function run({url,addresses,seconds=25}){
    stats.notifications++;
    const x=parseNotification(m,sub,allowed);
    if(!x){stats.invalid++;return}
-   const k=x.txHash+':'+x.pool.toLowerCase();
+   const k=x.txHash+':'+x.pool.toLowerCase()+':'+String(m.params.result.logIndex??'');
    if(seen.has(k)){stats.duplicates++;return}
-   seen.add(k);observations.push(x);
+   seen.add(k);const decodedEvent=decode(m.params.result);if(decodedEvent.recognized)stats.decodedSwaps++;else stats.unsupportedLogs++;decoded.push({txHash:x.txHash,pool:x.pool,phase:x.phase,logIndex:m.params.result.logIndex??null,decoded:decodedEvent});observations.push(x);
   })
  });
  if(stats.acknowledged)await new Promise(resolve=>setTimeout(resolve,seconds*1000));
  ws.close();
  const assessment=assess(observations);
- return {build:'RESEARCH_ONLY_3',mode:'BASE_FLASHBLOCKS_PENDING_LOGS_PROBE',providerSupportsPendingLogs:stats.acknowledged,
-  stats,observedEvents:observations.length,assessment,
-  limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
+ return {build:'RESEARCH_ONLY_4',mode:'BASE_FLASHBLOCKS_PENDING_SWAP_DECODING',providerSupportsPendingLogs:stats.acknowledged,
+  stats,observedEvents:observations.length,decodedEvents:decoded.slice(0,25),assessment,
+  limitations:['PROVIDER_ACK_DOES_NOT_GUARANTEE_EVENT_DELIVERY','PENDING_LOGS_ARE_PRECONFIRMED_NOT_MEMPOOL_WIDE','NO_TRANSACTION_ORDERING_PROOF','SWAP_DECODING_IS_NOT_PRICE_IMPACT_SIMULATION','NO_SIMULATION_OR_PROFIT_VERIFICATION'],
   mainnetBroadcast:false,executionEligible:false};
 }
 if(require.main===module){
