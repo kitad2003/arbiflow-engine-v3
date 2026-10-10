@@ -28,7 +28,7 @@ async function main(){
  const [operator]=await ethers.getSigners();
  const factory=await ethers.getContractFactory('ResearchAaveTwoSwapReceiver');
  const receiver=await factory.deploy(reserve.pool);await receiver.waitForDeployment();
- const principal=ethers.parseUnits('100',6),fee=(principal*BigInt(reserve.premiumBps)+5000n)/10000n;
+ const principal=ethers.parseUnits('25000',6),fee=(principal*BigInt(reserve.premiumBps)+5000n)/10000n;
  const report={build:'RESEARCH_ONLY_AAVE_5',mode:'BASE_FORK_TWO_V3_POOL_ROUND_TRIP',forkOnly:true,
   router,feeTierOut:500,feeTierBack:3000,principalRaw:principal.toString(),
   expectedAaveFeeRaw:fee.toString(),premiumPreFunded:false,realSwapExecuted:false,
