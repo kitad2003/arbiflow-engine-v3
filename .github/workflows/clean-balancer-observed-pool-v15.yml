@@ -1,0 +1,32 @@
+name: Clean Balancer V15 Observed Ethereum Pool Verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pool-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install contract-read dependency
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate isolated V15 read-only tests
+        run: |
+          node --check balancer-research-v1/verify-observed-pool-v15.js
+          node balancer-research-v1/verify-observed-pool-v15-test.js
+      - name: Verify V14 observed pool on Ethereum using tutorial factories
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: |
+          if [ -z "$ETHEREUM_RPC_URL" ]; then
+            echo "ETHEREUM_RPC_URL secret required"
+            exit 1
+          fi
+          node balancer-research-v1/verify-observed-pool-v15.js
