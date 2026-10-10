@@ -1,0 +1,26 @@
+name: Clean Balancer V43 Reproducible V26 Compilation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Install exact Solidity compiler for research run
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund solc@0.8.24
+      - name: Verify compile, deterministic bytecode, and read-only behavior
+        run: |
+          node --check balancer-research-v1/reproducible-v26-v43.js
+          node balancer-research-v1/reproducible-v26-v43-test.js
+      - name: Optional unsigned mainnet gas estimation
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          V42_OPERATOR_ADDRESS: ${{ vars.V42_OPERATOR_ADDRESS }}
+        run: node balancer-research-v1/reproducible-v26-v43.js
