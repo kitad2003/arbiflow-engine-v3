@@ -1,0 +1,23 @@
+name: ArbiFlow Multichain Feed Verification V2
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  feed-verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/multichain-feed-verification-v2.js
+      - run: node pending-research/multichain-feed-verification-v2-test.js
+      - name: Verify configured Ethereum and Base feeds
+        env:
+          ETHEREUM_WSS_URL: ${{ secrets.ETHEREUM_WSS_URL }}
+          BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+          FEED_DURATION_MS: '30000'
+        run: node pending-research/multichain-feed-verification-v2.js
