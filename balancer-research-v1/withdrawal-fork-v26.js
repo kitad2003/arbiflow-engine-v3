@@ -14,16 +14,29 @@ async function main(){
  const amount=ethers.parseEther('0.001');
  await (await token.deposit({value:amount})).wait();
  await (await token.transfer(await contract.getAddress(),amount)).wait();
- let outsiderBlocked=false,zeroBlocked=false,overspendBlocked=false;
- try{await contract.connect(outsider).withdrawSurplus.staticCall(amount)}catch(e){outsiderBlocked=String(e.message).includes('NOT_OPERATOR')}
- try{await contract.withdrawSurplus.staticCall(0)}catch(e){zeroBlocked=String(e.message).includes('BAD_AMOUNT')}
- try{await contract.withdrawSurplus.staticCall(amount+1n)}catch(e){overspendBlocked=String(e.message).includes('BAD_AMOUNT')}
+ // Compare actual Error(string) return data, not framework-dependent error messages.
+ async function expectReason(from,value,expected){
+  const data=contract.interface.encodeFunctionData('withdrawSurplus',[value]);
+  try{await ethers.provider.call({from,to:await contract.getAddress(),data});return {blocked:false,reason:'CALL_SUCCEEDED'};}
+  catch(e){
+   const raw=[e.data,e.error?.data,e.info?.error?.data].find(x=>typeof x==='string'&&ethers.isHexString(x));
+   let reason=null;
+   if(raw?.slice(0,10)==='0x08c379a0'){
+    try{reason=ethers.AbiCoder.defaultAbiCoder().decode(['string'],'0x'+raw.slice(10))[0]}catch{}
+   }
+   return {blocked:reason===expected,reason:reason||'UNDECODED_REVERT'};
+  }
+ }
+ const outsider=await expectReason(outsider.address,amount,'NOT_OPERATOR');
+ const zero=await expectReason(owner.address,0n,'BAD_AMOUNT');
+ const overspend=await expectReason(owner.address,amount+1n,'BAD_AMOUNT');
+ const outsiderBlocked=outsider.blocked,zeroBlocked=zero.blocked,overspendBlocked=overspend.blocked;
  const balanceBefore=await token.balanceOf(owner.address);
  const receipt=await (await contract.withdrawSurplus(amount)).wait();
  const balanceAfter=await token.balanceOf(owner.address);
  const remaining=await token.balanceOf(await contract.getAddress());
  const pass=outsiderBlocked&&zeroBlocked&&overspendBlocked&&receipt.status===1&&balanceAfter-balanceBefore===amount&&remaining===0n;
- console.log(JSON.stringify({build:'BALANCER_RESEARCH_V26',mode:'LOCAL_FORK_POST_LOAN_WITHDRAWAL_TEST',outsiderBlocked,zeroBlocked,overspendBlocked,withdrawalReceiptStatus:receipt.status,amountWithdrawnRaw:(balanceAfter-balanceBefore).toString(),contractBalanceAfterRaw:remaining.toString(),passed:pass,syntheticDepositedTokenNotArbitrageProfit:true,mainnetBroadcast:false,deploymentReady:false}));
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V26',mode:'LOCAL_FORK_POST_LOAN_WITHDRAWAL_TEST',outsiderBlocked,zeroBlocked,overspendBlocked,revertReasons:{outsider:outsider.reason,zero:zero.reason,overspend:overspend.reason},withdrawalReceiptStatus:receipt.status,amountWithdrawnRaw:(balanceAfter-balanceBefore).toString(),contractBalanceAfterRaw:remaining.toString(),passed:pass,syntheticDepositedTokenNotArbitrageProfit:true,mainnetBroadcast:false,deploymentReady:false}));
  if(!pass)process.exitCode=1;
 }
 main().catch(e=>{console.error('V26_FAILED',String(e.message).slice(0,180));process.exitCode=1});
