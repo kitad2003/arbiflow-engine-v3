@@ -8,23 +8,30 @@ async function main(){
  const report=JSON.parse(fs.readFileSync('arbiflow-aave-read-only.json','utf8'));
  const usdc=report.reserves.find(r=>r.symbol==='USDC'),weth=report.reserves.find(r=>r.symbol==='WETH');
  if(!usdc?.eligibleForFurtherFlashLoanTesting||!weth?.eligibleForFurtherFlashLoanTesting)throw Error('AAVE_RESERVES_NOT_VERIFIED');
- const q=new ethers.Contract(QUOTER,ABI,ethers.provider),amount=ethers.parseUnits('100',6);
+ const rpc=process.env.BASE_RPC_URL;
+ if(!/^https:\/\//.test(rpc||''))throw Error('BASE_RPC_URL_REQUIRED');
+ // Hardhat cannot reliably execute eth_call against Base's historical fork block.
+ // Make read-only calls through Base RPC pinned to the same block number as the fork.
+ const forkBlock=await ethers.provider.getBlockNumber();
+ const remote=new ethers.JsonRpcProvider(rpc,8453,{staticNetwork:true});
+ const q=new ethers.Contract(QUOTER,ABI,remote),amount=ethers.parseUnits('100',6);
  const fee=(amount*BigInt(report.premiumBps)+5000n)/10000n;
  const result={build:'RESEARCH_ONLY_AAVE_5_QUOTES',mode:'FORK_TWO_LEG_EXECUTABLE_SIZE_QUOTE',
   amountInRaw:amount.toString(),aaveFeeRaw:fee.toString(),debtRaw:(amount+fee).toString(),
-  quoter:QUOTER,firstFeeTier:500,secondFeeTier:3000,
+  quoter:QUOTER,quoteBlockNumber:forkBlock,quoteSource:'BASE_RPC_PINNED_TO_FORK_BLOCK',firstFeeTier:500,secondFeeTier:3000,
   firstLeg:null,secondLeg:null,expectedSurplusRaw:null,repaymentFeasibleFromQuotes:false,
   transactionExecuted:false,profitVerified:false,mainnetBroadcast:false,executionEligible:false};
  try{
-  const one=await q.quoteExactInputSingle.staticCall([usdc.asset,weth.asset,amount,500,0]);
+  const one=await q.quoteExactInputSingle.staticCall([usdc.asset,weth.asset,amount,500,0],{blockTag:forkBlock});
   result.firstLeg={amountOutRaw:one[0].toString(),gasEstimate:one[3].toString()};
-  const two=await q.quoteExactInputSingle.staticCall([weth.asset,usdc.asset,one[0],3000,0]);
+  const two=await q.quoteExactInputSingle.staticCall([weth.asset,usdc.asset,one[0],3000,0],{blockTag:forkBlock});
   result.secondLeg={amountOutRaw:two[0].toString(),gasEstimate:two[3].toString()};
   const difference=BigInt(two[0])-(amount+fee);
   result.expectedSurplusRaw=difference.toString();
   result.repaymentFeasibleFromQuotes=difference>=0n;
   result.estimatedOutcome=difference<0n?'INSUFFICIENT_REPAYMENT_FROM_QUOTES':'REPAYMENT_POSSIBLE_GAS_UNVERIFIED';
  }catch(e){result.quoteError=String(e.shortMessage||e.reason||e.message||e).slice(0,350);result.estimatedOutcome='QUOTE_FAILED'}
+ remote.destroy();
  fs.writeFileSync('arbiflow-aave-two-swap-quotes.json',JSON.stringify(result,null,2)+'\n');
  console.log(JSON.stringify(result));
 }
