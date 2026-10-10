@@ -27,16 +27,16 @@ async function main(){
    return {blocked:reason===expected,reason:reason||'UNDECODED_REVERT'};
   }
  }
- const outsider=await expectReason(outsider.address,amount,'NOT_OPERATOR');
- const zero=await expectReason(owner.address,0n,'BAD_AMOUNT');
- const overspend=await expectReason(owner.address,amount+1n,'BAD_AMOUNT');
- const outsiderBlocked=outsider.blocked,zeroBlocked=zero.blocked,overspendBlocked=overspend.blocked;
+ const outsiderCheck=await expectReason(outsider.address,amount,'NOT_OPERATOR');
+ const zeroCheck=await expectReason(owner.address,0n,'BAD_AMOUNT');
+ const overspendCheck=await expectReason(owner.address,amount+1n,'BAD_AMOUNT');
+ const outsiderBlocked=outsiderCheck.blocked,zeroBlocked=zeroCheck.blocked,overspendBlocked=overspendCheck.blocked;
  const balanceBefore=await token.balanceOf(owner.address);
  const receipt=await (await contract.withdrawSurplus(amount)).wait();
  const balanceAfter=await token.balanceOf(owner.address);
  const remaining=await token.balanceOf(await contract.getAddress());
  const pass=outsiderBlocked&&zeroBlocked&&overspendBlocked&&receipt.status===1&&balanceAfter-balanceBefore===amount&&remaining===0n;
- console.log(JSON.stringify({build:'BALANCER_RESEARCH_V26',mode:'LOCAL_FORK_POST_LOAN_WITHDRAWAL_TEST',outsiderBlocked,zeroBlocked,overspendBlocked,revertReasons:{outsider:outsider.reason,zero:zero.reason,overspend:overspend.reason},withdrawalReceiptStatus:receipt.status,amountWithdrawnRaw:(balanceAfter-balanceBefore).toString(),contractBalanceAfterRaw:remaining.toString(),passed:pass,syntheticDepositedTokenNotArbitrageProfit:true,mainnetBroadcast:false,deploymentReady:false}));
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V26',mode:'LOCAL_FORK_POST_LOAN_WITHDRAWAL_TEST',outsiderBlocked,zeroBlocked,overspendBlocked,revertReasons:{outsider:outsiderCheck.reason,zero:zeroCheck.reason,overspend:overspendCheck.reason},withdrawalReceiptStatus:receipt.status,amountWithdrawnRaw:(balanceAfter-balanceBefore).toString(),contractBalanceAfterRaw:remaining.toString(),passed:pass,syntheticDepositedTokenNotArbitrageProfit:true,mainnetBroadcast:false,deploymentReady:false}));
  if(!pass)process.exitCode=1;
 }
 main().catch(e=>{console.error('V26_FAILED',String(e.message).slice(0,180));process.exitCode=1});
