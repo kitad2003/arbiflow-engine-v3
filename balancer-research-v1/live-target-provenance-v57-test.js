@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {audit,run}=require('./live-target-provenance-v57');
+const h='0x'+'a'.repeat(64),p='0x'+'b'.repeat(64),pool='0x'+'c'.repeat(40);
+(async()=>{
+ const tx=audit({kind:'PENDING_TRANSACTION',eventHash:h,pendingHash:h,swapPools:[pool]});
+ assert.equal(tx.targetReferenceType,'TRANSACTION_HASH');
+ assert.equal(tx.pendingHash,h);
+ assert.equal(tx.matchVerified,false);
+ const bundle=audit({kind:'BUNDLE',eventHash:h,disclosedBundleTxHashes:[p],swapPools:[pool]});
+ assert.equal(bundle.targetReferenceType,'BUNDLE_HASH');
+ assert.equal(bundle.pendingHash,null);
+ assert.deepEqual(bundle.disclosedBundleTxHashes,[p]);
+ assert.equal(bundle.targetFirstSimulationAttempted,false);
+ const missing=audit({kind:'BUNDLE',eventHash:h});
+ assert.ok(missing.blockers.includes('BUNDLE_CONSTITUENT_TX_HASH_NOT_DISCLOSED'));
+ const out=await run({monitorImpl:async({onEvent})=>{await onEvent({kind:'BUNDLE',eventHash:h,swapPools:[pool]});await onEvent({kind:'PENDING_TRANSACTION',eventHash:p,pendingHash:p,swapPools:[]});return {uniqueEvents:2}},runtimeMs:1000});
+ assert.equal(out.bundleHashes,1);
+ assert.equal(out.pendingHashes,1);
+ assert.equal(out.bundlesSubmitted,0);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V57',status:'UNIT_TEST_PASS',assertions:11}));
+})().catch(e=>{console.error(e);process.exitCode=1});
