@@ -1,0 +1,21 @@
+name: Balancer V54 Pool Identity Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify V54 unit tests
+        run: node balancer-research-v1/bundle-pool-verification-v54-test.js
+      - name: Observe disclosed pool identities read only
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/bundle-pool-verification-v54.js
