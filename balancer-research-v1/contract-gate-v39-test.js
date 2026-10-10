@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {makeParser}=require('./stream-parser-v39');
+const {verify}=require('./contract-gate-v39');
+(async()=>{
+ const p=makeParser({maxFrameBytes:200});
+ assert.equal(p.push('data: {"hash":"0x'+'a'.repeat(64)+'"').length,0);
+ assert.equal(p.push('}\n\n').length,1);
+ assert.equal(p.push('data: '+('x'.repeat(250))+'\n\n').length,0);
+ assert.equal(p.snapshot().oversizedFrames,1);
+ assert.equal(p.push('data: '+('y'.repeat(250))).length,0);
+ assert.equal(p.push('\n\n').length,0);
+ assert.equal(p.snapshot().oversizedFrames,2);
+ assert.equal((await verify()).reason,'CONTRACT_ADDRESS_NOT_CONFIGURED');
+ const address='0x'+'1'.repeat(40);
+ assert.equal((await verify({address})).reason,'ETHEREUM_RPC_NOT_CONFIGURED');
+ assert.equal((await verify({address,provider:{getCode:async()=> '0x'}})).reason,'NO_DEPLOYED_BYTECODE_AT_ADDRESS');
+ const yes=await verify({address,provider:{getCode:async()=> '0x60006000'}});
+ assert.equal(yes.deployed,true);
+ assert.equal(yes.simulationReady,false);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V39',unitAssertionsPassed:11,streamRecovery:true,onChainGateMocked:true,mainnetBroadcast:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
