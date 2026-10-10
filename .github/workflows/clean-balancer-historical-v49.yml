@@ -1,0 +1,20 @@
+name: Clean Balancer V49 Historical Ethereum Reserves
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check balancer-research-v1/historical-reserves-v49.js
+      - run: node balancer-research-v1/historical-reserves-v49-test.js
+      - run: node balancer-research-v1/historical-reserves-v49.js
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
