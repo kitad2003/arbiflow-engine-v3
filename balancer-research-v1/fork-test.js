@@ -8,6 +8,13 @@ async function main(){
  const provider=ethers.provider;
  const network=await provider.getNetwork();
  assert.equal(network.chainId,8453n,'BASE_FORK_REQUIRED');
+ // On Base forks, Hardhat can classify eth_call at the fork's exact block as
+ // historical and fail before executing. Mine an isolated LOCAL successor block
+ // so all following eth_call invocations run at a post-fork block.
+ const forkHeight=await provider.getBlockNumber();
+ await provider.send('evm_mine',[]);
+ const localHeight=await provider.getBlockNumber();
+ assert.equal(localHeight,forkHeight+1,'LOCAL_POST_FORK_BLOCK_NOT_MINED');
  const vaultCode=await provider.getCode(VAULT);
  assert.notEqual(vaultCode,'0x','NO_VAULT_CODE');
  const token=new ethers.Contract(USDC,[
@@ -23,7 +30,7 @@ async function main(){
  const principal=ethers.parseUnits('100',decimals);
  const before=await token.balanceOf(VAULT);
  const base={build:'BALANCER_RESEARCH_V4',mode:'ISOLATED_BASE_FORK_REAL_BALANCER_VAULT',
-  blockNumber:await provider.getBlockNumber(),vault:VAULT,token:USDC,
+  forkBlockNumber:forkHeight,localBlockNumber:localHeight,vault:VAULT,token:USDC,
   vaultBalanceRaw:before.toString(),principalRaw:principal.toString(),
   feePercentageRaw:feePct.toString(),feeDenominator:'1000000000000000000',
   mainnetBroadcast:false,mainnetFundsMoved:false,profitVerified:false,executionEligible:false};
