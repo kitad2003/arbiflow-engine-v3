@@ -1,0 +1,23 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {intrinsic,investigate}=require('./gas-evidence-v45');
+(async()=>{
+ assert.equal(intrinsic('0x').intrinsicGasFloor,'53000');
+ assert.equal(intrinsic('0x00ff').intrinsicGasFloor,'53022');
+ const noRpc=await investigate();
+ assert.equal(noRpc.status,'INTRINSIC_FLOOR_ONLY');
+ assert.equal(noRpc.reason,'RPC_MISSING');
+ assert.equal(noRpc.mainnetBroadcast,false);
+ assert.equal(noRpc.estimateGasCalled,false);
+ const rpc={getNetwork:async()=>({chainId:1n}),getFeeData:async()=>({gasPrice:100n}),estimateGas:async()=>2000000n};
+ const noOperator=await investigate({provider:rpc});
+ assert.equal(noOperator.reason,'ACTUAL_OPERATOR_ADDRESS_REQUIRED');
+ assert.ok(BigInt(noOperator.indicativeIntrinsicFloorCostWei)>0n);
+ assert.equal(noOperator.estimateGasCalled,false);
+ const yes=await investigate({provider:rpc,operator:'0x'+'1'.repeat(40)});
+ assert.equal(yes.status,'UNSIGNED_RPC_ESTIMATE_OBTAINED');
+ assert.equal(yes.operatorSpecificGasUnits,'2000000');
+ assert.equal(yes.operatorSpecificCostWei,'200000000');
+ assert.equal(yes.contractDeployed,false);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V45',unitAssertionsPassed:13,gasFloorNotDeploymentEstimate:true,mainnetBroadcast:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
