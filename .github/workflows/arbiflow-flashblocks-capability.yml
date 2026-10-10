@@ -1,0 +1,39 @@
+name: ArbiFlow Flashblocks Capability Check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  flashblocks-capability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Validate pendingLogs probe syntax
+        run: node --check ResearchFlashblocksProbe.js
+      - name: Probe preconfirmed pendingLogs support
+        env:
+          BASE_RESEARCH_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
+          BASE_RESEARCH_POOL_ADDRESSES: ${{ vars.BASE_RESEARCH_POOL_ADDRESSES }}
+          RESEARCH_WATCH_SECONDS: '25'
+        run: |
+          if [ -z "$BASE_RESEARCH_WSS_URL" ] || [ -z "$BASE_RESEARCH_POOL_ADDRESSES" ]; then
+            echo "LIVE_FEED_SETTINGS_MISSING"
+            exit 1
+          fi
+          node ResearchFlashblocksProbe.js
+      - name: Archive capability result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashblocks-capability
+          path: arbiflow-flashblocks-capability.json
+          if-no-files-found: warn
