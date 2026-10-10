@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {decode,V2}=require('./swap-decoder-v4');
+const router='0x7a250d5630b4cf539739df2c5dacb4c659f2488d';
+const path=['0x0000000000000000000000000000000000000001','0x0000000000000000000000000000000000000002'];
+const input=V2.encodeFunctionData('swapExactETHForTokens',[100n,path,path[1],999999n]);
+const d=decode('ethereum',{to:router,input,value:'1000000000000000000'});
+assert.equal(d.routerVerified,true);assert.equal(d.decoded,true);assert.equal(d.amountInRaw,'1000000000000000000');assert.equal(d.amountOutMinRaw,'100');assert.equal(d.path.length,2);assert.equal(d.profitVerified,false);
+assert.equal(decode('base',{to:router,input}).routerVerified,false);
+assert.equal(decode('ethereum',{to:'0x66a9893cc07d91d95644aedd05d03f95e1dba8af',input:'0x3593564c'}).candidateForContractVerification,true);
+assert.equal(decode('ethereum',{to:router,input:'0x7ff36ab5'}).kind,'ABI_DECODE_FAILED');
+console.log('SWAP_DECODER_V4_TEST_PASS');
