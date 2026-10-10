@@ -1,0 +1,25 @@
+name: Clean Balancer V11 Live MEV-Share Hint Audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify read-only SSE parsing and bundle deduplication
+        run: |
+          node --check balancer-research-v1/mevshare-v11.js
+          node balancer-research-v1/mevshare-v11-test.js
+      - name: Investigate live Ethereum MEV-Share hints
+        env:
+          MEV_SHARE_RESEARCH_NETWORK: ethereum-mainnet
+        run: node balancer-research-v1/mevshare-v11.js
