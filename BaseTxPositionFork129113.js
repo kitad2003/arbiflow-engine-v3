@@ -2,6 +2,7 @@
 // Read-only Anvil transaction-position fork startup probe. No signing or broadcasting.
 const {spawn}=require('node:child_process');
 const fs=require('node:fs');
+const {compare}=require('./BaseForkCompare129115');
 const TARGET='0x4b0dd34e742962465cb72493861b640356c970a7b45ee8ce4d3784359ab1341e';
 const PORT=18545;
 const report={build:'12.9.113',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
@@ -10,6 +11,7 @@ async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
  const body=await response.json();if(body.error)throw Error('LOCAL_RPC_ERROR_'+body.error.code);return body.result;
 }
+async function remote(url,method,params){const response=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(30000)});const value=await response.json();if(!response.ok||value.error)throw Error('REMOTE_TRACE_UNAVAILABLE');return value.result}
 async function run(){
  const url=process.env.BASE_TRACE_RPC_URL||'';
  if(!/^https:\/\//.test(url)){report.reason='BASE_TRACE_RPC_URL_HTTPS_REQUIRED';return}
@@ -27,6 +29,15 @@ async function run(){
     report.localChainId=chain;report.localBlock=height;
     report.status='FORK_STARTED_CHECKPOINT_UNVERIFIED';
     report.reason='NEED_COMPARE_TARGET_PRESTATE_STORAGE_AND_PREFIX_RECEIPTS';
+    const snapshot=await remote(url,'debug_traceTransaction',[TARGET,{tracer:'prestateTracer',timeout:'10s'}]);
+    report.comparison=await compare(snapshot,rpc);
+    if(report.comparison.matched){
+      report.status='ACCESSED_PRESTATE_FIELDS_MATCH';
+      report.reason='PARTIAL_PRESTATE_MATCH_ONLY_FULL_CHECKPOINT_AND_RECEIPTS_UNVERIFIED';
+    }else{
+      report.status='FORK_PRESTATE_MISMATCH';
+      report.reason='ANVIL_FORK_DOES_NOT_MATCH_HISTORICAL_TARGET_PRESTATE';
+    }
     return;
    }catch{}
   }
@@ -35,4 +46,4 @@ async function run(){
   if(child&&!ended)child.kill('SIGTERM');
  }
 }
-run().catch(()=>{report.reason='FORK_PROBE_EXCEPTION'}).finally(()=>{fs.writeFileSync('arbiflow-base-tx-fork-129113.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));if(report.status!=='FORK_STARTED_CHECKPOINT_UNVERIFIED')process.exitCode=2});
+run().catch(()=>{report.reason='FORK_PROBE_EXCEPTION'}).finally(()=>{fs.writeFileSync('arbiflow-base-tx-fork-129113.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));if(report.status!=='ACCESSED_PRESTATE_FIELDS_MATCH')process.exitCode=2});
