@@ -7,7 +7,11 @@ const USDC='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 async function main(){
  const provider=ethers.provider;
  const network=await provider.getNetwork();
- assert.equal(network.chainId,8453n,'BASE_FORK_REQUIRED');
+ assert.equal(network.chainId,31337n,'ISOLATED_LOCAL_CHAIN_REQUIRED');
+ const upstream=new ethers.JsonRpcProvider(process.env.BALANCER_FORK_RPC_URL);
+ try{assert.equal((await upstream.getNetwork()).chainId,8453n,'UPSTREAM_BASE_REQUIRED')}
+ finally{upstream.destroy()}
+
  // On Base forks, Hardhat can classify eth_call at the fork's exact block as
  // historical and fail before executing. Mine an isolated LOCAL successor block
  // so all following eth_call invocations run at a post-fork block.
