@@ -1,0 +1,26 @@
+name: Clean Balancer V30 Dynamic Factory Pair Discovery
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify V30 dynamic pool discovery rules
+        run: |
+          node --check balancer-research-v1/dynamic-pair-discovery-v30.js
+          node balancer-research-v1/dynamic-pair-discovery-v30-test.js
+      - name: Investigate live disclosed swap hints and verify both factory identities
+        env:
+          ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+        run: node balancer-research-v1/dynamic-pair-discovery-v30.js
