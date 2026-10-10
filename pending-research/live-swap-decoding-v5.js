@@ -11,7 +11,7 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
  durationMs=Math.min(90000,Math.max(5000,durationMs));maxLookups=Math.min(300,Math.max(1,maxLookups));
  return new Promise((resolve,reject)=>{
   const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,unverifiedUniversalSelectors:0,classificationCounts:{},decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
-  let ws,done=false,sub=null,seq=55000,stop,ack,tick,last=0,inFlight=0;
+  let ws,done=false,sub=null,seq=56000,stop,ack,tick,last=0,inFlight=0;
   const seen=new Set(),queue=[],pending=new Map(),codeChecked=new Set();
   const started=Date.now();
   function finish(reason,error){if(done)return;done=true;clearTimeout(stop);clearTimeout(ack);clearInterval(tick);for(const v of pending.values())clearTimeout(v.timeout);pending.clear();s.durationMs=Date.now()-started;s.stopReason=reason;try{ws?.close()}catch{};if(error)reject(error);else resolve(s)}
