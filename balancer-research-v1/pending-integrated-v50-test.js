@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {run}=require('./pending-integrated-v50');
+(async()=>{
+ const hash='0x'+'a'.repeat(64);
+ const event={kind:'PENDING_TRANSACTION',pendingHash:hash,swapPools:['0x'+'b'.repeat(40)]};
+ const monitorImpl=async({onEvent})=>{await onEvent({kind:'BUNDLE',swapPools:event.swapPools});await onEvent(event);await onEvent(event);return {connectedSessions:1,uniqueEvents:2}};
+ const provider={getNetwork:async()=>({chainId:1n})};
+ const evalImpl=async()=>({state:'CONFIRMED_RESERVE_QUOTE_ONLY',v26TokenCompatible:true,bestGrossQuote:{grossPositive:true},reason:'NEEDS_POST_TARGET_SIMULATION_AND_NET_PROFIT'});
+ const x=await run({provider,monitorImpl,evaluateImpl:evalImpl});
+ assert.equal(x.streamConnected,true);
+ assert.equal(x.bundleEventsExcluded,1);
+ assert.equal(x.pendingEvents,2);
+ assert.equal(x.uniqueTargetsEvaluated,1);
+ assert.equal(x.duplicateTargets,1);
+ assert.equal(x.verifiedQuotes,1);
+ assert.equal(x.v26CompatibleGrossPositive,1);
+ assert.equal(x.alertCount,0);
+ assert.equal(x.executionEligible,false);
+ assert.equal(x.simulationAttempted,false);
+ assert.equal(x.mainnetBroadcast,false);
+ assert.equal(x.bundlesSubmitted,0);
+ assert.equal(x.examples[0].netProfitVerified,false);
+ console.log(JSON.stringify({build:'BALANCER_RESEARCH_V50',unitAssertionsPassed:13,readOnly:true,simulationAttempted:false}));
+})().catch(e=>{console.error(e);process.exitCode=1});
