@@ -8,7 +8,7 @@ const PREDECESSOR='0xb86187ffee731a987660d6a9b7e1d7046a9a5282e8d1d6658295af2e996
 const PORT=18545;
 const BLOCK=52392050;
 const TARGET_INDEX=2;
-const report={build:'12.9.119',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
+const report={build:'12.9.120',mode:'BASE_TRANSACTION_POSITION_FORK_PROBE',block:52392050,targetIndex:2,targetHash:TARGET,readOnly:true,mainnetBroadcast:false,preTransactionStateReconstructed:false,receiptMatches:0,executionEligible:false,status:'BLOCKED',reason:'NOT_STARTED'};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function rpc(method,params=[]){
  const response=await fetch('http://127.0.0.1:'+PORT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(2000)});
@@ -61,7 +61,9 @@ async function run(){
     const forkBlock=await rpc('eth_getBlockByNumber',[height,true]);
     const localTransactions=Array.isArray(forkBlock?.transactions)?forkBlock.transactions:[];
     report.positionEvidence={forkCheckpointHash:PREDECESSOR,localBlock:height,transactionsInLocalBlock:localTransactions.length,transactionHashes:localTransactions.slice(0,4).map(t=>typeof t==='string'?t:t.hash),targetIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===TARGET),predecessorIncluded:localTransactions.some(t=>(typeof t==='string'?t:t.hash)?.toLowerCase()===PREDECESSOR)};
-    if(report.positionEvidence.targetIncluded||!report.positionEvidence.predecessorIncluded){report.status='FORK_WRONG_TRANSACTION_BOUNDARY';report.reason='TARGET_INCLUDED_OR_PREDECESSOR_MISSING';return}
+    const hashes=localTransactions.map(t=>(typeof t==='string'?t:t.hash)?.toLowerCase());
+    report.positionEvidence.exactPrefixOrder=hashes.length===2&&hashes[0]==='0x1e26b4ea92a16b9bfb216c06a3d4aaf7d7ee811c11eed750be86745b34463dea'&&hashes[1]===PREDECESSOR;
+    if(!report.positionEvidence.exactPrefixOrder){report.status='FORK_WRONG_TRANSACTION_BOUNDARY';report.reason='FORK_PREFIX_ORDER_OR_LENGTH_MISMATCH';return}
     report.localChainId=chain;report.localBlock=height;
     report.status='FORK_STARTED_CHECKPOINT_UNVERIFIED';
     report.reason='NEED_COMPARE_TARGET_PRESTATE_STORAGE_AND_PREFIX_RECEIPTS';
@@ -76,7 +78,9 @@ async function run(){
       try{report.mismatchOrigins=await classifyMismatches(url,snapshot,report.comparison.mismatches)}catch{report.mismatchOriginError='REFERENCE_CLASSIFICATION_FAILED'}
     }
     return;
-   }catch{}
+   }catch(e){
+    if(report.positionEvidence){report.status='FORK_DIAGNOSTIC_FAILED';report.reason='CHECKPOINT_TRACE_OR_COMPARISON_REQUEST_FAILED';return}
+   }
   }
   report.reason=launchError?'ANVIL_UNAVAILABLE':ended?'ANVIL_FORK_STARTUP_FAILED':'ANVIL_STARTUP_TIMEOUT';
  }finally{
