@@ -1,0 +1,37 @@
+name: Clean Balancer V7 Live Preconfirmed Event Research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pending-event-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Check research-only adapter and unit tests
+        run: |
+          node --check balancer-research-v1/live-pending-v7.js
+          node balancer-research-v1/live-pending-v7-test.js
+      - name: Observe live Base preconfirmed event hints, without trade submission
+        env:
+          BALANCER_V7_WSS_URL: ${{ secrets.BASE_RESEARCH_WSS_URL }}
+          BALANCER_V7_WATCH_POOLS: ${{ vars.BASE_RESEARCH_POOL_ADDRESSES }}
+          BALANCER_V7_SECONDS: '20'
+        run: |
+          if [ -z "$BALANCER_V7_WSS_URL" ]; then
+            echo "BASE_RESEARCH_WSS_URL_SECRET_MISSING"
+            exit 1
+          fi
+          if [ -z "$BALANCER_V7_WATCH_POOLS" ]; then
+            echo "BASE_RESEARCH_POOL_ADDRESSES_VAR_MISSING"
+            exit 1
+          fi
+          node balancer-research-v1/live-pending-v7.js
