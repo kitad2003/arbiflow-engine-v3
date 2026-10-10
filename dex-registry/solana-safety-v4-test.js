@@ -9,4 +9,7 @@ assert.equal(screen(mint,account('abc')).reason,'FREEZE_AUTHORITY_NOT_REVOKED');
 assert.equal(screen(mint,account(null,'abc')).reason,'MINT_AUTHORITY_NOT_RENOUNCED');
 assert.equal(screen(mint,null).accepted,false);
 assert.equal(screen(mint,{...account(),owner:'unknown'}).accepted,false);
+const token2022='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+assert.equal(screen(mint,{...account(),owner:token2022,data:{program:'spl-token-2022',parsed:{type:'mint',info:{freezeAuthority:null,mintAuthority:null,extensions:[]}}}}).reason,'TOKEN_2022_EXTENSIONS_NOT_FULLY_AUDITED');
+assert.equal(screen(mint,{...account(),data:{program:'spl-token',parsed:{type:'mint',info:{mintAuthority:null}}}}).reason,'AUTHORITY_FIELDS_MISSING');
 (async()=>{const out=await audit([mint],{rpcUrl:'https://example.invalid',fetchImpl:async()=>({ok:true,json:async()=>({result:{value:account()}})})});assert.equal(out.mintAuthorityScreenPassed,1);assert.equal(out.results[0].taxVerified,false);console.log(JSON.stringify({build:'ARBIFLOW_SOLANA_SAFETY_V4',tests:'PASS'}))})().catch(e=>{console.error(e);process.exitCode=1});
