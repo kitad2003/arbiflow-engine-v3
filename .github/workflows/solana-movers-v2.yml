@@ -1,0 +1,25 @@
+name: ArbiFlow Solana Movers V2
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: 'GeckoTerminal pages (1-10)'
+        required: false
+        default: '3'
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Offline tests
+        run: |
+          node --check dex-registry/solana-movers-v2.js
+          node dex-registry/solana-movers-v2-test.js
+      - name: Read-only public API discovery
+        env:
+          SOLANA_PAGES: ${{ inputs.pages }}
+        run: node dex-registry/solana-movers-v2.js
