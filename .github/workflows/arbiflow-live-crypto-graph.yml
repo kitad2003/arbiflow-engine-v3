@@ -1,0 +1,24 @@
+name: ArbiFlow live crypto graph
+on:
+  workflow_dispatch:
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check LiveCryptoGraph12960.js
+      - name: Inspect discovered crypto routes
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: node LiveCryptoGraph12960.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-crypto-live-graph
+          path: arbiflow-crypto-live-graph.json
+          if-no-files-found: warn
