@@ -52,7 +52,7 @@ function main(){
   for(const p of inventory.pools)records.push({sourceType:'DEX_POOL',venue:p.dex,chainId:8453,pool:p.pool,token0:p.token0,token1:p.token1,kind:p.kind,fee:p.fee,createdBlock:p.createdBlock,observedAt:Date.now()});
  }
  // Other feeds must be real connector snapshots; never invent quotes.
- for(const path of ['arbiflow-aggregator-snapshots.json','arbiflow-cex-orderbooks.json']){
+ for(const path of ['arbiflow-aggregator-snapshots.json','arbiflow-cex-orderbooks.json','arbiflow-kraken-orderbooks.json']){
   if(fs.existsSync(path)){
    const rows=JSON.parse(fs.readFileSync(path,'utf8'));
    assert(Array.isArray(rows),'SOURCE_FILE_MUST_BE_ARRAY');
