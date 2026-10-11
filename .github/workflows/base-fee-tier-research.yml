@@ -10,8 +10,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax and unit assertions
         run: |
           node --check BaseFeeTierResearchV1.js
