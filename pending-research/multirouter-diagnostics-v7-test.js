@@ -31,6 +31,7 @@ async function main(){
  assert.equal(x.queueHighWatermark,3);
  assert.equal(x.queuedAtFinish,0);
  assert.equal(x.executionEligible,false);
+ assert.equal(x.universalSwapIntents,0);
  console.log(JSON.stringify({test:'V7_OFFLINE_DIAGNOSTICS',status:'PASS',chainCount:r.chainCount,unimplemented:13,skipped:x.lookupsSkippedAtCap,lookups:x.lookupsSent}));
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
