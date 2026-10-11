@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {reviewDeploymentProvenance}=require('./deployment-provenance-v7');
+const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222',h='0x'+'a'.repeat(64);
+const observation={collected:true,chainId:1,blockNumber:100,blockHash:h,pool:a,factory:b,poolCodeHash:h,factoryCodeHash:h};
+const manifest={chainId:1,pool:a,factory:b,poolCodeHash:h,factoryCodeHash:h,validFromBlock:50};
+const x=reviewDeploymentProvenance({observation,manifest,approval:{approverId:'test',reviewed:true,signature:'fake'}});
+assert.equal(x.recordMatches,true);assert.equal(x.provenanceAuthenticated,false);assert.equal(x.alertEligible,false);assert.equal(x.executionEligible,false);
+assert.equal(reviewDeploymentProvenance({observation,manifest:{...manifest,chainId:8453},approval:{}}).reason,'OBSERVATION_MANIFEST_MISMATCH');
+assert.equal(reviewDeploymentProvenance({observation,manifest,approval:null}).reason,'MISSING_EVIDENCE');
+console.log('V7_DEPLOYMENT_PROVENANCE_OFFLINE_TEST_PASS');
