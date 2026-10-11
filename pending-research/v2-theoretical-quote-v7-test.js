@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {quoteV2ExactIn}=require('./v2-theoretical-quote-v7');
+const a=quoteV2ExactIn({amountInRaw:'1000',reserveInRaw:'100000',reserveOutRaw:'100000',feeBps:30});
+assert.equal(a.valid,true);assert.equal(a.amountOutRaw,'987');assert.equal(a.executionEligible,false);assert.equal(a.profitVerified,false);
+assert.equal(quoteV2ExactIn({amountInRaw:'0',reserveInRaw:'100',reserveOutRaw:'100',feeBps:30}).valid,false);
+assert.equal(quoteV2ExactIn({amountInRaw:'100',reserveInRaw:'100',reserveOutRaw:'100',feeBps:10000}).valid,false);
+assert.equal(quoteV2ExactIn({amountInRaw:'garbage',reserveInRaw:'100',reserveOutRaw:'100',feeBps:30}).valid,false);
+const tiny=quoteV2ExactIn({amountInRaw:'1',reserveInRaw:'1000000000',reserveOutRaw:'1',feeBps:30});
+assert.equal(tiny.valid,false);
+console.log('V7_V2_THEORETICAL_QUOTE_OFFLINE_TEST_PASS');
