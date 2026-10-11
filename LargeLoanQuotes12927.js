@@ -12,7 +12,7 @@ const LOANS=[10000,25000,50000,100000,250000,500000,1000000];
 function calculate(amount,returned,feeBps){
  const principal=BigInt(amount)*1000000n,fee=(principal*BigInt(feeBps)+9999n)/10000n;
  const gross=BigInt(returned)-principal;
- return {grossUsdcRaw:gross.toString(),aavePremiumRaw:fee.toString(),afterPremiumBeforeGasRaw:(gross-fee).toString(),spreadGreaterThanHalfPercent:gross*10000n>principal*50n};
+ return {grossUsdcRaw:gross.toString(),aavePremiumRaw:fee.toString(),afterPremiumBeforeGasRaw:(gross-fee).toString(),spreadGreaterThanHalfPercent:gross*10000n>principal*50n,roundTripReturnBps:(gross*10000n/principal).toString(),spreadMetricMeaning:'EXECUTABLE_ROUND_TRIP_RETURN_NOT_SPOT_PRICE_DISCREPANCY'};
 }
 async function run(rpcUrl,amounts=LOANS){
  assert(/^https:\/\//.test(rpcUrl||''),'BASE_RPC_REQUIRED');
@@ -46,7 +46,7 @@ async function run(rpcUrl,amounts=LOANS){
    row.blockedReasons.push('FLASH_LOAN_ELIGIBILITY_NOT_PROVEN','GAS_L1_SLIPPAGE_NOT_VERIFIED','ATOMIC_SETTLEMENT_NOT_VERIFIED','RISK_NOT_VERIFIED');
    rows.push(row);
   }
-  return {success:true,build:'12.9.33',mode:'BASE_PINNED_BLOCK_10K_PLUS_INDICATIVE_QUOTES',blockNumber:block,blockHash,loanSizesUsdc:amounts,aavePremiumBps:Number(bps),rows,quotedRoutes:rows.filter(r=>r.quoted).length,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false};
+  return {success:true,build:'12.9.33',mode:'BASE_PINNED_BLOCK_10K_PLUS_INDICATIVE_QUOTES',blockNumber:block,blockHash,loanSizesUsdc:amounts,aavePremiumBps:Number(bps),rows,quotedRoutes:rows.filter(r=>r.quoted).length,positiveBeforeGas:rows.filter(r=>r.quoted&&BigInt(r.afterPremiumBeforeGasRaw)>0n).length,quoteFailures:rows.filter(r=>r.blockedReasons.includes('QUOTE_FAILED')).length,distinctPairsScanned:1,venueConfigurationsScanned:2,limitations:['ONE_FIXED_TOKEN_PAIR','ONE_FEE_CONFIGURATION_PER_VENUE','ROUND_TRIP_RETURN_IS_NOT_RAW_CROSS_VENUE_SPREAD','NO_GAS_ADJUSTED_PROFIT_VERIFICATION'],qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false};
  }finally{p.destroy();}
 }
 if(require.main===module){
