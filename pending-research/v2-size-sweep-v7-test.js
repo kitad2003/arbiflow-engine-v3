@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const {sweepV2TradeSizes}=require('./v2-size-sweep-v7');
 const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';
-const first={tokenIn:a,tokenOut:b,pool:'0x3333333333333333333333333333333333333333',blockTag:123,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
+const first={tokenIn:a,tokenOut:b,pool:'0x3333333333333333333333333333333333333333',blockTag:123,poolVerified:true,feeVerified:true,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
 const second={tokenIn:b,tokenOut:a,pool:'0x4444444444444444444444444444444444444444',blockTag:123,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
 const result=sweepV2TradeSizes({amountsRaw:['100','1000','10000'],first,second});
 assert.equal(result.valid,true);assert.equal(result.sizesChecked,3);assert.equal(result.alertEligible,false);
