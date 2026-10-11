@@ -76,6 +76,11 @@ jobs:
       - name: Build address-native route graph
         if: success()
         run: node DynamicAddressRoutes12968.js
+      - name: Collect live CEX top-of-book snapshot
+        continue-on-error: true
+        run: |
+          node --check BlueprintCexFeed12972.js
+          node BlueprintCexFeed12972.js
       - name: Validate blueprint market ingestion
         if: success()
         run: |
@@ -90,4 +95,5 @@ jobs:
             arbiflow-market-inventory-12967.json
             arbiflow-address-route-graph-12968.json
             arbiflow-blueprint-market-12971.json
+            arbiflow-cex-feed-12972.json
           if-no-files-found: warn
