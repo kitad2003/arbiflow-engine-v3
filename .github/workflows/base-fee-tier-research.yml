@@ -1,0 +1,24 @@
+name: Base fee tier research
+on:
+  workflow_dispatch:
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax and unit assertions
+        run: |
+          node --check BaseFeeTierResearchV1.js
+          node BaseFeeTierResearchV1.js
+      - name: Read-only pinned-block Base quotes
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
+          node BaseFeeTierResearchV1.js
