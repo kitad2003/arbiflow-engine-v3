@@ -1,0 +1,30 @@
+name: ArbiFlow pool identity audit
+on:
+  workflow_dispatch:
+jobs:
+  identity-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax and local assertions
+        run: |
+          node --check PoolIdentityAudit12958.js
+          node -e "const {checkPool}=require('./PoolIdentityAudit12958');if(typeof checkPool!=='function')process.exit(1)"
+      - name: Validate onchain pool identities
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
+          node PoolIdentityAudit12958.js
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-pool-identity-audit
+          path: arbiflow-pool-identity-audit.json
+          if-no-files-found: warn
