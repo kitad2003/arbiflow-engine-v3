@@ -19,6 +19,7 @@ on:
       - 'pending-research/signed-pool-chain-check-v7*.js'
       - 'pending-research/pool-evidence-correlation-v7*.js'
       - 'pending-research/v2-fee-evidence-v7*.js'
+      - 'pending-research/pool-research-snapshot-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -65,3 +66,5 @@ jobs:
       - run: node pending-research/pool-evidence-correlation-v7-test.js
       - run: node --check pending-research/v2-fee-evidence-v7.js
       - run: node pending-research/v2-fee-evidence-v7-test.js
+      - run: node --check pending-research/pool-research-snapshot-v7.js
+      - run: node pending-research/pool-research-snapshot-v7-test.js
