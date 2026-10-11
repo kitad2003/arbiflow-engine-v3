@@ -13,6 +13,7 @@ on:
       - 'pending-research/pool-evidence-v7*.js'
       - 'pending-research/chain-evidence-collector-v7*.js'
       - 'pending-research/deployment-manifest-check-v7*.js'
+      - 'pending-research/deployment-provenance-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -47,3 +48,5 @@ jobs:
       - run: node pending-research/chain-evidence-collector-v7-test.js
       - run: node --check pending-research/deployment-manifest-check-v7.js
       - run: node pending-research/deployment-manifest-check-v7-test.js
+      - run: node --check pending-research/deployment-provenance-v7.js
+      - run: node pending-research/deployment-provenance-v7-test.js
