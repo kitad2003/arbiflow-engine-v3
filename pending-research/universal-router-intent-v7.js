@@ -8,7 +8,7 @@ const ADDRESS=/^0x[0-9a-f]{40}$/i;
 const COMMANDS=Object.freeze({0x00:'V3_SWAP_EXACT_IN',0x01:'V3_SWAP_EXACT_OUT',0x08:'V2_SWAP_EXACT_IN',0x09:'V2_SWAP_EXACT_OUT'});
 function decodeUniversalIntent(tx,{allowlistedAddresses=[]}={}){
  const to=typeof tx?.to==='string'?tx.to.toLowerCase():null;
- const base={chain:tx?.chain||null,hash:tx?.hash||null,to,decoded:false,swapVerified:false,poolImpactVerified:false,profitVerified:false,executionEligible:false};
+ const base={chain:tx?.chain||null,hash:tx?.hash||null,to,decoded:false,completeIntent:false,swapVerified:false,poolImpactVerified:false,profitVerified:false,executionEligible:false};
  if(!to||!allowlistedAddresses.some(a=>a.toLowerCase()===to))return {...base,kind:'UNVERIFIED_ROUTER_DESTINATION'};
  let parsed;
  try{parsed=I.parseTransaction({data:tx.input||'0x',value:tx.value||0})}catch{return {...base,kind:'INVALID_UNIVERSAL_CALLDATA'}}
@@ -36,6 +36,6 @@ function decodeUniversalIntent(tx,{allowlistedAddresses=[]}={}){
    swaps.push({index:i,command,recipient:args[0],amountRaw:String(args[1]),limitRaw:String(args[2]),path,payerIsUser:Boolean(args[4]),exactOutput:id===0x01||id===0x09});
   }catch(e){unsupported.push({index:i,commandId:id,reason:'MALFORMED_SWAP_INPUT'})}
  }
- return {...base,kind:swaps.length?'DECODED_UNIVERSAL_SWAP_INTENT':'NO_SUPPORTED_SWAP_INTENT',decoded:swaps.length>0,swaps,unsupported,deadline:parsed.args.length===3?String(parsed.args[2]):null,notes:'Structural decoding only; router identity, onchain outcome and profitability require independent verification'};
+ return {...base,kind:swaps.length?'DECODED_UNIVERSAL_SWAP_INTENT':'NO_SUPPORTED_SWAP_INTENT',decoded:swaps.length>0,completeIntent:swaps.length>0&&unsupported.length===0,swaps,unsupported,deadline:parsed.args.length===3?String(parsed.args[2]):null,notes:'Structural decoding only; router identity, onchain outcome and profitability require independent verification'};
 }
 module.exports={decodeUniversalIntent};
