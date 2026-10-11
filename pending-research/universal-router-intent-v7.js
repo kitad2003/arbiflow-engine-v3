@@ -3,7 +3,7 @@
 // Only decodes structural swap intents. Never claims execution, pool impact, or profit.
 const {Interface}=require('ethers');
 const I=new Interface(['function execute(bytes commands,bytes[] inputs,uint256 deadline) payable','function execute(bytes commands,bytes[] inputs) payable']);
-const coder=I.getAbiCoder?.() || require('ethers').AbiCoder.defaultAbiCoder();
+const coder=require('ethers').AbiCoder.defaultAbiCoder();
 const ADDRESS=/^0x[0-9a-f]{40}$/i;
 const COMMANDS=Object.freeze({0x00:'V3_SWAP_EXACT_IN',0x01:'V3_SWAP_EXACT_OUT',0x08:'V2_SWAP_EXACT_IN',0x09:'V2_SWAP_EXACT_OUT'});
 function decodeUniversalIntent(tx,{allowlistedAddresses=[]}={}){
