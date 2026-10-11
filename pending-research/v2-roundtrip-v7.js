@@ -4,13 +4,15 @@ const {quoteV2ExactIn}=require('./v2-theoretical-quote-v7');
 const {getAddress}=require('ethers');
 function addr(value){try{return getAddress(value).toLowerCase()}catch{return null}}
 function estimateV2RoundTrip({amountInRaw,first,second}={}){
- const base={valid:false,executionEligible:false,profitVerified:false,kind:'V2_THEORETICAL_ROUND_TRIP'};
+ const base={valid:false,executionEligible:false,profitVerified:false,alertEligible:false,kind:'V2_THEORETICAL_ROUND_TRIP'};
  if(!first||!second)return {...base,reason:'MISSING_POOLS'};
  const firstIn=addr(first.tokenIn),firstOut=addr(first.tokenOut),secondIn=addr(second.tokenIn),secondOut=addr(second.tokenOut);
  if(!firstIn||!firstOut||!secondIn||!secondOut||firstIn===firstOut||firstOut!==secondIn||secondOut!==firstIn)return {...base,reason:'INVALID_ROUND_TRIP_TOKEN_PATH'};
  if(!first.pool||!second.pool||!addr(first.pool)||!addr(second.pool)||addr(first.pool)===addr(second.pool))return {...base,reason:'INVALID_OR_DUPLICATE_POOLS'};
  if(!Number.isSafeInteger(first.blockTag)||first.blockTag<0||first.blockTag!==second.blockTag)return {...base,reason:'BLOCK_MISMATCH'};
  if(first.poolVerified!==true||second.poolVerified!==true)return {...base,reason:'POOLS_NOT_VERIFIED'};
+ // User-supplied flags are not evidence of authenticated pool or factory deployments.
+ // A separate evidence-attestation pipeline must be implemented before executable alerts.
  if(first.feeVerified!==true||second.feeVerified!==true)return {...base,reason:'POOL_FEES_NOT_VERIFIED'};
  const leg1=quoteV2ExactIn({amountInRaw,...first});
  if(!leg1.valid)return {...base,reason:'FIRST_LEG_INVALID',first:leg1};
