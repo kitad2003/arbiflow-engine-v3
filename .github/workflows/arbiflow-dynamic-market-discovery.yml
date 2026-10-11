@@ -10,6 +10,10 @@ on:
         description: 'Optional ending block (blank uses chain head)'
         required: false
         default: ''
+      backfill_blocks:
+        description: 'Historical blocks to scan backwards (0 = normal forward scan)'
+        required: false
+        default: '0'
       chunk_size:
         description: 'RPC event-log block range per request (1-2000)'
         required: false
@@ -61,6 +65,7 @@ jobs:
           FROM_BLOCK: ${{ inputs.from_block }}
           TO_BLOCK: ${{ inputs.to_block }}
           CHUNK_SIZE: ${{ inputs.chunk_size }}
+          BACKFILL_BLOCKS: ${{ inputs.backfill_blocks }}
         run: node DynamicMarketDiscovery12964.js
       - name: Save updated market inventory
         if: always()
