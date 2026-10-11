@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessGasCoverage}=require('./gas-coverage-v7');
+const estimate={estimated:true,chainId:8453,maximumEstimatedGasWei:'21000'};
+const base={estimate,chainId:8453};
+assert.equal(assessGasCoverage(base).reason,'L2_DATA_FEE_NOT_ESTABLISHED');
+const r=assessGasCoverage({...base,l1DataFeeWei:'4000',builderPaymentWei:'500'});
+assert.equal(r.estimatedComponentsWei,'25500');assert.equal(r.costComplete,false);assert.equal(r.alertEligible,false);
+assert.equal(assessGasCoverage({...base,l1DataFeeWei:'-1'}).reason,'L2_DATA_FEE_NOT_ESTABLISHED');
+assert.equal(assessGasCoverage({...base,l1DataFeeWei:'4000',builderPaymentWei:'-1'}).reason,'INVALID_BUILDER_PAYMENT');
+const mainnet=assessGasCoverage({estimate:{...estimate,chainId:1},chainId:1});
+assert.equal(mainnet.isL2,false);assert.equal(mainnet.costComplete,false);
+console.log('V7_GAS_COVERAGE_OFFLINE_TEST_PASS');
