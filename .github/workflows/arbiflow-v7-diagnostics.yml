@@ -1,0 +1,22 @@
+name: ArbiFlow V7 read-only diagnostics
+on:
+  pull_request:
+    paths:
+      - 'pending-research/multirouter-diagnostics-v7.js'
+      - 'pending-research/multirouter-diagnostics-v7-test.js'
+      - '.github/workflows/arbiflow-v7-diagnostics.yml'
+  workflow_dispatch:
+jobs:
+  offline-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/multirouter-diagnostics-v7.js
+      - run: node --check pending-research/multirouter-diagnostics-v7-test.js
+      - run: node pending-research/multirouter-diagnostics-v7-test.js
