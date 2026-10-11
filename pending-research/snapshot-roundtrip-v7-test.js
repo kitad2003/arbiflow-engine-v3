@@ -5,7 +5,7 @@ const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222
 const firstSnapshot={snapshotReady:true,correlation:{consistent:true,chainId:1,blockNumber:123,blockHash:h,pool:'0x3333333333333333333333333333333333333333'},chainId:1,blockNumber:123,blockHash:h,pool:'0x3333333333333333333333333333333333333333',token0:a,token1:b,reserve0Raw:'100000',reserve1Raw:'200000',feeBps:30};
 const secondSnapshot={...firstSnapshot,pool:'0x4444444444444444444444444444444444444444',correlation:{...firstSnapshot.correlation,pool:'0x4444444444444444444444444444444444444444'},reserve0Raw:'200000',reserve1Raw:'100000'};
 const args={firstSnapshot,secondSnapshot,tokenIn:a,intermediateToken:b,amountInRaw:'1000'};
-const r=quoteSnapshotRoundTrip(args);assert.equal(r.valid,true);assert.equal(r.positiveGross,false);assert.equal(r.alertEligible,false);assert.equal(r.executionEligible,false);
+const r=quoteSnapshotRoundTrip(args);assert.equal(r.valid,true);assert.equal(r.positiveGross,true);assert.equal(r.alertEligible,false);assert.equal(r.executionEligible,false);
 assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,blockNumber:124}}).reason,'BLOCK_MISMATCH');
 assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,chainId:8453}}).reason,'CHAIN_MISMATCH');
 assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,pool:firstSnapshot.pool}}).reason,'INVALID_OR_DUPLICATE_POOLS');
