@@ -32,9 +32,12 @@ jobs:
       - name: Confirm fork-only Hardhat configuration
         run: |
           node - <<'NODE'
-          const config=require('./hardhat.aave1299.config.js');
-          if(!config.networks?.hardhat?.forking?.url||config.networks?.hardhat?.chainId!==8453)process.exit(1);
-          if(Object.keys(config.networks).some(name=>name!=='hardhat'))process.exit(1);
+          // Hardhat plugins require HardhatContext; initialize through Hardhat, not plain require(config).
+          const hre=require('hardhat');
+          const config=hre.config;
+          if(hre.network.name!=='hardhat')throw Error('NOT_LOCAL_HARDHAT_NETWORK');
+          if(!config.networks?.hardhat?.forking?.url||config.networks?.hardhat?.chainId!==8453)throw Error('BASE_FORK_CONFIG_REQUIRED');
+          if(Object.keys(config.networks).some(name=>name!=='hardhat'))throw Error('NONLOCAL_NETWORK_CONFIGURED');
           console.log('BASE_FORK_ONLY_CONFIG_VERIFIED');
           NODE
       - name: Verify fork research entry points are local-only
