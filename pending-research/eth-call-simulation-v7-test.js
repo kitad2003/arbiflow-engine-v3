@@ -21,5 +21,9 @@ function provider(reorg=false,revert=false){let reads=0;return {async getNetwork
  assert.equal((await simulateResearchTransaction({...args,provider:{...provider(),send:undefined}})).reason,'INVALID_PROVIDER');
  assert.equal((await simulateResearchTransaction({...args,expectedChainId:8453})).reason,'CHAIN_MISMATCH');
  assert.equal((await simulateResearchTransaction({...args,transaction:{...transaction,data:'bad'}})).reason,'INVALID_TRANSACTION');
+ assert.equal((await simulateResearchTransaction({...args,transaction:{...transaction,value:Number.MAX_SAFE_INTEGER+1}})).reason,'INVALID_TRANSACTION');
+ assert.equal((await simulateResearchTransaction({...args,transaction:{...transaction,value:-1n}})).reason,'INVALID_TRANSACTION');
+ assert.equal((await simulateResearchTransaction({...args,transaction:{...transaction,value:'01'}})).reason,'INVALID_TRANSACTION');
+ assert.equal((await simulateResearchTransaction({...args,transaction:{...transaction,value:'90071992547409930000'}})).simulated,true);
  console.log('V7_ETH_CALL_SIMULATION_OFFLINE_TEST_PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});
