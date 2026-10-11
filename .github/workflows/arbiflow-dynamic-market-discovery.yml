@@ -81,6 +81,11 @@ jobs:
         run: |
           node --check BlueprintCexFeed12972.js
           node BlueprintCexFeed12972.js
+      - name: Collect Kraken top-of-book snapshot
+        continue-on-error: true
+        run: |
+          node --check BlueprintKrakenFeed12973.js
+          node BlueprintKrakenFeed12973.js
       - name: Validate blueprint market ingestion
         if: success()
         run: |
