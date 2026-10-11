@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {quoteFromResearchSnapshot}=require('./snapshot-quote-adapter-v7');
+const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';
+const snapshot={snapshotReady:true,correlation:{consistent:true,blockNumber:123},blockNumber:123,pool:'0x3333333333333333333333333333333333333333',token0:a,token1:b,reserve0Raw:'100000',reserve1Raw:'200000',feeBps:30};
+const f=quoteFromResearchSnapshot({snapshot,tokenIn:a,tokenOut:b,amountInRaw:'1000'});
+const r=quoteFromResearchSnapshot({snapshot,tokenIn:b,tokenOut:a,amountInRaw:'1000'});
+assert.equal(f.valid,true);assert.equal(r.valid,true);assert.equal(f.amountOutRaw,'1974');assert.equal(r.amountOutRaw,'496');
+assert.equal(f.alertEligible,false);assert.equal(f.executionEligible,false);
+assert.equal(quoteFromResearchSnapshot({snapshot,tokenIn:a,tokenOut:a,amountInRaw:'1000'}).reason,'TOKEN_DIRECTION_MISMATCH');
+assert.equal(quoteFromResearchSnapshot({snapshot:{...snapshot,blockNumber:124},tokenIn:a,tokenOut:b,amountInRaw:'1000'}).reason,'SNAPSHOT_BLOCK_MISMATCH');
+assert.equal(quoteFromResearchSnapshot({snapshot,tokenIn:a,tokenOut:b,amountInRaw:'0'}).valid,false);
+console.log('V7_SNAPSHOT_QUOTE_ADAPTER_OFFLINE_TEST_PASS');
