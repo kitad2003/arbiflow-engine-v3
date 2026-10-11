@@ -5,6 +5,10 @@ jobs:
   full-universe:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        loan_size_usdc: [100, 500, 1000, 2500, 5000, 10000, 25000, 50000]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +24,7 @@ jobs:
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           MAX_ROUND_TRIPS: '200'
-          LOAN_SIZE_USDC: '50000'
+          LOAN_SIZE_USDC: ${{ matrix.loan_size_usdc }}
         run: |
           test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
           node FullUniverse12956.js
@@ -28,6 +32,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: arbiflow-full-universe-report
+          name: arbiflow-full-universe-${{ matrix.loan_size_usdc }}-usdc
           path: arbiflow-full-universe-12956.json
           if-no-files-found: warn
