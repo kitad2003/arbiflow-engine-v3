@@ -29,6 +29,7 @@ on:
       - 'pending-research/gas-sensitivity-v7*.js'
       - 'pending-research/gas-token-conversion-v7*.js'
       - 'pending-research/rate-context-v7*.js'
+      - 'pending-research/eth-call-simulation-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -95,3 +96,5 @@ jobs:
       - run: node pending-research/gas-token-conversion-v7-test.js
       - run: node --check pending-research/rate-context-v7.js
       - run: node pending-research/rate-context-v7-test.js
+      - run: node --check pending-research/eth-call-simulation-v7.js
+      - run: node pending-research/eth-call-simulation-v7-test.js
