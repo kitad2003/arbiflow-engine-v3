@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessV2FeeEvidence}=require('./v2-fee-evidence-v7');
+const poolEvidence={consistent:true,chainId:1,blockNumber:123};
+const x=assessV2FeeEvidence({poolEvidence,feeBps:30,source:{kind:'ONCHAIN_FEE_QUERY',chainId:1,blockNumber:123}});
+assert.equal(x.feeVerified,false);assert.equal(x.reason,'FEE_SOURCE_AUTHENTICATION_NOT_IMPLEMENTED');
+assert.equal(assessV2FeeEvidence({poolEvidence,feeBps:30,source:{kind:'USER_SUPPLIED'}}).reason,'UNVERIFIED_FEE_SOURCE');
+assert.equal(assessV2FeeEvidence({poolEvidence,feeBps:30,source:{kind:'ONCHAIN_FEE_QUERY',chainId:1,blockNumber:124}}).reason,'FEE_CHAIN_OR_BLOCK_MISMATCH');
+assert.equal(assessV2FeeEvidence({poolEvidence:{consistent:false},feeBps:30}).reason,'POOL_EVIDENCE_NOT_CONSISTENT');
+assert.equal(assessV2FeeEvidence({poolEvidence,feeBps:10000,source:{}}).reason,'INVALID_FEE_BPS');
+console.log('V7_V2_FEE_EVIDENCE_OFFLINE_TEST_PASS');

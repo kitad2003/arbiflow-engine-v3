@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {sweepV2TradeSizes}=require('./v2-size-sweep-v7');
+const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';
+const first={tokenIn:a,tokenOut:b,pool:'0x3333333333333333333333333333333333333333',blockTag:123,poolVerified:true,feeVerified:true,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
+const second={tokenIn:b,tokenOut:a,pool:'0x4444444444444444444444444444444444444444',blockTag:123,poolVerified:true,feeVerified:true,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
+const result=sweepV2TradeSizes({amountsRaw:['100','1000','10000'],first,second});
+assert.equal(result.valid,true);assert.equal(result.sizesChecked,3);assert.equal(result.alertEligible,false);
+assert.equal(result.executionEligible,false);assert.equal(result.profitVerified,false);
+assert.equal(result.bestTheoreticalPositive!==null,true);
+assert.equal(sweepV2TradeSizes({amountsRaw:['100','100'],first,second}).reason,'INVALID_OR_DUPLICATE_SIZE');
+assert.equal(sweepV2TradeSizes({amountsRaw:['-1'],first,second}).valid,false);
+assert.equal(sweepV2TradeSizes({amountsRaw:Array(65).fill('1'),first,second}).reason,'INVALID_SIZE_LIST');
+assert.equal(sweepV2TradeSizes({amountsRaw:['100'],first,second:{...second,blockTag:124}}).valid,false);
+console.log('V7_V2_SIZE_SWEEP_OFFLINE_TEST_PASS');

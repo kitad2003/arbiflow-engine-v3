@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessResearchNet}=require('./research-net-gate-v7');
+const token='0x1111111111111111111111111111111111111111';
+const roundTrip={valid:true,grossDeltaRaw:'1000',tokenIn:token};
+const conversionEvidence={token,sameTokenUnits:true};
+const a=assessResearchNet({roundTrip,gasCostRaw:'1200',conversionEvidence});
+assert.equal(a.netDeltaRaw,'-200');assert.equal(a.positiveNet,false);assert.equal(a.netVerified,false);assert.equal(a.alertEligible,false);
+assert.equal(assessResearchNet({roundTrip,gasCostRaw:'500',conversionEvidence}).netDeltaRaw,'500');
+assert.equal(assessResearchNet({roundTrip,gasCostRaw:'-1',conversionEvidence}).reason,'INVALID_GAS_COST');
+assert.equal(assessResearchNet({roundTrip,gasCostRaw:'500',conversionEvidence:{...conversionEvidence,token:'0x2222222222222222222222222222222222222222'}}).reason,'GAS_UNIT_CONVERSION_UNVERIFIED');
+console.log('V7_RESEARCH_NET_GATE_OFFLINE_TEST_PASS');

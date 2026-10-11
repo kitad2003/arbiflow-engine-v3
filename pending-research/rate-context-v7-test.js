@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {validateResearchRate}=require('./rate-context-v7');
+const token='0x1111111111111111111111111111111111111111',hash='0x'+'a'.repeat(64);
+const rate={chainId:8453,blockNumber:100,blockHash:hash,profitToken:token,numerator:'100',denominator:'3'};
+const args={rate,chainId:8453,blockNumber:100,blockHash:hash,profitToken:token};
+const r=validateResearchRate(args);assert.equal(r.consistent,true);assert.equal(r.authenticated,false);assert.equal(r.alertEligible,false);
+assert.equal(validateResearchRate({...args,blockHash:'0x'+'b'.repeat(64)}).reason,'RATE_CONTEXT_MISMATCH');
+assert.equal(validateResearchRate({...args,profitToken:'0x2222222222222222222222222222222222222222'}).reason,'RATE_TOKEN_MISMATCH');
+assert.equal(validateResearchRate({...args,rate:{...rate,denominator:'0'}}).reason,'INVALID_RATE_RATIO');
+console.log('V7_RATE_CONTEXT_OFFLINE_TEST_PASS');

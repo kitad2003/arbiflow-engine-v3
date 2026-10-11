@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {convertGasWeiToTokenRaw}=require('./gas-token-conversion-v7');
+const h='0x'+'a'.repeat(64);
+const args={rateBlockHash:h,expectedBlockHash:h,gasWei:'5',tokenRawPerNativeNumerator:'2',tokenRawPerNativeDenominator:'3',rateChainId:1,expectedChainId:1,rateBlockNumber:123,expectedBlockNumber:123};
+const r=convertGasWeiToTokenRaw(args);assert.equal(r.converted,true);assert.equal(r.tokenGasRaw,'4');assert.equal(r.rateVerified,false);assert.equal(r.alertEligible,false);
+assert.equal(convertGasWeiToTokenRaw({...args,rateChainId:8453}).reason,'RATE_CHAIN_MISMATCH');
+assert.equal(convertGasWeiToTokenRaw({...args,rateBlockNumber:124}).reason,'RATE_BLOCK_MISMATCH');
+assert.equal(convertGasWeiToTokenRaw({...args,rateBlockHash:'0x'+'b'.repeat(64)}).reason,'RATE_BLOCK_HASH_MISMATCH');
+assert.equal(convertGasWeiToTokenRaw({...args,rateBlockHash:123}).reason,'RATE_BLOCK_HASH_MISMATCH');
+assert.equal(convertGasWeiToTokenRaw({...args,tokenRawPerNativeDenominator:'0'}).reason,'INVALID_RATE');
+assert.equal(convertGasWeiToTokenRaw({...args,gasWei:'-5'}).reason,'INVALID_DECIMAL_INPUT');
+assert.equal(convertGasWeiToTokenRaw({...args,gasWei:'90071992547409931234567890'}).converted,true);
+console.log('V7_GAS_TOKEN_CONVERSION_OFFLINE_TEST_PASS');

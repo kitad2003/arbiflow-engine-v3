@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {inspectResearchOpportunity}=require('./research-opportunity-adapter-v7');
+const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222',h='0x'+'a'.repeat(64);
+const base={snapshotReady:true,chainId:1,blockNumber:123,blockHash:h,token0:a,token1:b,reserve0Raw:'100000',reserve1Raw:'200000',feeBps:30};
+const firstSnapshot={...base,pool:'0x3333333333333333333333333333333333333333',correlation:{consistent:true,chainId:1,blockNumber:123,blockHash:h,pool:'0x3333333333333333333333333333333333333333'}};
+const secondSnapshot={...base,pool:'0x4444444444444444444444444444444444444444',correlation:{consistent:true,chainId:1,blockNumber:123,blockHash:h,pool:'0x4444444444444444444444444444444444444444'},reserve0Raw:'200000',reserve1Raw:'100000'};
+const args={firstSnapshot,secondSnapshot,tokenIn:a,intermediateToken:b,amountInRaw:'1000'};
+const r=inspectResearchOpportunity(args);
+assert.equal(r.roundTrip.valid,true);assert.equal(r.alertEligible,false);assert.equal(r.executionEligible,false);
+assert.equal(inspectResearchOpportunity({...args,firstSnapshot:{...firstSnapshot,identityVerified:true,feeVerified:true},secondSnapshot:{...secondSnapshot,identityVerified:true,feeVerified:true}}).alertEligible,false);
+assert.equal(inspectResearchOpportunity({...args,secondSnapshot:{...secondSnapshot,blockNumber:124}}).reason,'RESEARCH_ROUND_TRIP_REJECTED');
+console.log('V7_RESEARCH_OPPORTUNITY_ADAPTER_OFFLINE_TEST_PASS');

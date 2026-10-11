@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {Interface}=require('ethers');
+const {verifyV2Pool}=require('./v2-pool-verification-v7');
+const I=new Interface(['function token0() view returns(address)','function token1() view returns(address)','function factory() view returns(address)','function getReserves() view returns(uint112,uint112,uint32)','function getPair(address,address) view returns(address)']);
+const pool='0x1111111111111111111111111111111111111111',a='0x2222222222222222222222222222222222222222',b='0x3333333333333333333333333333333333333333',factory='0x4444444444444444444444444444444444444444';
+function provider(factoryOverride=factory,zero=false,pairOverride=pool,reorg=false){let blockReads=0;return {async getBlock(number){assert.equal(number,123456);blockReads++;return {number,hash:'0x'+(reorg&&blockReads>1?'b':'a').repeat(64)}},async getBlockNumber(){return 123456},async getCode(_address,blockTag){assert.equal(blockTag,123456);return '0x6000'},async call({data},blockTag){assert.equal(blockTag,123456);const name=I.getFunction(data.slice(0,10)).name;const values={token0:[a],token1:[b],factory:[factoryOverride],getReserves:[zero?0n:1000n,2000n,0],getPair:[pairOverride]};return I.encodeFunctionResult(name,values[name])}}}
+(async()=>{
+ const args={provider:provider(),pool,tokenA:a,tokenB:b,expectedFactory:factory};
+ const valid=await verifyV2Pool(args);assert.equal(valid.verified,true);assert.equal(valid.blockTag,123456);assert.equal(valid.blockHash,'0x'+'a'.repeat(64));assert.equal(valid.executionEligible,false);
+ assert.equal((await verifyV2Pool({...args,provider:provider(factory,false,pool,true)})).reason,'BLOCK_REORG_OR_HASH_CHANGED');
+ assert.equal((await verifyV2Pool({...args,provider:{...provider(),getBlock:async()=>null}})).reason,'BLOCK_HASH_UNAVAILABLE');
+ assert.equal((await verifyV2Pool({...args,provider:provider(a)})).reason,'FACTORY_MISMATCH');
+ assert.equal((await verifyV2Pool({...args,provider:provider(factory,true)})).reason,'ZERO_RESERVES');
+ assert.equal((await verifyV2Pool({...args,provider:provider(factory,false,a)})).reason,'FACTORY_PAIR_REGISTRY_MISMATCH');
+ assert.equal((await verifyV2Pool({...args,tokenB:factory})).reason,'TOKEN_PAIR_MISMATCH');
+ assert.equal((await verifyV2Pool({...args,expectedFactory:null})).reason,'INVALID_OR_UNVERIFIED_INPUT');
+ assert.equal((await verifyV2Pool({...args,provider:{call:provider().call}})).reason,'INVALID_OR_UNVERIFIED_INPUT');
+ assert.equal((await verifyV2Pool({...args,provider:{...provider(),getCode:async()=> '0x'}})).reason,'POOL_OR_FACTORY_CODE_MISSING');
+ console.log('V7_V2_POOL_OFFLINE_TEST_PASS');
+})().catch(e=>{console.error(e);process.exitCode=1});

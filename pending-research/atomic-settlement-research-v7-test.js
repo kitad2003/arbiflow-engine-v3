@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessAtomicSettlementResearch:assess}=require('./atomic-settlement-research-v7');
+const args={borrowedRaw:'100000',flashFeeRaw:'90',returnedToLenderRaw:'100090',startingBalanceRaw:'500',endingBalanceRaw:'1500',gasCostTokenRaw:'300'};
+const good=assess(args);
+assert.equal(good.repaymentCovered,true);assert.equal(good.theoreticalNetRaw,'700');assert.equal(good.positiveTheoreticalNet,true);assert.equal(good.executionEligible,false);assert.equal(good.simulationVerified,false);
+const short=assess({...args,returnedToLenderRaw:'100089'});assert.equal(short.reason,'REPAYMENT_SHORTFALL');assert.equal(short.repaymentShortfallRaw,'1');assert.equal(short.positiveTheoreticalNet,false);
+const negative=assess({...args,gasCostTokenRaw:'2000'});assert.equal(negative.theoreticalNetRaw,'-1000');assert.equal(negative.positiveTheoreticalNet,false);
+assert.equal(assess({...args,flashFeeRaw:'-1'}).reason,'INVALID_RAW_AMOUNTS');
+assert.equal(assess({...args,borrowedRaw:'0'}).reason,'ZERO_BORROW');
+console.log('V7_ATOMIC_SETTLEMENT_RESEARCH_OFFLINE_TEST_PASS');

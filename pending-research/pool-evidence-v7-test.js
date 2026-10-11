@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {inspectPoolEvidence}=require('./pool-evidence-v7');
+const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';
+const e={pool:a,factory:b,token0:a,token1:b,chainId:1,blockNumber:123,blockHash:'0x'+'a'.repeat(64),poolCodeHash:'0x'+'b'.repeat(64),factoryCodeHash:'0x'+'c'.repeat(64),feeBps:30,feeSource:'ONCHAIN_VERIFIED',factoryPairRegistryMatch:true,poolTokenMatch:true};
+const x=inspectPoolEvidence(e);assert.equal(x.accepted,true);assert.equal(x.identityVerified,false);assert.equal(x.feeVerified,false);
+assert.equal(inspectPoolEvidence({...e,blockHash:null}).accepted,false);
+assert.equal(inspectPoolEvidence({...e,feeSource:'GUESS'}).reason,'UNVERIFIED_FEE_SOURCE');
+assert.equal(inspectPoolEvidence({...e,factoryPairRegistryMatch:false}).accepted,false);
+assert.equal(inspectPoolEvidence({...e,token1:a}).accepted,false);
+console.log('V7_POOL_EVIDENCE_SHAPE_OFFLINE_TEST_PASS');

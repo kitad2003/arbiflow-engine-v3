@@ -1,0 +1,103 @@
+name: ArbiFlow V7 read-only diagnostics
+on:
+  pull_request:
+    paths:
+      - 'pending-research/multirouter-diagnostics-v7.js'
+      - 'pending-research/multirouter-diagnostics-v7-test.js'
+      - 'pending-research/universal-router-intent-v7*.js'
+      - 'pending-research/v2-pool-verification-v7*.js'
+      - 'pending-research/v2-theoretical-quote-v7*.js'
+      - 'pending-research/v2-roundtrip-v7*.js'
+      - 'pending-research/v2-size-sweep-v7*.js'
+      - 'pending-research/opportunity-gate-v7*.js'
+      - 'pending-research/pool-evidence-v7*.js'
+      - 'pending-research/chain-evidence-collector-v7*.js'
+      - 'pending-research/deployment-manifest-check-v7*.js'
+      - 'pending-research/deployment-provenance-v7*.js'
+      - 'pending-research/deployment-signature-v7*.js'
+      - 'pending-research/signed-pool-deployment-v7*.js'
+      - 'pending-research/signed-pool-chain-check-v7*.js'
+      - 'pending-research/pool-evidence-correlation-v7*.js'
+      - 'pending-research/v2-fee-evidence-v7*.js'
+      - 'pending-research/pool-research-snapshot-v7*.js'
+      - 'pending-research/snapshot-quote-adapter-v7*.js'
+      - 'pending-research/snapshot-roundtrip-v7*.js'
+      - 'pending-research/research-opportunity-adapter-v7*.js'
+      - 'pending-research/research-net-gate-v7*.js'
+      - 'pending-research/native-gas-estimate-v7*.js'
+      - 'pending-research/gas-coverage-v7*.js'
+      - 'pending-research/gas-sensitivity-v7*.js'
+      - 'pending-research/gas-token-conversion-v7*.js'
+      - 'pending-research/rate-context-v7*.js'
+      - 'pending-research/eth-call-simulation-v7*.js'
+      - 'pending-research/atomic-settlement-research-v7*.js'
+      - '.github/workflows/arbiflow-v7-diagnostics.yml'
+  workflow_dispatch:
+jobs:
+  offline-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/multirouter-diagnostics-v7.js
+      - run: node --check pending-research/multirouter-diagnostics-v7-test.js
+      - run: node pending-research/multirouter-diagnostics-v7-test.js
+      - run: node --check pending-research/universal-router-intent-v7.js
+      - run: node pending-research/universal-router-intent-v7-test.js
+      - run: node --check pending-research/v2-pool-verification-v7.js
+      - run: node pending-research/v2-pool-verification-v7-test.js
+      - run: node --check pending-research/v2-theoretical-quote-v7.js
+      - run: node pending-research/v2-theoretical-quote-v7-test.js
+      - run: node --check pending-research/v2-roundtrip-v7.js
+      - run: node pending-research/v2-roundtrip-v7-test.js
+      - run: node --check pending-research/v2-size-sweep-v7.js
+      - run: node pending-research/v2-size-sweep-v7-test.js
+      - run: node --check pending-research/opportunity-gate-v7.js
+      - run: node pending-research/opportunity-gate-v7-test.js
+      - run: node --check pending-research/pool-evidence-v7.js
+      - run: node pending-research/pool-evidence-v7-test.js
+      - run: node --check pending-research/chain-evidence-collector-v7.js
+      - run: node pending-research/chain-evidence-collector-v7-test.js
+      - run: node --check pending-research/deployment-manifest-check-v7.js
+      - run: node pending-research/deployment-manifest-check-v7-test.js
+      - run: node --check pending-research/deployment-provenance-v7.js
+      - run: node pending-research/deployment-provenance-v7-test.js
+      - run: node --check pending-research/deployment-signature-v7.js
+      - run: node pending-research/deployment-signature-v7-test.js
+      - run: node --check pending-research/signed-pool-deployment-v7.js
+      - run: node pending-research/signed-pool-deployment-v7-test.js
+      - run: node --check pending-research/signed-pool-chain-check-v7.js
+      - run: node pending-research/signed-pool-chain-check-v7-test.js
+      - run: node --check pending-research/pool-evidence-correlation-v7.js
+      - run: node pending-research/pool-evidence-correlation-v7-test.js
+      - run: node --check pending-research/v2-fee-evidence-v7.js
+      - run: node pending-research/v2-fee-evidence-v7-test.js
+      - run: node --check pending-research/pool-research-snapshot-v7.js
+      - run: node pending-research/pool-research-snapshot-v7-test.js
+      - run: node --check pending-research/snapshot-quote-adapter-v7.js
+      - run: node pending-research/snapshot-quote-adapter-v7-test.js
+      - run: node --check pending-research/snapshot-roundtrip-v7.js
+      - run: node pending-research/snapshot-roundtrip-v7-test.js
+      - run: node --check pending-research/research-opportunity-adapter-v7.js
+      - run: node pending-research/research-opportunity-adapter-v7-test.js
+      - run: node --check pending-research/research-net-gate-v7.js
+      - run: node pending-research/research-net-gate-v7-test.js
+      - run: node --check pending-research/native-gas-estimate-v7.js
+      - run: node pending-research/native-gas-estimate-v7-test.js
+      - run: node --check pending-research/gas-coverage-v7.js
+      - run: node pending-research/gas-coverage-v7-test.js
+      - run: node --check pending-research/gas-sensitivity-v7.js
+      - run: node pending-research/gas-sensitivity-v7-test.js
+      - run: node --check pending-research/gas-token-conversion-v7.js
+      - run: node pending-research/gas-token-conversion-v7-test.js
+      - run: node --check pending-research/rate-context-v7.js
+      - run: node pending-research/rate-context-v7-test.js
+      - run: node --check pending-research/eth-call-simulation-v7.js
+      - run: node pending-research/eth-call-simulation-v7-test.js
+      - run: node --check pending-research/atomic-settlement-research-v7.js
+      - run: node pending-research/atomic-settlement-research-v7-test.js
