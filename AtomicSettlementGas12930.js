@@ -18,7 +18,8 @@ async function main(){
  await hre.network.provider.send('hardhat_reset',[{forking:{jsonRpcUrl:process.env.BASE_RPC_URL,blockNumber:quotes.blockNumber}}]);
  const pinned=await e.provider.getBlock(quotes.blockNumber);
  assert(pinned&&pinned.hash.toLowerCase()===quotes.blockHash.toLowerCase(),'QUOTE_FORK_BLOCK_HASH_MISMATCH');
- const candidates=rank(quotes.rows).ranked.filter(r=>r.rankable&&r.observedLiquidityCoversPrincipal).slice(0,3);
+ // Evaluate every eligible quoted direction/size in this two-venue research universe.
+ const candidates=rank(quotes.rows).ranked.filter(r=>r.rankable&&r.observedLiquidityCoversPrincipal);
  assert(candidates.length>0,'NO_QUOTED_CANDIDATES');
  await hre.network.provider.send('evm_mine');
  const [signer]=await e.getSigners(),F=await e.getContractFactory('AaveDexAtomicFork12913');
