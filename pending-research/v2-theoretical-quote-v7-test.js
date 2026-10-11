@@ -8,4 +8,5 @@ assert.equal(quoteV2ExactIn({amountInRaw:'100',reserveInRaw:'100',reserveOutRaw:
 assert.equal(quoteV2ExactIn({amountInRaw:'garbage',reserveInRaw:'100',reserveOutRaw:'100',feeBps:30}).valid,false);
 const tiny=quoteV2ExactIn({amountInRaw:'1',reserveInRaw:'1000000000',reserveOutRaw:'1',feeBps:30});
 assert.equal(tiny.valid,false);
+for(const bad of ['-1','1.5','1e5',1000,Number.MAX_SAFE_INTEGER])assert.equal(quoteV2ExactIn({amountInRaw:bad,reserveInRaw:'100000',reserveOutRaw:'100000',feeBps:30}).valid,false);
 console.log('V7_V2_THEORETICAL_QUOTE_OFFLINE_TEST_PASS');
