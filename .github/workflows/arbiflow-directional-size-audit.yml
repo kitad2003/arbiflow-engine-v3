@@ -1,0 +1,31 @@
+name: ArbiFlow directional size audit
+on:
+  workflow_dispatch:
+jobs:
+  directional-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Check code and directional assertions
+        run: |
+          node --check DirectionalSizeAudit12957.js
+          node -e "const a=require('./DirectionalSizeAudit12957');if(a.SIZES.length!==8)process.exit(1)"
+      - name: Run read-only bidirectional audit
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
+          node DirectionalSizeAudit12957.js
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-directional-size-audit
+          path: arbiflow-directional-size-audit.json
+          if-no-files-found: warn
