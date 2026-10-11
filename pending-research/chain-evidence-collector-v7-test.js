@@ -12,5 +12,8 @@ function provider(code='0x6000'){return {async getNetwork(){return {chainId:1n}}
  assert.equal((await collectPoolChainEvidence({...args,expectedChainId:8453})).reason,'CHAIN_ID_MISMATCH');
  assert.equal((await collectPoolChainEvidence({...args,provider:provider('0x')})).reason,'CONTRACT_CODE_MISSING');
  assert.equal((await collectPoolChainEvidence({...args,provider:{}})).reason,'INVALID_INPUT_OR_PROVIDER');
+ let reads=0;
+ const reorgProvider={...provider(),async getBlock(n){assert.equal(n,123);reads++;return {hash:reads===1?blockHash:'0x'+'b'.repeat(64)}}};
+ assert.equal((await collectPoolChainEvidence({...args,provider:reorgProvider})).reason,'BLOCK_REORG_OR_INCONSISTENT_PROVIDER');
  console.log('V7_CHAIN_EVIDENCE_COLLECTOR_OFFLINE_TEST_PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});
