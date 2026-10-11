@@ -11,11 +11,11 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
  if(!MODES[chain]||!/^wss:\/\//i.test(url||''))throw Error('INVALID_CHAIN_OR_ENDPOINT');
  durationMs=Math.min(90000,Math.max(5000,durationMs));maxLookups=Math.min(2000,Math.max(1,Math.floor(maxLookups)));
  return new Promise((resolve,reject)=>{
-  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
+  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupPacingMs:250,queuedAtFinish:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
   let ws,done=false,sub=null,seq=56000,stop,ack,tick,last=0,inFlight=0;
   const seen=new Set(),queue=[],pending=new Map(),codeChecked=new Set();
   const started=Date.now();
-  function finish(reason,error){if(done)return;done=true;clearTimeout(stop);clearTimeout(ack);clearInterval(tick);for(const v of pending.values())clearTimeout(v.timeout);pending.clear();s.durationMs=Date.now()-started;s.stopReason=reason;const top=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([value,count])=>({value,count}));s.topSelectors=top(s.selectorCounts);s.topDestinations=top(s.destinationCounts);delete s.selectorCounts;delete s.destinationCounts;try{ws?.close()}catch{};if(error)reject(error);else resolve(s)}
+  function finish(reason,error){if(done)return;done=true;clearTimeout(stop);clearTimeout(ack);clearInterval(tick);for(const v of pending.values())clearTimeout(v.timeout);pending.clear();s.durationMs=Date.now()-started;s.stopReason=reason;s.queuedAtFinish=queue.length;const top=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([value,count])=>({value,count}));s.topSelectors=top(s.selectorCounts);s.topDestinations=top(s.destinationCounts);delete s.selectorCounts;delete s.destinationCounts;try{ws?.close()}catch{};if(error)reject(error);else resolve(s)}
   function send(method,params,kind,context){const id=++seq;inFlight++;const timeout=setTimeout(()=>{if(!pending.has(id))return;pending.delete(id);inFlight--;if(kind==='tx')s.lookupTimeouts++;else s.codeErrors++},7000);pending.set(id,{kind,context,timeout});ws.send(JSON.stringify({jsonrpc:'2.0',id,method,params}));}
   function pump(){if(done||!sub||!s.chainIdVerified||inFlight>=3||Date.now()-last<250)return;
    if(queue.length&&s.lookupsSent<maxLookups){last=Date.now();s.lookupsSent++;send('eth_getTransactionByHash',[queue.shift()],'tx');}
@@ -61,7 +61,7 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
 }
 async function run(env=process.env){
  const results=[];
- for(const chain of CHAINS){
+ for(const {name:chain} of CHAINS){
   if(!MODES[chain]){results.push({chain,status:'FEED_NOT_IMPLEMENTED',active:false,reason:'No verified subscription mode for this chain'});continue}
   const secret=MODES[chain].secret;
   if(!env[secret]){results.push({chain,status:'NOT_CONFIGURED',secret});continue}
