@@ -10,9 +10,9 @@ const AAVE='0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
 const Q={UNISWAP_V3:'0x222ca98f00ed15b1fae10b61c277703a194cf5d2',PANCAKESWAP_V3:'0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'};
 const ABI=['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns(uint256,uint160,uint32,uint256)'];
 const V1=['function getAmountOut(uint256,address) view returns(uint256)'];
-const PROBE=100n*1000000n,MIN=10000n*1000000n,MAX_ROUND=Number(process.env.MAX_ROUND_TRIPS||60);
+const PROBE=100n*1000000n,MIN=BigInt(process.env.LOAN_SIZE_USDC||'10000')*1000000n,MAX_ROUND=Number(process.env.MAX_ROUND_TRIPS||60);
 const OUT='arbiflow-full-universe-12956.json';
-function stableRate(probe,large){return probe>0n&&large>0n?Number(large*10000n/(probe*100n)):0}
+function stableRate(probe,large,ratio=100n){return probe>0n&&large>0n&&ratio>0n?Number(large*10000n/(probe*ratio)):0}
 function selectCandidates(routes,firstLeg,ranked,max){
  const xs=routes.filter(r=>firstLeg.get(r.first.address.toLowerCase())?.usable);
  xs.sort((a,b)=>{
@@ -26,7 +26,7 @@ function selectCandidates(routes,firstLeg,ranked,max){
 }
 async function run(rpc){
  assert(/^https:\/\//.test(rpc||''),'BASE_RPC_URL_REQUIRED');
- assert(Number.isSafeInteger(MAX_ROUND)&&MAX_ROUND>=1&&MAX_ROUND<=200,'INVALID_MAX_ROUND_TRIPS');
+ assert(Number.isSafeInteger(MAX_ROUND)&&MAX_ROUND>=1&&MAX_ROUND<=200,'INVALID_MAX_ROUND_TRIPS');assert(MIN>=100n*1000000n&&MIN<=1000000n*1000000n,'INVALID_LOAN_SIZE_USDC');
  const discovery=await discover(rpc);assert(discovery.success,'DISCOVERY_FAILED');
  const provider=new ethers.JsonRpcProvider(rpc,8453,{staticNetwork:true});
  try{
@@ -49,9 +49,8 @@ async function run(rpc){
    try{
     const a=await quote(r.first,'USDC',r.token,PROBE);
     const b=await quote(r.first,'USDC',r.token,MIN);
-    const scaledBps=stableRate(a,b);
-    // A large probe should produce at least 10x the tiny probe output
-    // when the input increases 100x. This is a deliberately loose exhaustion gate.
+    const scaledBps=stableRate(a,b,MIN/PROBE);
+    // Compare growth against the selected input ratio; heuristic, not executable liquidity proof.
     tested.set(key,{pair:r.pair,token:r.token,firstPool:r.first.address,probeOutputRaw:a.toString(),minLoanOutputRaw:b.toString(),growthBps:scaledBps,usable:a>0n&&b>0n&&scaledBps>=1000,reason:a===0n?'ZERO_PROBE':b===0n?'ZERO_MIN_LOAN':scaledBps<1000?'EXHAUSTED_FIRST_LEG':'GROWTH_GATE_PASS'});
    }catch(e){probeFailures.push({pool:r.first.address,error:String(e?.shortMessage||e?.message||e).slice(0,90)});tested.set(key,{usable:false,reason:'QUOTE_ERROR'})}
   }
@@ -70,15 +69,15 @@ async function run(rpc){
   }
   const sorted=[...results].filter(x=>x.success).sort((a,b)=>b.afterAaveBeforeGasUsdc-a.afterAaveBeforeGasUsdc);
   const counts={totalRoutes:universe.total,indexedRoutes:universe.selected.length,firstPoolsScreened:tested.size,firstPoolsUsable:[...tested.values()].filter(x=>x.usable).length,firstPoolsExhausted:[...tested.values()].filter(x=>x.reason==='EXHAUSTED_FIRST_LEG').length,firstPoolQuoteFailures:probeFailures.length,routesPassingFirstLeg:universe.selected.filter(x=>tested.get(x.first.address.toLowerCase())?.usable).length,roundTripsSelected:candidates.length,roundTripsSuccess:sorted.length,roundTripsFailed:results.filter(x=>!x.success).length,spotGreaterThanHalfPercent:screen.ranked.filter(x=>x.scoreBps>50).length,positiveAfterAave:sorted.filter(x=>x.positiveAfterAave).length,exactSpreadPassing:sorted.filter(x=>x.spreadPassing).length};
-  const report={build:'12.9.56',mode:'FULL_UNIVERSE_EXHAUSTION_SCREEN_READ_ONLY',createdAt:new Date().toISOString(),block,discoveredPools:discovery.uniqueActivePools,counts,minimumLoanUsdc:10000,probeUsdc:100,firstPoolScreen:[...tested.values()],firstPoolQuoteFailures:probeFailures,topRoundTripResults:sorted.slice(0,30),rpcPacer:pacer.stats,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false,limitations:['HEURISTIC_GROWTH_GATE_NOT_FULL_TICK_LIQUIDITY_PROOF','FIRST_LEG_SCREEN_DOES_NOT_VALIDATE_SECOND_POOL_LIQUIDITY','MAX_ROUND_TRIPS_LIMIT','NO_GAS_SLIPPAGE_ATOMIC_RISK_VERIFICATION']};
+  const report={build:'12.9.56',mode:'FULL_UNIVERSE_EXHAUSTION_SCREEN_READ_ONLY',createdAt:new Date().toISOString(),block,discoveredPools:discovery.uniqueActivePools,counts,minimumLoanUsdc:Number(MIN/1000000n),probeUsdc:100,firstPoolScreen:[...tested.values()],firstPoolQuoteFailures:probeFailures,topRoundTripResults:sorted.slice(0,30),rpcPacer:pacer.stats,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false,limitations:['HEURISTIC_GROWTH_GATE_NOT_FULL_TICK_LIQUIDITY_PROOF','FIRST_LEG_SCREEN_DOES_NOT_VALIDATE_SECOND_POOL_LIQUIDITY','MAX_ROUND_TRIPS_LIMIT','NO_GAS_SLIPPAGE_ATOMIC_RISK_VERIFICATION']};
   fs.writeFileSync(OUT,JSON.stringify(report,null,2)+'\n');return report;
  }finally{provider.destroy()}
 }
 if(require.main===module){
  assert.equal(stableRate(100n,10000n),10000);
  assert.equal(stableRate(100n,100n),100);
- assert.equal(stableRate(0n,500n),0);
- console.log(JSON.stringify({build:'12.9.56',unitAssertionsPassed:3}));
+ assert.equal(stableRate(0n,500n),0);assert.equal(stableRate(100n,1000n,10n),10000);
+ console.log(JSON.stringify({build:'12.9.56',unitAssertionsPassed:4}));
  if(!process.env.BASE_RPC_URL){console.error('BASE_RPC_URL_REQUIRED');process.exitCode=1}
  else run(process.env.BASE_RPC_URL).then(x=>console.log(JSON.stringify(x))).catch(e=>{console.error('FULL_12956_FAILED',String(e?.message||e).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,180));process.exitCode=1});
 }
