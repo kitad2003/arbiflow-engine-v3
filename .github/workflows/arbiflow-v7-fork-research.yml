@@ -29,6 +29,14 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Compile fork executor locally
         run: npx hardhat compile --config hardhat.aave1299.config.js
+      - name: Confirm fork-only Hardhat configuration
+        run: |
+          node - <<'NODE'
+          const config=require('./hardhat.aave1299.config.js');
+          if(!config.networks?.hardhat?.forking?.url||config.networks?.hardhat?.chainId!==8453)process.exit(1);
+          if(Object.keys(config.networks).some(name=>name!=='hardhat'))process.exit(1);
+          console.log('BASE_FORK_ONLY_CONFIG_VERIFIED');
+          NODE
       - name: Run local fork test without mainnet broadcast
         env:
           FORK_TEST: ${{ inputs.fork_test }}
