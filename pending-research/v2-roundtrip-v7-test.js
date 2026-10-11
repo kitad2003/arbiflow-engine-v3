@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const {estimateV2RoundTrip}=require('./v2-roundtrip-v7');
 const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';
 const first={tokenIn:a,tokenOut:b,pool:'0x3333333333333333333333333333333333333333',blockTag:123,poolVerified:true,feeVerified:true,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
-const second={tokenIn:b,tokenOut:a,pool:'0x4444444444444444444444444444444444444444',blockTag:123,reserveInRaw:'200000',reserveOutRaw:'100000',feeBps:30};
+const second={tokenIn:b,tokenOut:a,pool:'0x4444444444444444444444444444444444444444',blockTag:123,poolVerified:true,feeVerified:true,reserveInRaw:'200000',reserveOutRaw:'100000',feeBps:30};
 const x=estimateV2RoundTrip({amountInRaw:'1000',first,second});
 assert.equal(x.valid,true);assert.equal(x.positiveGross,false);assert.equal(x.profitVerified,false);assert.equal(x.executionEligible,false);
 const better=estimateV2RoundTrip({amountInRaw:'1000',first,second:{...second,reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30}});
