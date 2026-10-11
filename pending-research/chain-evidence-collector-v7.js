@@ -16,6 +16,9 @@ async function collectPoolChainEvidence({provider,pool,factory,expectedChainId}=
   if(!block||!/^0x[0-9a-f]{64}$/i.test(block.hash||''))return {...base,reason:'BLOCK_HASH_UNAVAILABLE'};
   const [poolCode,factoryCode]=await Promise.all([provider.getCode(p,blockNumber),provider.getCode(f,blockNumber)]);
   if(!/^0x(?:[0-9a-f]{2})+$/i.test(poolCode||'')||!/^0x(?:[0-9a-f]{2})+$/i.test(factoryCode||''))return {...base,reason:'CONTRACT_CODE_MISSING'};
+  // Reject observations if the canonical block changes during asynchronous code reads.
+  const blockAfter=await provider.getBlock(blockNumber);
+  if(!blockAfter||typeof blockAfter.hash!=='string'||blockAfter.hash.toLowerCase()!==block.hash.toLowerCase())return {...base,reason:'BLOCK_REORG_OR_INCONSISTENT_PROVIDER'};
   return {...base,collected:true,reason:'CHAIN_EVIDENCE_COLLECTED_NOT_AUTHENTICATED',chainId,blockNumber,blockHash:block.hash.toLowerCase(),pool:p,factory:f,poolCodeHash:keccak256(poolCode),factoryCodeHash:keccak256(factoryCode),limitations:['Provider trust and chain finality not independently established','Proxy implementations and factory identity not authenticated','Pool tokens, registry and fee must be checked separately']};
  }catch{return {...base,reason:'PROVIDER_QUERY_FAILED'}}
 }
