@@ -13,7 +13,7 @@ on:
       chunk_size:
         description: 'RPC event-log block range per request (1-2000)'
         required: false
-        default: '500'
+        default: '100'
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -36,5 +36,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arbiflow-dynamic-market-discovery
-          path: arbiflow-dynamic-discovery-12964.json
+          path: |
+            arbiflow-dynamic-discovery-12964.json
+            arbiflow-market-inventory-12967.json
           if-no-files-found: warn
