@@ -92,7 +92,7 @@ async function scan(rpc,{fromBlock,toBlock,chunkSize=100}={}){
   }
   const merged=[...inventory.pools,...pools];
   if(lastCompleteBlock>=from){
-   fs.writeFileSync(INVENTORY_PATH,JSON.stringify({chainId:8453,lastCompleteBlock,pools:merged},null,2)+'\\n');
+   fs.writeFileSync(INVENTORY_PATH,JSON.stringify({chainId:8453,lastCompleteBlock,pools:merged},null,2)+'\n');
   }
   const report={build:'12.9.67',mode:'INCREMENTAL_MARKET_INVENTORY',network:'BASE',chainId:8453,headBlock:head,fromBlock:from,toBlock:to,chunkSize,venues:Object.keys(FACTORIES),uniqueTokens:tokens.size,uniquePools:pools.length,inventoryPools:merged.length,lastCompleteBlock,pagesScanned:pages.length,failedPages:errors.length,rpcMetrics,diagnostics,coverageComplete:errors.length===0&&lastCompleteBlock===to&&diagnostics.every(d=>d.contractExists&&!d.probeError),eventsOnly:true,liquidityVerified:false,quotesExecuted:false,pools,errors,pages,readOnly:true,mainnetBroadcast:false,executionEligible:false};
   fs.writeFileSync('arbiflow-dynamic-discovery-12964.json',JSON.stringify(report,null,2)+'\n');
