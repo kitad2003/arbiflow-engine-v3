@@ -5,6 +5,7 @@ on:
       - 'pending-research/multirouter-diagnostics-v7.js'
       - 'pending-research/multirouter-diagnostics-v7-test.js'
       - 'pending-research/universal-router-intent-v7*.js'
+      - 'pending-research/v2-pool-verification-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -23,3 +24,5 @@ jobs:
       - run: node pending-research/multirouter-diagnostics-v7-test.js
       - run: node --check pending-research/universal-router-intent-v7.js
       - run: node pending-research/universal-router-intent-v7-test.js
+      - run: node --check pending-research/v2-pool-verification-v7.js
+      - run: node pending-research/v2-pool-verification-v7-test.js
