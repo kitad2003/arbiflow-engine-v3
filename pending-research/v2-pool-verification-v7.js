@@ -13,9 +13,12 @@ function address(x){try{return getAddress(x).toLowerCase()}catch{return null}}
 async function verifyV2Pool({provider,pool,tokenA,tokenB,expectedFactory}={}){
  const out={pool:address(pool),verified:false,readOnly:true,executionEligible:false,profitVerified:false,reason:null};
  const a=address(tokenA),b=address(tokenB),f=address(expectedFactory);
- if(!provider||typeof provider.call!=='function'||typeof provider.getBlockNumber!=='function'||typeof provider.getCode!=='function'||!out.pool||!a||!b||a===b||!f){out.reason='INVALID_OR_UNVERIFIED_INPUT';return out}
+ if(!provider||typeof provider.call!=='function'||typeof provider.getBlockNumber!=='function'||typeof provider.getCode!=='function'||typeof provider.getBlock!=='function'||!out.pool||!a||!b||a===b||!f){out.reason='INVALID_OR_UNVERIFIED_INPUT';return out}
  let blockTag;
  try{blockTag=await provider.getBlockNumber();if(!Number.isSafeInteger(blockTag)||blockTag<0)throw Error('INVALID_BLOCK_NUMBER')}catch{return {...out,reason:'BLOCK_PINNING_UNAVAILABLE'}}
+ const hash=x=>typeof x==='string'&&/^0x[0-9a-fA-F]{64}$/.test(x);
+ let pinnedHash;
+ try{const block=await provider.getBlock(blockTag);if(!block||block.number!==blockTag||!hash(block.hash))return {...out,reason:'BLOCK_HASH_UNAVAILABLE'};pinnedHash=block.hash.toLowerCase()}catch{return {...out,reason:'BLOCK_HASH_UNAVAILABLE'}}
  async function read(name){
   const data=I.encodeFunctionData(name,[]);
   const response=await provider.call({to:out.pool,data},blockTag);
@@ -34,7 +37,10 @@ async function verifyV2Pool({provider,pool,tokenA,tokenB,expectedFactory}={}){
   if(registeredPair!==out.pool){out.reason='FACTORY_PAIR_REGISTRY_MISMATCH';return out}
   const reserve0=BigInt(reserves[0]),reserve1=BigInt(reserves[1]);
   if(reserve0===0n||reserve1===0n){out.reason='ZERO_RESERVES';return out}
-  return {...out,verified:true,reason:'TOKEN_FACTORY_AND_RESERVES_MATCH',token0:x,token1:y,factory:actualFactory,codePresentAtBlock:true,reserve0Raw:String(reserve0),reserve1Raw:String(reserve1),blockTag,note:'V2-like pool factory registry and reserves match; factory deployment identity, executable liquidity and profitability remain unverified'};
+  // Recheck after all pinned reads. A reorg invalidates otherwise matching reserve data.
+  const finalBlock=await provider.getBlock(blockTag);
+  if(!finalBlock||finalBlock.number!==blockTag||!hash(finalBlock.hash)||finalBlock.hash.toLowerCase()!==pinnedHash)return {...out,reason:'BLOCK_REORG_OR_HASH_CHANGED'};
+  return {...out,verified:true,blockHash:pinnedHash,reason:'TOKEN_FACTORY_AND_RESERVES_MATCH',token0:x,token1:y,factory:actualFactory,codePresentAtBlock:true,reserve0Raw:String(reserve0),reserve1Raw:String(reserve1),blockTag,note:'V2-like pool factory registry and reserves match; factory deployment identity, executable liquidity and profitability remain unverified'};
  }catch(e){out.reason='POOL_CALL_OR_DECODE_FAILED';return out}
 }
 module.exports={verifyV2Pool};
