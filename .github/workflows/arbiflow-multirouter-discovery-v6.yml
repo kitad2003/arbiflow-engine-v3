@@ -1,0 +1,23 @@
+name: ArbiFlow Multirouter Discovery V6
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check pending-research/multirouter-discovery-v6.js
+      - run: node pending-research/multirouter-discovery-v6-test.js
+      - name: Discover Ethereum and Base selectors and destinations
+        env:
+          ETHEREUM_WSS_URL: ${{ secrets.ETHEREUM_WSS_URL }}
+          BASE_FLASHBLOCKS_WSS_URL: ${{ secrets.BASE_FLASHBLOCKS_WSS_URL }}
+          LIVE_DECODING_DURATION_MS: '45000'
+        run: node pending-research/multirouter-discovery-v6.js
