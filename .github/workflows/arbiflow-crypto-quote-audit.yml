@@ -1,0 +1,30 @@
+name: ArbiFlow crypto quote audit
+on:
+  workflow_dispatch:
+    inputs:
+      routes_per_type:
+        description: 'Routes per strategy (1-30)'
+        required: false
+        default: '5'
+jobs:
+  quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check CryptoQuoteAudit12961.js
+      - name: Read-only onchain route quotes
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          ROUTES_PER_TYPE: ${{ inputs.routes_per_type }}
+        run: node CryptoQuoteAudit12961.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-crypto-quote-audit
+          path: arbiflow-crypto-quote-audit.json
+          if-no-files-found: warn
