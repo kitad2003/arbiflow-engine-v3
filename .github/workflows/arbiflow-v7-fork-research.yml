@@ -1,0 +1,40 @@
+name: ArbiFlow V7 manual Base fork research
+on:
+  workflow_dispatch:
+    inputs:
+      fork_test:
+        description: 'Choose existing read-only fork research test'
+        required: true
+        type: choice
+        options:
+          - aave-two-venue-fail-closed
+          - atomic-settlement-gas
+permissions:
+  contents: read
+jobs:
+  local-fork-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Require RPC secret
+        run: |
+          if [ -z "$BASE_RPC_URL" ]; then echo 'BASE_RPC_URL secret is required'; exit 1; fi
+          case "$BASE_RPC_URL" in https://*) ;; *) echo 'BASE_RPC_URL must use HTTPS'; exit 1;; esac
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Compile fork executor locally
+        run: npx hardhat compile --config hardhat.aave1299.config.js
+      - name: Run local fork test without mainnet broadcast
+        env:
+          FORK_TEST: ${{ inputs.fork_test }}
+        run: |
+          case "$FORK_TEST" in
+            aave-two-venue-fail-closed) npm run test:aave-dex-atomic-fork ;;
+            atomic-settlement-gas) npm run test:atomic-settlement-gas ;;
+            *) echo 'Unsupported fork test'; exit 1 ;;
+          esac
