@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {compareDeploymentEvidence}=require('./deployment-manifest-check-v7');
+const pool='0x1111111111111111111111111111111111111111',factory='0x2222222222222222222222222222222222222222';
+const observation={collected:true,chainId:1,blockNumber:123,pool,factory,poolCodeHash:'0x'+'a'.repeat(64),factoryCodeHash:'0x'+'b'.repeat(64)};
+const manifest={reviewed:true,sourceType:'PINNED_DEPLOYMENT_MANIFEST',chainId:1,pool,factory,poolCodeHash:observation.poolCodeHash,factoryCodeHash:observation.factoryCodeHash,validFromBlock:100};
+const x=compareDeploymentEvidence({observation,manifest});
+assert.equal(x.matched,true);assert.equal(x.identityVerified,false);assert.equal(x.executionEligible,false);
+assert.equal(compareDeploymentEvidence({observation,manifest:{...manifest,reviewed:false}}).matched,false);
+assert.equal(compareDeploymentEvidence({observation,manifest:{...manifest,poolCodeHash:'0x'+'c'.repeat(64)}}).reason,'CODE_HASH_MISMATCH');
+assert.equal(compareDeploymentEvidence({observation,manifest:{...manifest,validFromBlock:124}}).reason,'BLOCK_OUTSIDE_MANIFEST_RANGE');
+assert.equal(compareDeploymentEvidence({observation,manifest:{...manifest,chainId:8453}}).reason,'CHAIN_MISMATCH');
+console.log('V7_DEPLOYMENT_MANIFEST_OFFLINE_TEST_PASS');
