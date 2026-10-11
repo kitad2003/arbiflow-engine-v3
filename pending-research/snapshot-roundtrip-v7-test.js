@@ -12,4 +12,6 @@ assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,p
 assert.equal(quoteSnapshotRoundTrip({...args,intermediateToken:a}).reason,'INVALID_TOKEN_PATH');
 assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,correlation:{...secondSnapshot.correlation,blockHash:'0x'+'b'.repeat(64)}}}).reason,'CORRELATION_BLOCK_HASH_MISMATCH');
 assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,token0:a,token1:'0x5555555555555555555555555555555555555555'}}).reason,'SECOND_LEG_INVALID');
+assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,blockHash:123}}).reason,'BLOCK_MISMATCH');
+assert.equal(quoteSnapshotRoundTrip({...args,secondSnapshot:{...secondSnapshot,correlation:{...secondSnapshot.correlation,blockHash:123}}}).reason,'CORRELATION_BLOCK_HASH_MISMATCH');
 console.log('V7_SNAPSHOT_ROUNDTRIP_OFFLINE_TEST_PASS');
