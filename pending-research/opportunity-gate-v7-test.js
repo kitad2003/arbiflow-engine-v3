@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {assessV7Opportunity}=require('./opportunity-gate-v7');
+assert.equal(assessV7Opportunity().alertEligible,false);
+const keys=['poolIdentityVerified','factoryIdentityVerified','feeSourceVerified','blockConsistent','tokenPathVerified','executableQuotesVerified','atomicSimulationPassed','gasEstimateVerified','netProfitVerified','riskAssessed'];
+const c=Object.fromEntries(keys.map(k=>[k,true]));Object.assign(c,{spreadPct:1.2,risk:'LOW',netProfitRaw:'1000'});
+const x=assessV7Opportunity(c);assert.equal(x.requirementsSatisfiedByClaim,true);assert.equal(x.alertEligible,false);assert.equal(x.reason,'EVIDENCE_ATTESTATION_NOT_IMPLEMENTED');
+assert.equal(assessV7Opportunity({...c,spreadPct:0.5}).requirementsSatisfiedByClaim,false);
+assert.equal(assessV7Opportunity({...c,risk:'HIGH'}).requirementsSatisfiedByClaim,false);
+assert.equal(assessV7Opportunity({...c,netProfitRaw:'-10'}).requirementsSatisfiedByClaim,false);
+console.log('V7_OPPORTUNITY_GATE_OFFLINE_TEST_PASS');
