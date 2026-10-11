@@ -1,0 +1,32 @@
+name: ArbiFlow full universe diagnostic
+on:
+  workflow_dispatch:
+jobs:
+  full-universe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies without lockfile
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax and local assertions
+        run: |
+          node --check PoolUniverse12939.js
+          node --check FullUniverse12956.js
+      - name: Run full-universe read-only research
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          MAX_ROUND_TRIPS: '60'
+        run: |
+          test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
+          node FullUniverse12956.js
+      - name: Upload full diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-full-universe-report
+          path: arbiflow-full-universe-12956.json
+          if-no-files-found: warn
