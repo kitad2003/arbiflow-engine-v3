@@ -32,6 +32,9 @@ jobs:
           TO_BLOCK: ${{ inputs.to_block }}
           CHUNK_SIZE: ${{ inputs.chunk_size }}
         run: node DynamicMarketDiscovery12964.js
+      - name: Build address-native route graph
+        if: success()
+        run: node DynamicAddressRoutes12968.js
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -39,4 +42,5 @@ jobs:
           path: |
             arbiflow-dynamic-discovery-12964.json
             arbiflow-market-inventory-12967.json
+            arbiflow-address-route-graph-12968.json
           if-no-files-found: warn
