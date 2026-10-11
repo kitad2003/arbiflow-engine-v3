@@ -15,6 +15,7 @@ on:
       - 'pending-research/deployment-manifest-check-v7*.js'
       - 'pending-research/deployment-provenance-v7*.js'
       - 'pending-research/deployment-signature-v7*.js'
+      - 'pending-research/signed-pool-deployment-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -53,3 +54,5 @@ jobs:
       - run: node pending-research/deployment-provenance-v7-test.js
       - run: node --check pending-research/deployment-signature-v7.js
       - run: node pending-research/deployment-signature-v7-test.js
+      - run: node --check pending-research/signed-pool-deployment-v7.js
+      - run: node pending-research/signed-pool-deployment-v7-test.js
