@@ -17,4 +17,12 @@ assert.equal(good.executionEligible,false);assert.equal(good.profitVerified,fals
 assert.equal(decodeUniversalIntent(tx,{allowlistedAddresses:[]}).decoded,false);
 const unknown={...tx,input:iface.encodeFunctionData('execute',['0x3f',[input],9999999999n])};
 assert.equal(decodeUniversalIntent(unknown,{allowlistedAddresses:[router]}).decoded,false);
+const v3path='0x'+a.slice(2)+'0001f4'+b.slice(2);
+const v3input=coder.encode(['address','uint256','uint256','bytes','bool'],[a,1200n,1000n,v3path,false]);
+const v3tx={...tx,input:iface.encodeFunctionData('execute',['0x00',[v3input],9999999999n])};
+const v3=decodeUniversalIntent(v3tx,{allowlistedAddresses:[router]});
+assert.equal(v3.decoded,true);
+assert.equal(v3.swaps[0].command,'V3_SWAP_EXACT_IN');
+assert.deepEqual(v3.swaps[0].path.map(x=>x.toLowerCase()),[a,b]);
+assert.equal(v3.swaps[0].payerIsUser,false);
 console.log('V7_UNIVERSAL_ROUTER_OFFLINE_TEST_PASS');
