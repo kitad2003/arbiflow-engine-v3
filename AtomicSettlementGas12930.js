@@ -7,35 +7,44 @@ const hre=require('hardhat');
 const {run}=require('./LargeLoanQuotes12927');
 const {rank}=require('./LoanOptimizer12928');
 function decoded(err,ex){const data=err?.data||err?.error?.data||err?.info?.error?.data;if(typeof data==='string')try{return ex.interface.parseError(data)}catch{}return null;}
+function progress(stage,extra={}){console.log(JSON.stringify({diagnostic:'ATOMIC_FORK_PROGRESS',stage,elapsedSeconds:Math.round(process.uptime()),...extra}));}
 async function main(){
+ const heartbeat=setInterval(()=>progress('HEARTBEAT_WAITING_FOR_CURRENT_RPC_OR_FORK_STAGE'),30000);heartbeat.unref();
+ progress('START');
  assert.equal(hre.network.name,'hardhat','HARDHAT_FORK_ONLY');
  assert(/^https:\/\//.test(process.env.BASE_RPC_URL||''),'BASE_RPC_URL_REQUIRED');
- const e=hre.ethers;assert.equal((await e.provider.getNetwork()).chainId,8453n);
+ const e=hre.ethers;progress('VERIFY_FORK_NETWORK');assert.equal((await e.provider.getNetwork()).chainId,8453n);
+ progress('BEGIN_EXTERNAL_QUOTES',{loanSizes:7,directions:2});
  const quotes=await run(process.env.BASE_RPC_URL,[10000,25000,50000,100000,250000,500000,1000000]);
+ progress('EXTERNAL_QUOTES_COMPLETE',{rows:quotes.rows.length,blockNumber:quotes.blockNumber});
  // Pin the local fork to the exact block used for indicative external quotes.
  // The local deployment creates later fork blocks, so comparisons remain indicative.
  assert(Number.isSafeInteger(quotes.blockNumber)&&/^0x[0-9a-fA-F]{64}$/.test(quotes.blockHash||''),'QUOTE_BLOCK_CONTEXT_MISSING');
+ progress('BEGIN_HARDHAT_RESET');
  await hre.network.provider.send('hardhat_reset',[{forking:{jsonRpcUrl:process.env.BASE_RPC_URL,blockNumber:quotes.blockNumber}}]);
+ progress('HARDHAT_RESET_COMPLETE');
  const pinned=await e.provider.getBlock(quotes.blockNumber);
  assert(pinned&&pinned.hash.toLowerCase()===quotes.blockHash.toLowerCase(),'QUOTE_FORK_BLOCK_HASH_MISMATCH');
  // Evaluate every eligible quoted direction/size in this two-venue research universe.
  const candidates=rank(quotes.rows).ranked.filter(r=>r.rankable&&r.observedLiquidityCoversPrincipal);
  assert(candidates.length>0,'NO_QUOTED_CANDIDATES');
+ progress('CANDIDATES_RANKED',{count:candidates.length});
  await hre.network.provider.send('evm_mine');
  const [signer]=await e.getSigners(),F=await e.getContractFactory('AaveDexAtomicFork12913');
- const ex=await F.deploy();await ex.waitForDeployment();
+ progress('BEGIN_LOCAL_EXECUTOR_DEPLOY');const ex=await F.deploy();await ex.waitForDeployment();progress('LOCAL_EXECUTOR_DEPLOYED');
  const usdc=new e.Contract('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',['function balanceOf(address) view returns(uint256)'],e.provider);
  const aavePool=new e.Contract('0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',['function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)'],e.provider);
  const premiumBps=BigInt(await aavePool.FLASHLOAN_PREMIUM_TOTAL());
  const reports=[];
  for(const item of candidates){
+  progress('CANDIDATE_BEGIN',{index:reports.length+1,total:candidates.length,loanUsdc:item.loanUsdc,direction:item.direction});
   const amount=BigInt(item.loanUsdc)*1000000n;
   const plan={amount,minWeth:1n,minUsdc:1n,minProfit:1n,deadline:BigInt((await e.provider.getBlock('latest')).timestamp+3600),uniFirst:item.direction==='UNI_TO_AERO',probeAfterSwaps:true};
   const row={loanUsdc:item.loanUsdc,direction:item.direction,bothSwapsReached:false,forkSettlementSucceeded:false,fullAtomicReceiptGasUsed:null,preGasQuotedReturnRaw:item.preGasAfterAavePremiumUsdcRaw,quoteBlockNumber:quotes.blockNumber,quoteBlockHash:quotes.blockHash,forkAnchorBlockHash:pinned.hash,quoteVsForkStateIdentical:false,actualReturnRaw:null,netProfitVerified:false,qualified:false,alerts:[],blockedReasons:[]};
   let outputs;
   try{await ex.start.staticCall(plan,{gasLimit:10000000});}
   catch(err){const d=decoded(err,ex);if(d?.name==='BothSwapsReached'){row.bothSwapsReached=true;outputs={wethRaw:d.args[0].toString(),usdcRaw:d.args[1].toString()};}}
-  if(!outputs){row.blockedReasons.push('BOTH_REAL_SWAPS_NOT_REACHED');reports.push(row);continue;}
+  if(!outputs){row.blockedReasons.push('BOTH_REAL_SWAPS_NOT_REACHED');reports.push(row);progress('CANDIDATE_COMPLETE',{index:reports.length,bothSwapsReached:false});continue;}
   row.actualReturnRaw=outputs.usdcRaw;
   const premiumRaw=(amount*premiumBps+9999n)/10000n;
   const swapDeltaRaw=BigInt(outputs.usdcRaw)-amount;
@@ -65,16 +74,19 @@ async function main(){
   }else{
    row.blockedReasons.push('ATOMIC_SETTLEMENT_REJECTED_'+(revertReason||'UNKNOWN'));
    // An unsuccessful path has no successful receipt. A trace is only diagnostic.
-   try{
+   if(process.env.ENABLE_EXPENSIVE_FORK_TRACE==='1')try{
+    progress('BEGIN_DEBUG_TRACE',{index:reports.length+1});
     const data=ex.interface.encodeFunctionData('start',[normal]);
     const trace=await hre.network.provider.send('debug_traceCall',[{from:signer.address,to:await ex.getAddress(),data,gas:'0x989680'},'latest',{}]);
     if(trace&&typeof trace.gas==='number'&&trace.gas>0)row.revertedExecutionTraceGas=String(trace.gas);
    }catch(err){row.traceAvailable=false;}
+   else row.blockedReasons.push('DEBUG_TRACE_DISABLED_BY_DEFAULT');
   }
   row.blockedReasons.push('BASE_L1_FEE_USDC_NOT_VERIFIED','FULL_NET_PROFIT_NOT_VERIFIED','INDEPENDENT_RISK_ASSESSMENT_PENDING');
-  reports.push(row);
+  reports.push(row);progress('CANDIDATE_COMPLETE',{index:reports.length,total:candidates.length,settled:row.forkSettlementSucceeded});
  }
  assert(reports.every(r=>r.qualified===false&&r.alerts.length===0),'UNVERIFIED_DASHBOARD_ALERT');
+ progress('ALL_CANDIDATES_COMPLETE',{count:reports.length});
  console.log(JSON.stringify({success:true,build:'12.9.138',mode:'FORK_ONLY_ATOMIC_SETTLEMENT_AND_GAS_DIAGNOSTIC',rankedCandidatesTested:reports.length,rows:reports,successfulForkSettlements:reports.filter(r=>r.forkSettlementSucceeded).length,netProfitVerified:false,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false}));
 }
 main().catch(err=>{console.error('ATOMIC_SETTLEMENT_GAS_FAILED',String(err?.shortMessage||err?.message||err).replace(/https?:\/\/\S+/g,'[REDACTED]').slice(0,300));process.exitCode=1});
