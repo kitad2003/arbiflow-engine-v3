@@ -20,7 +20,7 @@ jobs:
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           MAX_ROUND_TRIPS: '200'
-          LOAN_SIZE_USDC: '500'
+          LOAN_SIZE_USDC: '50000'
         run: |
           test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
           node FullUniverse12956.js
