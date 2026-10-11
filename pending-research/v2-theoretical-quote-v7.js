@@ -4,6 +4,7 @@
 function quoteV2ExactIn({amountInRaw,reserveInRaw,reserveOutRaw,feeBps}={}){
  const base={valid:false,executionEligible:false,profitVerified:false,kind:'V2_THEORETICAL_EXACT_IN'};
  try{
+  if(![amountInRaw,reserveInRaw,reserveOutRaw].every(v=>(typeof v==='string'&&/^[0-9]+$/.test(v))||(typeof v==='bigint'&&v>=0n)))return {...base,reason:'INVALID_INPUT_OR_FEE'};
   const a=BigInt(amountInRaw),ri=BigInt(reserveInRaw),ro=BigInt(reserveOutRaw);
   if(!Number.isSafeInteger(feeBps)||feeBps<0||feeBps>=10000||a<=0n||ri<=0n||ro<=0n)return {...base,reason:'INVALID_INPUT_OR_FEE'};
   const adjusted=a*BigInt(10000-feeBps);
