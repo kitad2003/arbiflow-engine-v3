@@ -1,0 +1,40 @@
+name: ArbiFlow dynamic market discovery
+on:
+  workflow_dispatch:
+    inputs:
+      from_block:
+        description: 'Optional historical start block (blank uses latest 1000 blocks)'
+        required: false
+        default: ''
+      to_block:
+        description: 'Optional ending block (blank uses chain head)'
+        required: false
+        default: ''
+      chunk_size:
+        description: 'RPC event-log block range per request (1-2000)'
+        required: false
+        default: '500'
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check DynamicMarketDiscovery12964.js
+      - name: Discover factory-created pools
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          TO_BLOCK: ${{ inputs.to_block }}
+          CHUNK_SIZE: ${{ inputs.chunk_size }}
+        run: node DynamicMarketDiscovery12964.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arbiflow-dynamic-market-discovery
+          path: arbiflow-dynamic-discovery-12964.json
+          if-no-files-found: warn
