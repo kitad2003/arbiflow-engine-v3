@@ -14,6 +14,8 @@ jobs:
           node-version: '24'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check pending-research/multirouter-discovery-v6.js
+      - run: node --check pending-research/pending-opportunity-gate-v7.js
+      - run: node pending-research/pending-opportunity-gate-v7-test.js
       - run: node pending-research/multirouter-discovery-v6-test.js
       - name: Discover Ethereum and Base selectors and destinations
         env:
