@@ -7,7 +7,7 @@ function provider(reorg=false,revert=false){let reads=0;return {async getNetwork
 (async()=>{
  const args={provider:provider(),transaction,expectedChainId:1,blockNumber:123,blockHash:h};
  const x=await simulateResearchTransaction(args);assert.equal(x.simulated,true);assert.equal(x.executionEligible,false);assert.equal(x.profitVerified,false);
- assert.equal((await simulateResearchTransaction({...args,provider:provider(true)})).reason,'BLOCK_REORG_DURING_SIMULATION');
+ assert.equal((await simulateResearchTransaction({...args,provider:provider(true)})).reason,'BLOCK_REORG_DURING_CODE_CHECK');
  assert.equal((await simulateResearchTransaction({...args,provider:provider(false,true)})).reason,'ETH_CALL_REVERTED_OR_FAILED');
  assert.equal((await simulateResearchTransaction({...args,provider:{...provider(),getCode:async()=> '0x'}})).reason,'TARGET_CONTRACT_CODE_MISSING');
  assert.equal((await simulateResearchTransaction({...args,expectedChainId:8453})).reason,'CHAIN_MISMATCH');
