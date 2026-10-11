@@ -12,6 +12,12 @@ async function main(){
  assert(/^https:\/\//.test(process.env.BASE_RPC_URL||''),'BASE_RPC_URL_REQUIRED');
  const e=hre.ethers;assert.equal((await e.provider.getNetwork()).chainId,8453n);
  const quotes=await run(process.env.BASE_RPC_URL,[10000,25000,50000,100000,250000,500000,1000000]);
+ // Pin the local fork to the exact block used for indicative external quotes.
+ // The local deployment creates later fork blocks, so comparisons remain indicative.
+ assert(Number.isSafeInteger(quotes.blockNumber)&&/^0x[0-9a-fA-F]{64}$/.test(quotes.blockHash||''),'QUOTE_BLOCK_CONTEXT_MISSING');
+ await hre.network.provider.send('hardhat_reset',[{forking:{jsonRpcUrl:process.env.BASE_RPC_URL,blockNumber:quotes.blockNumber}}]);
+ const pinned=await e.provider.getBlock(quotes.blockNumber);
+ assert(pinned&&pinned.hash.toLowerCase()===quotes.blockHash.toLowerCase(),'QUOTE_FORK_BLOCK_HASH_MISMATCH');
  const candidates=rank(quotes.rows).ranked.filter(r=>r.rankable&&r.observedLiquidityCoversPrincipal).slice(0,3);
  assert(candidates.length>0,'NO_QUOTED_CANDIDATES');
  await hre.network.provider.send('evm_mine');
@@ -24,7 +30,7 @@ async function main(){
  for(const item of candidates){
   const amount=BigInt(item.loanUsdc)*1000000n;
   const plan={amount,minWeth:1n,minUsdc:1n,minProfit:1n,deadline:BigInt((await e.provider.getBlock('latest')).timestamp+3600),uniFirst:item.direction==='UNI_TO_AERO',probeAfterSwaps:true};
-  const row={loanUsdc:item.loanUsdc,direction:item.direction,bothSwapsReached:false,forkSettlementSucceeded:false,fullAtomicReceiptGasUsed:null,preGasQuotedReturnRaw:item.preGasAfterAavePremiumUsdcRaw,actualReturnRaw:null,netProfitVerified:false,qualified:false,alerts:[],blockedReasons:[]};
+  const row={loanUsdc:item.loanUsdc,direction:item.direction,bothSwapsReached:false,forkSettlementSucceeded:false,fullAtomicReceiptGasUsed:null,preGasQuotedReturnRaw:item.preGasAfterAavePremiumUsdcRaw,quoteBlockNumber:quotes.blockNumber,quoteBlockHash:quotes.blockHash,forkAnchorBlockHash:pinned.hash,quoteVsForkStateIdentical:false,actualReturnRaw:null,netProfitVerified:false,qualified:false,alerts:[],blockedReasons:[]};
   let outputs;
   try{await ex.start.staticCall(plan,{gasLimit:10000000});}
   catch(err){const d=decoded(err,ex);if(d?.name==='BothSwapsReached'){row.bothSwapsReached=true;outputs={wethRaw:d.args[0].toString(),usdcRaw:d.args[1].toString()};}}
@@ -38,7 +44,11 @@ async function main(){
   row.aavePremiumUsdcRaw=premiumRaw.toString();
   row.actualAfterPremiumBeforeGasUsdcRaw=afterPremiumRaw.toString();
   row.actualAfterPremiumBeforeGasPositive=afterPremiumRaw>0n;
-  row.quotedVsActualBeforeGasDifferenceRaw=item.preGasAfterAavePremiumUsdcRaw==null?null:(afterPremiumRaw-BigInt(item.preGasAfterAavePremiumUsdcRaw)).toString();
+  // Local deployment and fork mining advance state beyond the quoted block.
+  // Never imply an exactly state-matched quote-versus-swap measurement.
+  row.quotedVsActualBeforeGasDifferenceRaw=null;
+  row.indicativeQuoteDifferenceRaw=item.preGasAfterAavePremiumUsdcRaw==null?null:(afterPremiumRaw-BigInt(item.preGasAfterAavePremiumUsdcRaw)).toString();
+  row.blockedReasons.push('QUOTE_AND_EXECUTION_BLOCKS_DIFFER');
   if(afterPremiumRaw<=0n)row.blockedReasons.push('ACTUAL_LOSS_AFTER_AAVE_PREMIUM_BEFORE_GAS');
   const normal={...plan,probeAfterSwaps:false};
   let allowed=false,revertReason=null;
