@@ -10,6 +10,8 @@ function estimateV2RoundTrip({amountInRaw,first,second}={}){
  if(!firstIn||!firstOut||!secondIn||!secondOut||firstIn===firstOut||firstOut!==secondIn||secondOut!==firstIn)return {...base,reason:'INVALID_ROUND_TRIP_TOKEN_PATH'};
  if(!first.pool||!second.pool||!addr(first.pool)||!addr(second.pool)||addr(first.pool)===addr(second.pool))return {...base,reason:'INVALID_OR_DUPLICATE_POOLS'};
  if(!Number.isSafeInteger(first.blockTag)||first.blockTag<0||first.blockTag!==second.blockTag)return {...base,reason:'BLOCK_MISMATCH'};
+ if(first.poolVerified!==true||second.poolVerified!==true)return {...base,reason:'POOLS_NOT_VERIFIED'};
+ if(first.feeVerified!==true||second.feeVerified!==true)return {...base,reason:'POOL_FEES_NOT_VERIFIED'};
  const leg1=quoteV2ExactIn({amountInRaw,...first});
  if(!leg1.valid)return {...base,reason:'FIRST_LEG_INVALID',first:leg1};
  const leg2=quoteV2ExactIn({amountInRaw:leg1.amountOutRaw,...second});
