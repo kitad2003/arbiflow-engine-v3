@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {estimateV2RoundTrip}=require('./v2-roundtrip-v7');
+const first={reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30};
+const second={reserveInRaw:'200000',reserveOutRaw:'100000',feeBps:30};
+const x=estimateV2RoundTrip({amountInRaw:'1000',first,second});
+assert.equal(x.valid,true);assert.equal(x.positiveGross,false);assert.equal(x.profitVerified,false);assert.equal(x.executionEligible,false);
+const better=estimateV2RoundTrip({amountInRaw:'1000',first,second:{reserveInRaw:'100000',reserveOutRaw:'200000',feeBps:30}});
+assert.equal(better.valid,true);assert.equal(better.positiveGross,true);assert.equal(better.profitVerified,false);
+assert.equal(estimateV2RoundTrip({amountInRaw:'0',first,second}).valid,false);
+assert.equal(estimateV2RoundTrip({amountInRaw:'1000',first,second:null}).valid,false);
+console.log('V7_V2_ROUNDTRIP_OFFLINE_TEST_PASS');
