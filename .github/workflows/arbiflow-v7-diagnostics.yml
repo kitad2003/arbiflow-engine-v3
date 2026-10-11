@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check pending-research/multirouter-diagnostics-v7.js
       - run: node --check pending-research/multirouter-diagnostics-v7-test.js
       - run: node pending-research/multirouter-diagnostics-v7-test.js
