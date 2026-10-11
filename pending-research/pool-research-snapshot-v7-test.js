@@ -11,4 +11,7 @@ const result=buildResearchPoolSnapshot(args);
 assert.equal(result.snapshotReady,true);assert.equal(result.feeVerified,false);assert.equal(result.alertEligible,false);assert.equal(result.executionEligible,false);
 assert.equal(buildResearchPoolSnapshot({...args,poolState:{...poolState,reserve0Raw:'0'}}).reason,'INVALID_RESERVES');
 assert.equal(buildResearchPoolSnapshot({...args,poolState:{...poolState,blockTag:124}}).reason,'INCONSISTENT_POOL_EVIDENCE');
+assert.equal(buildResearchPoolSnapshot({...args,poolState:{...poolState,token0:'not-an-address'}}).reason,'INVALID_TOKENS');
+assert.equal(buildResearchPoolSnapshot({...args,poolState:{...poolState,token1:token0}}).reason,'INVALID_TOKENS');
+assert.equal(buildResearchPoolSnapshot({...args,poolState:{...poolState,token0:pool}}).reason,'INVALID_TOKENS');
 console.log('V7_POOL_RESEARCH_SNAPSHOT_OFFLINE_TEST_PASS');
