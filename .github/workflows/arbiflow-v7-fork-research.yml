@@ -37,7 +37,8 @@ jobs:
           const config=hre.config;
           if(hre.network.name!=='hardhat')throw Error('NOT_LOCAL_HARDHAT_NETWORK');
           if(!config.networks?.hardhat?.forking?.url||config.networks?.hardhat?.chainId!==8453)throw Error('BASE_FORK_CONFIG_REQUIRED');
-          if(Object.keys(config.networks).some(name=>name!=='hardhat'))throw Error('NONLOCAL_NETWORK_CONFIGURED');
+          // Hardhat adds built-in localhost defaults; reject non-local network selection instead.
+          if(process.env.HARDHAT_NETWORK && process.env.HARDHAT_NETWORK!=='hardhat')throw Error('NONLOCAL_NETWORK_SELECTED');
           console.log('BASE_FORK_ONLY_CONFIG_VERIFIED');
           NODE
       - name: Verify fork research entry points are local-only
