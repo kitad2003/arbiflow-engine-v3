@@ -12,6 +12,8 @@ function quoteSnapshotRoundTrip({firstSnapshot,secondSnapshot,tokenIn,intermedia
  if(!p||!q||p===q)return {...base,reason:'INVALID_OR_DUPLICATE_POOLS'};
  if(!Number.isSafeInteger(firstSnapshot.chainId)||firstSnapshot.chainId!==secondSnapshot.chainId)return {...base,reason:'CHAIN_MISMATCH'};
  if(!Number.isSafeInteger(firstSnapshot.blockNumber)||firstSnapshot.blockNumber!==secondSnapshot.blockNumber||firstSnapshot.blockHash?.toLowerCase()!==secondSnapshot.blockHash?.toLowerCase()||!/^0x[0-9a-f]{64}$/i.test(firstSnapshot.blockHash||''))return {...base,reason:'BLOCK_MISMATCH'};
+ if(!firstSnapshot.correlation?.consistent||!secondSnapshot.correlation?.consistent)return {...base,reason:'UNCORRELATED_SNAPSHOTS'};
+ if(firstSnapshot.correlation.blockHash?.toLowerCase()!==secondSnapshot.correlation.blockHash?.toLowerCase())return {...base,reason:'CORRELATION_BLOCK_HASH_MISMATCH'};
  const first=quoteFromResearchSnapshot({snapshot:firstSnapshot,tokenIn:a,tokenOut:b,amountInRaw});
  if(!first.valid)return {...base,reason:'FIRST_LEG_INVALID',first};
  const second=quoteFromResearchSnapshot({snapshot:secondSnapshot,tokenIn:b,tokenOut:a,amountInRaw:first.amountOutRaw});
