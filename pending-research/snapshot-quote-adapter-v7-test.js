@@ -11,4 +11,5 @@ assert.equal(quoteFromResearchSnapshot({snapshot,tokenIn:a,tokenOut:a,amountInRa
 assert.equal(quoteFromResearchSnapshot({snapshot:{...snapshot,blockNumber:124},tokenIn:a,tokenOut:b,amountInRaw:'1000'}).reason,'SNAPSHOT_BLOCK_MISMATCH');
 assert.equal(quoteFromResearchSnapshot({snapshot,tokenIn:a,tokenOut:b,amountInRaw:'0'}).valid,false);
 assert.equal(quoteFromResearchSnapshot({snapshot:{...snapshot,blockHash:'0x'+'b'.repeat(64)},tokenIn:a,tokenOut:b,amountInRaw:'1000'}).reason,'SNAPSHOT_BLOCK_HASH_MISMATCH');
+assert.equal(quoteFromResearchSnapshot({snapshot:{...snapshot,correlation:{...snapshot.correlation,blockHash:123}},tokenIn:a,tokenOut:b,amountInRaw:'1000'}).reason,'SNAPSHOT_BLOCK_HASH_MISMATCH');
 console.log('V7_SNAPSHOT_QUOTE_ADAPTER_OFFLINE_TEST_PASS');
