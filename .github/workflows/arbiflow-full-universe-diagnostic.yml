@@ -4,7 +4,7 @@ on:
 jobs:
   full-universe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,7 +19,8 @@ jobs:
       - name: Run full-universe read-only research
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          MAX_ROUND_TRIPS: '60'
+          MAX_ROUND_TRIPS: '200'
+          LOAN_SIZE_USDC: '500'
         run: |
           test -n "$BASE_RPC_URL" || { echo "BASE_RPC_URL secret missing"; exit 1; }
           node FullUniverse12956.js
