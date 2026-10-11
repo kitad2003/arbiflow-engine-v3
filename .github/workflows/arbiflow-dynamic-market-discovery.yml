@@ -13,16 +13,28 @@ on:
       chunk_size:
         description: 'RPC event-log block range per request (1-2000)'
         required: false
-        default: '100'
+        default: '8'
 jobs:
   discover:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+    concurrency:
+      group: arbiflow-base-inventory
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Restore prior market inventory
+        uses: actions/cache/restore@v4
+        with:
+          path: arbiflow-market-inventory-12967.json
+          key: arbiflow-base-market-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            arbiflow-base-market-
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check DynamicMarketDiscovery12964.js
       - name: Discover factory-created pools
@@ -32,6 +44,12 @@ jobs:
           TO_BLOCK: ${{ inputs.to_block }}
           CHUNK_SIZE: ${{ inputs.chunk_size }}
         run: node DynamicMarketDiscovery12964.js
+      - name: Save updated market inventory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: arbiflow-market-inventory-12967.json
+          key: arbiflow-base-market-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Build address-native route graph
         if: success()
         run: node DynamicAddressRoutes12968.js
