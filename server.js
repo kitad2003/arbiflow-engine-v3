@@ -69,6 +69,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Unified read-only dashboard; independent of the existing engine endpoints.
+require('./arbiflow-platform').mount(app);
+
 // Phase 7: manual read-only public exchange market data (pre-integrated).
 require('./phase7-cex').mount(app);
 require('./phase73-net').mount(app);
