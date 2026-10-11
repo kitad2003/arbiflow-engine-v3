@@ -19,10 +19,10 @@ function diagnostic(e){
  const message=String(data.message||e?.shortMessage||e?.message||e).replace(/https?:\/\/[^\s"']+/g,'[RPC_URL]').slice(0,240);
  return {code:data.code??e?.code??null,message};
 }
-async function getLogsAdaptive(provider,address,start,end,metrics,depth=0){
+async function getLogsAdaptive(provider,address,start,end,metrics,depth=0,topics=[topic]){
  try{
   metrics.attempts++;
-  return await provider.getLogs({address,topics:[topic],fromBlock:start,toBlock:end});
+  return await provider.getLogs({address,topics,fromBlock:start,toBlock:end});
  }catch(e){
   metrics.failures++;
   if(start===end||depth>=14){
@@ -32,8 +32,8 @@ async function getLogsAdaptive(provider,address,start,end,metrics,depth=0){
   }
   metrics.splits++;
   const middle=Math.floor((start+end)/2);
-  const left=await getLogsAdaptive(provider,address,start,middle,metrics,depth+1);
-  const right=await getLogsAdaptive(provider,address,middle+1,end,metrics,depth+1);
+  const left=await getLogsAdaptive(provider,address,start,middle,metrics,depth+1,topics);
+  const right=await getLogsAdaptive(provider,address,middle+1,end,metrics,depth+1,topics);
   return [...left,...right];
  }
 }
@@ -48,6 +48,18 @@ async function scan(rpc,{fromBlock,toBlock,chunkSize=500}={}){
   if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<0||to<from||to>head)throw Error('INVALID_BLOCK_RANGE');
   if(!Number.isSafeInteger(chunkSize)||chunkSize<1||chunkSize>2000)throw Error('INVALID_CHUNK_SIZE');
   const pools=[],errors=[],seen=new Set(),tokens=new Set(),pages=[],rpcMetrics={attempts:0,failures:0,splits:0};
+  const diagnostics=[];
+  for(const [dex,address] of Object.entries(FACTORIES)){
+   const code=await provider.getCode(address,to);
+   const row={dex,factory:address,contractExists:code!=='0x',eventTopic:topic,probeBlock:to,allFactoryLogs:0,matchingPoolCreatedLogs:0,probeError:null};
+   try{
+    const raw=await getLogsAdaptive(provider,address,to,to,rpcMetrics,0,[]);
+    row.allFactoryLogs=raw.length;
+    row.matchingPoolCreatedLogs=raw.filter(log=>log.topics[0]?.toLowerCase()===topic.toLowerCase()).length;
+    row.observedTopics=[...new Set(raw.map(log=>log.topics[0]))].slice(0,12);
+   }catch(e){row.probeError=e?.diagnostic||diagnostic(e)}
+   diagnostics.push(row);
+  }
   for(let start=from;start<=to;start+=chunkSize){
    const end=Math.min(to,start+chunkSize-1);
    for(const [dex,address] of Object.entries(FACTORIES)){
@@ -64,7 +76,7 @@ async function scan(rpc,{fromBlock,toBlock,chunkSize=500}={}){
     }
    }
   }
-  const report={build:'12.9.65',mode:'ADAPTIVE_FACTORY_EVENT_MARKET_DISCOVERY',network:'BASE',chainId:8453,headBlock:head,fromBlock:from,toBlock:to,chunkSize,venues:Object.keys(FACTORIES),uniqueTokens:tokens.size,uniquePools:pools.length,pagesScanned:pages.length,failedPages:errors.length,rpcMetrics,coverageComplete:errors.length===0,eventsOnly:true,liquidityVerified:false,quotesExecuted:false,pools,errors,pages,readOnly:true,mainnetBroadcast:false,executionEligible:false};
+  const report={build:'12.9.66',mode:'FACTORY_EVENT_DISCOVERY_WITH_DIAGNOSTICS',network:'BASE',chainId:8453,headBlock:head,fromBlock:from,toBlock:to,chunkSize,venues:Object.keys(FACTORIES),uniqueTokens:tokens.size,uniquePools:pools.length,pagesScanned:pages.length,failedPages:errors.length,rpcMetrics,diagnostics,coverageComplete:errors.length===0&&diagnostics.every(d=>d.contractExists&&!d.probeError),eventsOnly:true,liquidityVerified:false,quotesExecuted:false,pools,errors,pages,readOnly:true,mainnetBroadcast:false,executionEligible:false};
   fs.writeFileSync('arbiflow-dynamic-discovery-12964.json',JSON.stringify(report,null,2)+'\n');
   return {...report,pools:undefined,pages:undefined};
  }finally{provider.destroy()}
@@ -73,7 +85,7 @@ if(require.main===module){
  const fake=iface.encodeEventLog(iface.getEvent('PoolCreated'),['0x0000000000000000000000000000000000000001','0x0000000000000000000000000000000000000002',500,10,'0x0000000000000000000000000000000000000003']);
  const decoded=decode({topics:fake.topics,data:fake.data,blockNumber:123,transactionHash:'0xabc'},'UNISWAP_V3');
  if(decoded.fee!==500||decoded.pool.toLowerCase()!=='0x0000000000000000000000000000000000000003')throw Error('DECODE_TEST_FAILED');
- console.log(JSON.stringify({build:'12.9.65',eventDecodeUnitTest:'PASS',readOnly:true}));
+ console.log(JSON.stringify({build:'12.9.66',eventDecodeUnitTest:'PASS',readOnly:true}));
  if(!process.env.BASE_RPC_URL){console.error('BASE_RPC_URL_REQUIRED');process.exitCode=1}
  else scan(process.env.BASE_RPC_URL,{fromBlock:process.env.FROM_BLOCK?Number(process.env.FROM_BLOCK):undefined,toBlock:process.env.TO_BLOCK?Number(process.env.TO_BLOCK):undefined,chunkSize:Number(process.env.CHUNK_SIZE||500)}).then(r=>{console.log(JSON.stringify(r));if(!r.coverageComplete)process.exitCode=2}).catch(e=>{console.error('DISCOVERY_FAILED',String(e?.message||e).slice(0,160));process.exitCode=1});
 }
