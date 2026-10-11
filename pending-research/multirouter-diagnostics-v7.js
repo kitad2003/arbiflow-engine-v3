@@ -4,6 +4,7 @@
 const WebSocket=require('ws');
 const {MODES,normalize}=require('./multichain-feed-verification-v2');
 const {decode}=require('./swap-decoder-v4');
+const {decodeUniversalIntent}=require('./universal-router-intent-v7');
 const {classify}=require('./multichain-transaction-intelligence-v3-classifier');
 const {CHAINS}=require('./multichain-monitor-registry-v1');
 const {ROUTERS,CANDIDATES}=require('./verified-router-registry-v4');
@@ -11,7 +12,7 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
  if(!MODES[chain]||!/^wss:\/\//i.test(url||''))throw Error('INVALID_CHAIN_OR_ENDPOINT');
  durationMs=Math.min(90000,Math.max(5000,durationMs));maxLookups=Math.min(2000,Math.max(1,Math.floor(maxLookups)));
  return new Promise((resolve,reject)=>{
-  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupPacingMs:250,queuedAtFinish:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
+  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupPacingMs:250,queuedAtFinish:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,universalSwapIntents:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
   let ws,done=false,sub=null,seq=56000,stop,ack,tick,last=0,inFlight=0;
   const seen=new Set(),queue=[],pending=new Map(),codeChecked=new Set();
   const started=Date.now();
@@ -41,7 +42,10 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
     }
     if(m.error){s.lookupErrors++;return}
     if(!m.result){s.lookupsNull++;return}
-    s.lookupsResolved++;const d=decode(chain,m.result),raw=classify(chain,m.result);s.classificationCounts[raw.kind]=(s.classificationCounts[raw.kind]||0)+1;
+    s.lookupsResolved++;const d=decode(chain,m.result),raw=classify(chain,m.result);
+    const verifiedUniversalAddresses=Object.entries(ROUTERS[chain]||{}).filter(([,meta])=>meta.family==='UNISWAP_UNIVERSAL').map(([address])=>address);
+    const universal=decodeUniversalIntent(m.result,{allowlistedAddresses:verifiedUniversalAddresses});
+    if(universal.decoded){s.universalSwapIntents++;if(s.decodedExamples.length<8)s.decodedExamples.push(universal)}s.classificationCounts[raw.kind]=(s.classificationCounts[raw.kind]||0)+1;
     if(raw.selector)s.selectorCounts[raw.selector]=(s.selectorCounts[raw.selector]||0)+1;
     if(raw.to)s.destinationCounts[raw.to]=(s.destinationCounts[raw.to]||0)+1;
     if(raw.kind==='UNKNOWN_CONTRACT_CALL'&&s.sampleUnknown.length<12)s.sampleUnknown.push({hash:raw.hash,to:raw.to,selector:raw.selector});
@@ -68,7 +72,7 @@ async function run(env=process.env){
   try{const r=await inspect({chain,url:env[secret],durationMs:Number(env.LIVE_DECODING_DURATION_MS||45000),maxLookups:Number(env.V7_MAX_LOOKUPS||300)});results.push({...r,status:r.chainIdVerified&&r.subscriptionAcknowledged&&r.events>0?'EVENTS_OBSERVED':'NO_EVENTS_OBSERVED'})}
   catch(e){results.push({chain,status:'FAILED',error:String(e.message)})}
  }
- return {build:'ARBIFLOW_MULTIROUTER_DIAGNOSTICS_V7',chainCount:CHAINS.length,results,readOnly:true,executionEnabled:false,transactionsSigned:0,bundlesSubmitted:0,limitations:['Selectors and destinations are observational, not verified contract identities','Only canonical Ethereum Uniswap V2 router ABI is currently allowed to decode; V7 is a diagnostic update, not a new decoder','eth_getCode proves code presence only, not contract identity or correctness','Base Flashblocks are sequencer preconfirmations, not a public mempool; 13 additional chain feeds remain unimplemented','No pool state, simulation, executable quotes, gas-adjusted net profits or trade execution']};
+ return {build:'ARBIFLOW_MULTIROUTER_DIAGNOSTICS_V7',chainCount:CHAINS.length,results,readOnly:true,executionEnabled:false,transactionsSigned:0,bundlesSubmitted:0,limitations:['Selectors and destinations are observational, not verified contract identities','Canonical Ethereum Uniswap V2 decoding is enabled; Universal Router structural decoding requires a separately verified router allowlist, currently empty','eth_getCode proves code presence only, not contract identity or correctness','Base Flashblocks are sequencer preconfirmations, not a public mempool; 13 additional chain feeds remain unimplemented','No pool state, simulation, executable quotes, gas-adjusted net profits or trade execution']};
 }
 if(require.main===module)run().then(x=>{console.log(JSON.stringify(x,null,2));if(!x.results.some(r=>r.status==='EVENTS_OBSERVED'))process.exitCode=2}).catch(e=>{console.error(e);process.exitCode=1});
 module.exports={inspect,run};
