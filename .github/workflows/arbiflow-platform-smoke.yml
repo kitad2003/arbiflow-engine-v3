@@ -1,0 +1,36 @@
+name: ArbiFlow platform smoke test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - arbiflow-platform.html
+      - arbiflow-platform.js
+      - server.js
+      - .github/workflows/arbiflow-platform-smoke.yml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate platform route and tabs
+        run: |
+          node --check arbiflow-platform.js
+          node --check server.js
+          node - <<'NODE'
+          const assert=require('node:assert/strict'),fs=require('node:fs');
+          const html=fs.readFileSync('arbiflow-platform.html','utf8');
+          const server=fs.readFileSync('server.js','utf8');
+          for(const tab of ['overview','bots','arbitrage','intelligence','risk'])assert(html.includes('data-tab="'+tab+'"'),'missing tab '+tab);
+          assert(server.includes("require('./arbiflow-platform').mount(app)"),'platform route not mounted');
+          const routes={};
+          require('./arbiflow-platform').mount({get:(path,handler)=>{routes[path]=handler}});
+          assert(routes['/platform']&&routes['/platform/health']);
+          let sent='';routes['/platform']({}, {type(){return this},send(x){sent=x}});
+          assert(sent.includes('ARBIFLOW'));
+          let status;routes['/platform/health']({}, {json(x){status=x}});
+          assert.equal(status.executionEnabled,false);
+          console.log('PLATFORM_SMOKE_PASS');
+          NODE
