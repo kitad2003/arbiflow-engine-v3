@@ -25,6 +25,7 @@ on:
       - 'pending-research/research-opportunity-adapter-v7*.js'
       - 'pending-research/research-net-gate-v7*.js'
       - 'pending-research/native-gas-estimate-v7*.js'
+      - 'pending-research/gas-coverage-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -83,3 +84,5 @@ jobs:
       - run: node pending-research/research-net-gate-v7-test.js
       - run: node --check pending-research/native-gas-estimate-v7.js
       - run: node pending-research/native-gas-estimate-v7-test.js
+      - run: node --check pending-research/gas-coverage-v7.js
+      - run: node pending-research/gas-coverage-v7-test.js
