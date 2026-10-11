@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       from_block:
-        description: 'Optional historical start block (blank uses latest 1000 blocks)'
+        description: 'Optional historical start block (blank resumes saved inventory)'
         required: false
         default: ''
       to_block:
@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      actions: read
     concurrency:
       group: arbiflow-base-inventory
       cancel-in-progress: false
@@ -35,6 +36,23 @@ jobs:
           key: arbiflow-base-market-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             arbiflow-base-market-
+      - name: Restore inventory from most recent workflow artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=arbiflow-dynamic-market-discovery&per_page=100" --jq '.artifacts[] | select(.expired == false) | .id' | head -n 1 || true)"
+          if [[ -n "$id" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$id/zip" > /tmp/arbiflow-prior.zip
+            unzip -p /tmp/arbiflow-prior.zip arbiflow-market-inventory-12967.json > /tmp/arbiflow-prior-inventory.json || true
+            if [[ -s /tmp/arbiflow-prior-inventory.json ]]; then
+              node -e 'const fs=require("fs");const p="/tmp/arbiflow-prior-inventory.json";const d=JSON.parse(fs.readFileSync(p));if(d.chainId!==8453||!Array.isArray(d.pools)||!Number.isSafeInteger(d.lastCompleteBlock))process.exit(1);const local="arbiflow-market-inventory-12967.json";let prev=null;try{prev=JSON.parse(fs.readFileSync(local))}catch{};if(!prev||!Number.isSafeInteger(prev.lastCompleteBlock)||d.lastCompleteBlock>prev.lastCompleteBlock){fs.copyFileSync(p,local)};const active=JSON.parse(fs.readFileSync(local));console.log(JSON.stringify({inventoryRestored:true,lastCompleteBlock:active.lastCompleteBlock,pools:active.pools.length}))'
+            fi
+          fi
+          if [[ ! -f arbiflow-market-inventory-12967.json ]]; then
+            echo "No prior inventory found: first-run bootstrap will scan latest 1000 blocks."
+          fi
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check DynamicMarketDiscovery12964.js
       - name: Discover factory-created pools
