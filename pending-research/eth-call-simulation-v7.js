@@ -14,6 +14,8 @@ async function simulateResearchTransaction({provider,transaction,expectedChainId
   const before=await provider.getBlock(blockNumber);
   if(!before||before.number!==blockNumber||!hash(before.hash)||before.hash.toLowerCase()!==blockHash.toLowerCase())return {...base,reason:'BLOCK_CONTEXT_MISMATCH'};
   const code=await provider.getCode(transaction.to,blockNumber);
+  const codeBlock=await provider.getBlock(blockNumber);
+  if(!codeBlock||codeBlock.number!==blockNumber||!hash(codeBlock.hash)||codeBlock.hash.toLowerCase()!==blockHash.toLowerCase())return {...base,reason:'BLOCK_REORG_DURING_CODE_CHECK'};
   if(typeof code!=='string'||!/^0x(?:[0-9a-fA-F]{2})+$/.test(code))return {...base,reason:'TARGET_CONTRACT_CODE_MISSING'};
   let output,callFailed=false;
   try{output=await provider.call(transaction,blockNumber)}catch{callFailed=true}
