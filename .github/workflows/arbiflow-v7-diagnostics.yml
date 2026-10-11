@@ -9,6 +9,7 @@ on:
       - 'pending-research/v2-theoretical-quote-v7*.js'
       - 'pending-research/v2-roundtrip-v7*.js'
       - 'pending-research/v2-size-sweep-v7*.js'
+      - 'pending-research/opportunity-gate-v7*.js'
       - '.github/workflows/arbiflow-v7-diagnostics.yml'
   workflow_dispatch:
 jobs:
@@ -35,3 +36,5 @@ jobs:
       - run: node pending-research/v2-roundtrip-v7-test.js
       - run: node --check pending-research/v2-size-sweep-v7.js
       - run: node pending-research/v2-size-sweep-v7-test.js
+      - run: node --check pending-research/opportunity-gate-v7.js
+      - run: node pending-research/opportunity-gate-v7-test.js
