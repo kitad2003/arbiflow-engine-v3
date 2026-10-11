@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {correlatePoolEvidence}=require('./pool-evidence-correlation-v7');
+const pool='0x1111111111111111111111111111111111111111',factory='0x2222222222222222222222222222222222222222';
+const h='0x'+'a'.repeat(64),c='0x'+'b'.repeat(64),d='0x'+'c'.repeat(64);
+const chainEvidence={collected:true,chainId:1,blockNumber:123,blockHash:h,pool,factory,poolCodeHash:c,factoryCodeHash:d};
+const poolState={verified:true,blockTag:123,pool,factory};
+const manifest={chainId:1,pool,factory,poolCodeHash:c,factoryCodeHash:d,validFromBlock:100};
+const args={chainEvidence,poolState,manifest};
+const ok=correlatePoolEvidence(args);assert.equal(ok.consistent,true);assert.equal(ok.identityVerified,false);assert.equal(ok.alertEligible,false);
+assert.equal(correlatePoolEvidence({...args,poolState:{...poolState,blockTag:124}}).reason,'CHAIN_OR_BLOCK_MISMATCH');
+assert.equal(correlatePoolEvidence({...args,manifest:{...manifest,chainId:8453}}).reason,'CHAIN_OR_BLOCK_MISMATCH');
+assert.equal(correlatePoolEvidence({...args,manifest:{...manifest,poolCodeHash:h}}).reason,'CODE_HASH_MISMATCH');
+assert.equal(correlatePoolEvidence({...args,poolState:{...poolState,verified:false}}).reason,'INCOMPLETE_EVIDENCE');
+console.log('V7_POOL_EVIDENCE_CORRELATION_OFFLINE_TEST_PASS');
