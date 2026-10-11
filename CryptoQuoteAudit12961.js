@@ -4,13 +4,13 @@ const fs=require('node:fs');
 const {ethers}=require('ethers');
 const {discover,TOKENS}=require('./PoolUniverse12939');
 const {enumerate,quoteRoute}=require('./CryptoArbitrageRoutes12959');
-const {selectDiversified}=require('./DiversifiedRouteSelection12962');
+const {select:selectFair}=require('./FairRouteScanner12963');
 const QUOTERS={UNISWAP_V3:'0x222ca98f00ed15b1fae10b61c277703a194cf5d2',PANCAKESWAP_V3:'0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'};
 const V3=['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns(uint256,uint160,uint32,uint256)'];
 const V1=['function getAmountOut(uint256,address) view returns(uint256)'];
 const SIZES=[100,500,1000,2500,5000,10000,25000,50000];
 function select(routes,n){
- return selectDiversified(routes,n);
+ return selectFair(routes,n).routes;
 }
 async function run(rpc){
  if(!/^https:\/\//.test(rpc||''))throw Error('BASE_RPC_URL_REQUIRED');
@@ -45,7 +45,7 @@ async function run(rpc){
    results.push(item);
   }
   const good=results.filter(r=>r.success);
-  const report={build:'12.9.62',mode:'READ_ONLY_PINNED_BLOCK_CRYPTO_QUOTES',block:d.confirmedBlock,discoveredPools:d.uniqueActivePools,generatedRoutes:g.generated,routeGraphTruncated:g.truncated,selectedRoutes:routes.length,selectedTokenPaths:[...new Set(routes.map(r=>r.tokenPath.join('>')))],sizesUsdc:SIZES,attempted:results.length,successful:good.length,failed:results.length-good.length,positiveGross:good.filter(r=>r.positiveGross).length,errors,topGross:good.sort((a,b)=>b.grossUsdc-a.grossUsdc).slice(0,15),allResults:results,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false,limitations:['NO_FLASH_LOAN_FEE','NO_GAS_COST','NO_ATOMIC_FORK_SETTLEMENT','BOUNDED_ROUTE_SAMPLE','NO_CEX_MARKETS','UNVERIFIED_POOL_DISCOVERY_ERRORS']};
+  const report={build:'12.9.63',mode:'READ_ONLY_PINNED_BLOCK_CRYPTO_QUOTES',block:d.confirmedBlock,discoveredPools:d.uniqueActivePools,generatedRoutes:g.generated,routeGraphTruncated:g.truncated,selectionCoverage:selectFair(g.routes,count).coverage,selectedRoutes:routes.length,selectedTokenPaths:[...new Set(routes.map(r=>r.tokenPath.join('>')))],sizesUsdc:SIZES,attempted:results.length,successful:good.length,failed:results.length-good.length,positiveGross:good.filter(r=>r.positiveGross).length,errors,topGross:good.sort((a,b)=>b.grossUsdc-a.grossUsdc).slice(0,15),allResults:results,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false,limitations:['NO_FLASH_LOAN_FEE','NO_GAS_COST','NO_ATOMIC_FORK_SETTLEMENT','BOUNDED_ROUTE_SAMPLE','NO_CEX_MARKETS','UNVERIFIED_POOL_DISCOVERY_ERRORS']};
   fs.writeFileSync('arbiflow-crypto-quote-audit.json',JSON.stringify(report,null,2)+'\n');
   return {...report,allResults:undefined};
  }finally{provider.destroy()}
