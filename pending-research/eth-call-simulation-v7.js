@@ -8,7 +8,7 @@ async function simulateResearchTransaction({provider,transaction,expectedChainId
  if(!provider||typeof provider.getNetwork!=='function'||typeof provider.getBlock!=='function'||typeof provider.send!=='function'||typeof provider.getCode!=='function')return {...base,reason:'INVALID_PROVIDER'};
  if(!Number.isSafeInteger(expectedChainId)||expectedChainId<=0||!Number.isSafeInteger(blockNumber)||blockNumber<0||!hash(blockHash))return {...base,reason:'INVALID_BLOCK_CONTEXT'};
  if(transaction&&Object.keys(transaction).some(k=>!['to','from','data','value'].includes(k)))return {...base,reason:'UNSUPPORTED_TRANSACTION_FIELDS'};
- if(!transaction||!address(transaction.to)||typeof transaction.data!=='string'||!/^0x(?:[0-9a-fA-F]{2})*$/.test(transaction.data)||(transaction.from!==undefined&&!address(transaction.from))||(transaction.value!==undefined&&!/^[0-9]+$/.test(String(transaction.value))))return {...base,reason:'INVALID_TRANSACTION'};
+ if(!transaction||!address(transaction.to)||typeof transaction.data!=='string'||!/^0x(?:[0-9a-fA-F]{2})*$/.test(transaction.data)||(transaction.from!==undefined&&!address(transaction.from))||(transaction.value!==undefined&&!(typeof transaction.value==='bigint'&&transaction.value>=0n)&&!(typeof transaction.value==='string'&&/^(0|[1-9][0-9]*)$/.test(transaction.value))&&!(typeof transaction.value==='number'&&Number.isSafeInteger(transaction.value)&&transaction.value>=0)))return {...base,reason:'INVALID_TRANSACTION'};
  try{
   const network=await provider.getNetwork();
   if(Number(network.chainId)!==expectedChainId)return {...base,reason:'CHAIN_MISMATCH'};
