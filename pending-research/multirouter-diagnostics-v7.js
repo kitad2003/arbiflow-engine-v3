@@ -12,7 +12,7 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
  if(!MODES[chain]||!/^wss:\/\//i.test(url||''))throw Error('INVALID_CHAIN_OR_ENDPOINT');
  durationMs=Math.min(90000,Math.max(5000,durationMs));maxLookups=Math.min(2000,Math.max(1,Math.floor(maxLookups)));
  return new Promise((resolve,reject)=>{
-  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupPacingMs:250,queuedAtFinish:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,universalSwapIntents:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
+  const s={chain,chainIdExpected:MODES[chain].chainId,chainIdObserved:null,chainIdVerified:false,subscriptionAcknowledged:false,events:0,uniqueEvents:0,lookupsSkippedAtCap:0,queueHighWatermark:0,lookupCap:maxLookups,lookupPacingMs:250,queuedAtFinish:0,lookupsSent:0,lookupsResolved:0,lookupsNull:0,lookupErrors:0,lookupTimeouts:0,codeChecks:0,codePresent:0,codeMissing:0,codeErrors:0,decodedSwaps:0,universalSwapIntents:0,universalCompleteIntents:0,universalPartialIntents:0,unverifiedUniversalSelectors:0,classificationCounts:{},selectorCounts:{},destinationCounts:{},topSelectors:[],topDestinations:[],sampleUnknown:[],decodedExamples:[],unverifiedCandidates:[],poolAddressesVerified:0,profitVerified:0,executionEligible:false,mainnetBroadcast:false,readOnly:true};
   let ws,done=false,sub=null,seq=56000,stop,ack,tick,last=0,inFlight=0;
   const seen=new Set(),queue=[],pending=new Map(),codeChecked=new Set();
   const started=Date.now();
@@ -27,6 +27,7 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
   tick=setInterval(pump,100);
   ws.on('open',()=>ws.send(JSON.stringify({jsonrpc:'2.0',id:55000,method:'eth_chainId',params:[]})));
   ws.on('message',raw=>{
+   if(done)return;
    let m;try{m=JSON.parse(String(raw))}catch{return}
    if(m.id===55000){const n=typeof m.result==='string'?Number.parseInt(m.result,16):NaN;s.chainIdObserved=Number.isFinite(n)?n:null;
     if(n!==MODES[chain].chainId)return finish('CHAIN_ID_MISMATCH',Error('CHAIN_ID_MISMATCH'));
@@ -45,7 +46,8 @@ function inspect({chain,url,WebSocketImpl=WebSocket,durationMs=45000,maxLookups=
     s.lookupsResolved++;const d=decode(chain,m.result),raw=classify(chain,m.result);
     const verifiedUniversalAddresses=Object.entries(ROUTERS[chain]||{}).filter(([,meta])=>meta.family==='UNISWAP_UNIVERSAL').map(([address])=>address);
     const universal=decodeUniversalIntent(m.result,{allowlistedAddresses:verifiedUniversalAddresses});
-    if(universal.decoded){s.universalSwapIntents++;if(s.decodedExamples.length<8)s.decodedExamples.push(universal)}s.classificationCounts[raw.kind]=(s.classificationCounts[raw.kind]||0)+1;
+    if(universal.decoded){s.universalSwapIntents++;if(universal.completeIntent)s.universalCompleteIntents++;else s.universalPartialIntents++;if(s.decodedExamples.length<8)s.decodedExamples.push(universal)}
+    s.classificationCounts[raw.kind]=(s.classificationCounts[raw.kind]||0)+1;
     if(raw.selector)s.selectorCounts[raw.selector]=(s.selectorCounts[raw.selector]||0)+1;
     if(raw.to)s.destinationCounts[raw.to]=(s.destinationCounts[raw.to]||0)+1;
     if(raw.kind==='UNKNOWN_CONTRACT_CALL'&&s.sampleUnknown.length<12)s.sampleUnknown.push({hash:raw.hash,to:raw.to,selector:raw.selector});
