@@ -21,6 +21,9 @@ async function run(rpcUrl,amounts=LOANS){
  try{
   assert.equal(BigInt(await p.send('eth_chainId',[])),8453n);
   const block=await p.getBlockNumber();
+  const blockRecord=await p.getBlock(block);
+  assert(blockRecord&&/^0x[0-9a-fA-F]{64}$/.test(blockRecord.hash||''),'QUOTE_BLOCK_HASH_REQUIRED');
+  const blockHash=blockRecord.hash.toLowerCase();
   const pool=new ethers.Contract(AAVE,['function FLASHLOAN_PREMIUM_TOTAL() view returns(uint128)','function getReserveData(address) view returns((uint256 configuration,uint128 liquidityIndex,uint128 currentLiquidityRate,uint128 variableBorrowIndex,uint128 currentVariableBorrowRate,uint128 currentStableBorrowRate,uint40 lastUpdateTimestamp,uint16 id,address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress,address interestRateStrategyAddress,uint128 accruedToTreasury,uint128 unbacked,uint128 isolationModeTotalDebt))'],p);
   const [bps,reserve]=await Promise.all([pool.FLASHLOAN_PREMIUM_TOTAL({blockTag:block}),pool.getReserveData(USDC,{blockTag:block})]);
   const usdc=new ethers.Contract(USDC,['function balanceOf(address) view returns(uint256)'],p);
@@ -30,7 +33,7 @@ async function run(rpcUrl,amounts=LOANS){
   const rows=[];
   for(const amount of amounts)for(const first of ['UNI','AERO']){
    const size=BigInt(amount)*1000000n,second=first==='UNI'?'AERO':'UNI';
-   const row={loanUsdc:amount,direction:first+'_TO_'+second,blockNumber:block,borrowedPrincipalSource:'AAVE_V3',readOnly:true,quoted:false,returnedUsdcRaw:null,aaveLiquidityObservationRaw:liquidity.toString(),liquidityBalanceCoversPrincipal:liquidity>=size,actualFlashLoanAvailabilityProven:false,qualified:false,alerts:[],blockedReasons:[]};
+   const row={loanUsdc:amount,direction:first+'_TO_'+second,blockNumber:block,blockHash,borrowedPrincipalSource:'AAVE_V3',readOnly:true,quoted:false,returnedUsdcRaw:null,aaveLiquidityObservationRaw:liquidity.toString(),liquidityBalanceCoversPrincipal:liquidity>=size,actualFlashLoanAvailabilityProven:false,qualified:false,alerts:[],blockedReasons:[]};
    if(liquidity<size)row.blockedReasons.push('ATOKEN_POOL_BALANCE_BELOW_REQUEST');
    try{
     if(liquidity<size){row.blockedReasons.push('QUOTE_SKIPPED_INSUFFICIENT_OBSERVED_LIQUIDITY');rows.push(row);continue;}
@@ -43,7 +46,7 @@ async function run(rpcUrl,amounts=LOANS){
    row.blockedReasons.push('FLASH_LOAN_ELIGIBILITY_NOT_PROVEN','GAS_L1_SLIPPAGE_NOT_VERIFIED','ATOMIC_SETTLEMENT_NOT_VERIFIED','RISK_NOT_VERIFIED');
    rows.push(row);
   }
-  return {success:true,build:'12.9.33',mode:'BASE_PINNED_BLOCK_10K_PLUS_INDICATIVE_QUOTES',blockNumber:block,loanSizesUsdc:amounts,aavePremiumBps:Number(bps),rows,quotedRoutes:rows.filter(r=>r.quoted).length,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false};
+  return {success:true,build:'12.9.33',mode:'BASE_PINNED_BLOCK_10K_PLUS_INDICATIVE_QUOTES',blockNumber:block,blockHash,loanSizesUsdc:amounts,aavePremiumBps:Number(bps),rows,quotedRoutes:rows.filter(r=>r.quoted).length,qualified:0,alerts:[],readOnly:true,mainnetBroadcast:false,executionEligible:false};
  }finally{p.destroy();}
 }
 if(require.main===module){
